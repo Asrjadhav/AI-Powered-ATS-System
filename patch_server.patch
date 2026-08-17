@@ -1,0 +1,22 @@
+--- server.ts
++++ server.ts
+@@ -1918,6 +1918,19 @@
+     res.json(newCandidate);
+   });
+ 
++  app.delete("/api/candidates/:id", (req, res) => {
++    try {
++      let candidates = JSON.parse(fs.readFileSync(path.join(process.cwd(), "candidates_db.json"), "utf8"));
++      const rawId = req.params.id;
++      const candidateId = rawId.startsWith("c") ? rawId : rawId; // assuming candidates have 'c' prefix like c1, c2
++      candidates = candidates.filter((c: any) => c.id !== candidateId);
++      fs.writeFileSync(path.join(process.cwd(), "candidates_db.json"), JSON.stringify(candidates, null, 2));
++      res.json({ success: true });
++    } catch (err) {
++      res.status(500).json({ error: "Failed to delete candidate" });
++    }
++  });
++
+   app.patch("/api/candidates/:id", (req, res) => {
+     try {
+       const candidates = JSON.parse(fs.readFileSync(path.join(process.cwd(), "candidates_db.json"), "utf8"));

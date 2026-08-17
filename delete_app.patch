@@ -1,0 +1,22 @@
+--- server.ts
++++ server.ts
+@@ -2126,6 +2126,19 @@
+     }
+   });
+ 
++  app.delete("/api/applications/:id", (req, res) => {
++    try {
++      let candidates = JSON.parse(fs.readFileSync(path.join(process.cwd(), "candidates_db.json"), "utf8"));
++      const rawId = req.params.id;
++      const candidateId = rawId.startsWith("app-") ? rawId.replace("app-", "") : rawId;
++      candidates = candidates.filter((c: any) => c.id !== candidateId);
++      fs.writeFileSync(path.join(process.cwd(), "candidates_db.json"), JSON.stringify(candidates, null, 2));
++      res.json({ success: true });
++    } catch (err) {
++      res.status(500).json({ error: "Failed to delete candidate application" });
++    }
++  });
++
+   // ==========================================
+   // TEAMS / USERS & PERMISSIONS
+   // ==========================================

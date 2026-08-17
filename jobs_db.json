@@ -1,0 +1,8 @@
+[
+  { "id": "j1", "title": "Senior React Engineer", "department": "Engineering", "hiringManager": "Alice", "recruiter": "Bob", "location": "Remote", "type": "Full-time", "status": "published" },
+  { "id": "j2", "title": "Product Designer", "department": "Design", "hiringManager": "Charlie", "recruiter": "Dana", "location": "Pune", "type": "Full-time", "status": "published" },
+  { "id": "j3", "title": "Backend Developer", "department": "Engineering", "hiringManager": "Eve", "recruiter": "Frank", "location": "Remote", "type": "Full-time", "status": "published" },
+  { "id": "j4", "title": "HR Manager", "department": "HR", "hiringManager": "Grace", "recruiter": "Hank", "location": "Pune", "type": "Full-time", "status": "published" },
+  { "id": "j5", "title": "Sales Representative", "department": "Sales", "hiringManager": "Ivy", "recruiter": "Jack", "location": "Remote", "type": "Full-time", "status": "published" },
+  { "id": "j6", "title": "Intern - Marketing", "department": "Marketing", "hiringManager": "Kim", "recruiter": "Leo", "location": "Pune", "type": "Part-time", "status": "published" }
+]

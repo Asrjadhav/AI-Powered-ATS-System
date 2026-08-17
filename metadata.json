@@ -1,0 +1,6 @@
+{
+  "name": "AI Applicant Tracking System",
+  "description": "An enterprise-level AI-powered Applicant Tracking System (ATS) with resume parsing, match scoring, and automated candidate flows.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

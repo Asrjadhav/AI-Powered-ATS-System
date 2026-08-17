@@ -1,0 +1,132 @@
+[
+  {
+    "id": "temp-app-received",
+    "name": "Application Received Confirmation",
+    "category": "Application Received",
+    "subject": "Application Received – {{job_title}} at {{company_name}}",
+    "body": "Hi {{candidate_name}},\n\nThank you for applying for the position of {{job_title}} at {{company_name}}.\n\nWe have successfully received your application and our recruitment team is reviewing your profile.\n\nApplication Details\n\n• Position: {{job_title}}\n• Department: {{department}}\n• Experience: {{experience}}\n\nIf your profile matches our current requirements, we will contact you regarding the next stage of the recruitment process.\n\nThank you for your interest in joining {{company_name}}.\n\nBest Regards,\n\n{{recruiter_name}}\n\n{{company_name}}",
+    "isSystem": true,
+    "lastUsed": "2026-07-15T14:30:00.000Z",
+    "status": "Active"
+  },
+  {
+    "id": "temp-resume-shortlisted",
+    "name": "Resume Shortlisted Announcement",
+    "category": "Resume Shortlisted",
+    "subject": "Congratulations! Your Resume has been Shortlisted for {{job_title}}",
+    "body": "Hi {{candidate_name}},\n\nGreat news!\n\nAfter reviewing your application, our hiring team has shortlisted your profile for the position of {{job_title}}.\n\nAI Evaluation Summary\n\nATS Match Score: {{ats_score}}\n\nMatched Skills:\n{{skills}}\n\nThe next stage of the hiring process will be communicated shortly.\n\nWe look forward to speaking with you.\n\nBest Regards,\n\n{{recruiter_name}}\n\n{{company_name}}",
+    "isSystem": true,
+    "lastUsed": "2026-07-16T09:15:00.000Z",
+    "status": "Active"
+  },
+  {
+    "id": "temp-interview-invitation",
+    "name": "Technical Interview Invitation",
+    "category": "Interview Invitation",
+    "subject": "Interview Invitation – {{job_title}}",
+    "body": "Hi {{candidate_name}},\n\nCongratulations!\n\nYou have been shortlisted for an interview for the position of {{job_title}}.\n\nInterview Details\n\nDate:\n{{interview_date}}\n\nTime:\n{{interview_time}}\n\nMode:\n{{interview_mode}}\n\nMeeting Link:\n{{meeting_link}}\n\nPlease join 10 minutes before your scheduled interview.\n\nWe wish you all the best.\n\nRegards,\n\n{{recruiter_name}}\n\n{{company_name}}",
+    "isSystem": true,
+    "lastUsed": "2026-07-17T01:10:00.000Z",
+    "status": "Active"
+  },
+  {
+    "id": "temp-interview-reminder",
+    "name": "Upcoming Interview Reminder",
+    "category": "Interview Reminder",
+    "subject": "Reminder: Interview Scheduled Tomorrow",
+    "body": "Hi {{candidate_name}},\n\nThis is a friendly reminder regarding your interview.\n\nPosition:\n{{job_title}}\n\nDate:\n{{interview_date}}\n\nTime:\n{{interview_time}}\n\nMeeting Link:\n{{meeting_link}}\n\nWe look forward to meeting you.\n\nBest Regards,\n\n{{company_name}}",
+    "isSystem": true,
+    "lastUsed": "2026-07-16T17:45:00.000Z",
+    "status": "Active"
+  },
+  {
+    "id": "temp-interview-rescheduled",
+    "name": "Interview Reschedule Notice",
+    "category": "Interview Rescheduled",
+    "subject": "Interview Rescheduled – {{job_title}}",
+    "body": "Hi {{candidate_name}},\n\nYour interview for the position of {{job_title}} has been rescheduled.\n\nUpdated Schedule\n\nDate:\n{{interview_date}}\n\nTime:\n{{interview_time}}\n\nMeeting Link:\n{{meeting_link}}\n\nWe apologize for the inconvenience.\n\nThank you for your understanding.\n\nRegards,\n\n{{company_name}}",
+    "isSystem": true,
+    "lastUsed": "2026-07-14T11:00:00.000Z",
+    "status": "Active"
+  },
+  {
+    "id": "temp-interview-rejected",
+    "name": "Post-Interview Rejection Letter",
+    "category": "Interview Rejected",
+    "subject": "Update Regarding Your Interview",
+    "body": "Hi {{candidate_name}},\n\nThank you for taking the time to interview with us.\n\nAfter careful consideration, we have decided to move forward with another candidate whose profile more closely matches our current requirements.\n\nWe sincerely appreciate your interest in {{company_name}} and encourage you to apply for future opportunities.\n\nWe wish you success in your career.\n\nBest Regards,\n\n{{company_name}}",
+    "isSystem": true,
+    "lastUsed": "2026-07-13T16:20:00.000Z",
+    "status": "Active"
+  },
+  {
+    "id": "temp-offer-letter",
+    "name": "Official Job Offer Letter",
+    "category": "Offer Letter",
+    "subject": "Offer Letter – {{job_title}} at {{company_name}}",
+    "body": "Hi {{candidate_name}},\n\nCongratulations!\n\nWe are delighted to offer you the position of {{job_title}} at {{company_name}}.\n\nOffer Details\n\nDesignation:\n{{job_title}}\n\nDepartment:\n{{department}}\n\nJoining Date:\n{{joining_date}}\n\nAnnual Compensation:\n{{salary}}\n\nPlease find your Offer Letter attached as a PDF.\n\nKindly review the document and confirm your acceptance before {{offer_expiry}}.\n\nWe look forward to welcoming you to our team.\n\nBest Regards,\n\n{{recruiter_name}}\n\n{{company_name}}",
+    "isSystem": true,
+    "lastUsed": "2026-07-17T00:45:00.000Z",
+    "status": "Active"
+  },
+  {
+    "id": "temp-offer-reminder",
+    "name": "Offer Letter Validity Reminder",
+    "category": "Offer Reminder",
+    "subject": "Reminder: Offer Letter Pending Acceptance",
+    "body": "Hi {{candidate_name}},\n\nThis is a reminder that your offer for the position of {{job_title}} is awaiting your response.\n\nOffer Expiry\n\n{{offer_expiry}}\n\nIf you have any questions, please contact our recruitment team.\n\nRegards,\n\n{{company_name}}",
+    "isSystem": true,
+    "lastUsed": "2026-07-15T12:00:00.000Z",
+    "status": "Active"
+  },
+  {
+    "id": "temp-offer-accepted",
+    "name": "Internal Offer Acceptance Notice",
+    "category": "Offer Accepted",
+    "subject": "Welcome to {{company_name}}",
+    "body": "Hi {{candidate_name}},\n\nCongratulations!\n\nWe are pleased to confirm that we have received your offer acceptance.\n\nOur HR team will now begin your onboarding process.\n\nYou will soon receive:\n\n• Joining Instructions\n• Documentation Checklist\n• First Day Reporting Details\n\nWelcome to {{company_name}}.\n\nBest Regards,\n\nHR Team\n\n{{company_name}}",
+    "isSystem": true,
+    "lastUsed": "2026-07-17T02:00:00.000Z",
+    "status": "Active"
+  },
+  {
+    "id": "temp-offer-rejected",
+    "name": "Internal Offer Declined Notice",
+    "category": "Offer Rejected",
+    "subject": "Acknowledgement of Offer Decision",
+    "body": "Hi {{candidate_name}},\n\nThank you for informing us regarding your decision.\n\nAlthough we are disappointed that you have decided not to join {{company_name}}, we sincerely appreciate your time throughout the recruitment process.\n\nWe wish you success in your future endeavors.\n\nRegards,\n\n{{company_name}}",
+    "isSystem": true,
+    "lastUsed": "2026-07-10T15:30:00.000Z",
+    "status": "Active"
+  },
+  {
+    "id": "temp-joining-instructions",
+    "name": "New Hire Day 1 Joining Instructions",
+    "category": "Joining Instructions",
+    "subject": "Joining Instructions – {{company_name}}",
+    "body": "Hi {{candidate_name}},\n\nCongratulations!\n\nPlease find below your joining instructions.\n\nJoining Date\n\n{{joining_date}}\n\nReporting Time\n\n09:30 AM\n\nOffice Location\n\n{{office_location}}\n\nPlease carry the following documents.\n\n• Aadhaar Card\n• PAN Card\n• Passport Size Photos\n• Educational Certificates\n• Experience Certificates (if applicable)\n• Bank Details\n\nWe look forward to welcoming you.\n\nRegards,\n\nHR Team\n\n{{company_name}}",
+    "isSystem": true,
+    "lastUsed": "2026-07-12T10:00:00.000Z",
+    "status": "Active"
+  },
+  {
+    "id": "temp-welcome-email",
+    "name": "Corporate Welcome Greeting",
+    "category": "Welcome Email",
+    "subject": "Welcome to {{company_name}}",
+    "body": "Hi {{candidate_name}},\n\nWelcome to the {{company_name}} family.\n\nWe are excited to have you join us as our new\n\n{{job_title}}\n\nYour onboarding process begins on\n\n{{joining_date}}\n\nWe are confident that your skills and enthusiasm will make a valuable contribution to our organization.\n\nWelcome aboard!\n\nBest Regards,\n\n{{company_name}}",
+    "isSystem": true,
+    "lastUsed": "2026-07-16T11:45:00.000Z",
+    "status": "Active"
+  },
+  {
+    "id": "temp-general-communication",
+    "name": "General Candidate Touchpoint",
+    "category": "General Communication",
+    "subject": "Update from {{company_name}}",
+    "body": "Hi {{candidate_name}},\n\n{{custom_message}}\n\nIf you have any questions, please feel free to contact us.\n\nRegards,\n\n{{recruiter_name}}\n\n{{company_name}}",
+    "isSystem": true,
+    "lastUsed": "2026-07-14T14:00:00.000Z",
+    "status": "Active"
+  }
+]
