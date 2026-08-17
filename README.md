@@ -1,20 +1,47 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# 🚀 AI-Powered Applicant Tracking System (ATS)
 
-# Run and deploy your AI Studio app
+An intelligent full-stack Applicant Tracking System that helps HR teams manage the complete hiring process — from job posting and candidate applications to AI screening, interviews, offers, and hiring.
 
-This contains everything you need to run your app locally.
+## ✨ Features
 
-View your app in AI Studio: https://ai.studio/apps/1e7f7b03-59db-44bf-8592-429beb9bd9d3
+- 👤 Candidate Management & Recruitment Pipeline
+- 💼 Job Creation & Public Job Applications
+- 🤖 AI Resume Screening & Candidate Matching
+- 📊 Real-Time Recruitment Dashboard & Analytics
+- 🎤 Interview Scheduling & Feedback
+- 💰 Offer Management
+- 📧 Email Templates & Notifications
+- 🌐 Recruitment Platform Integrations
+- 🔄 Stable Candidate & Application Data Flow
 
-## Run Locally
+## 🛠️ Tech Stack
 
-**Prerequisites:**  Node.js
+**Frontend:** React, TypeScript, Vite, Tailwind CSS  
+**Backend:** FastAPI, Python, SQLAlchemy  
+**Database:** PostgreSQL  
+**AI:** Gemini API  
+**Tools:** Axios, Git, GitHub, Postman
 
+## 🏗️ Architecture
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+```text
+React + TypeScript
+       ↓
+Repository Layer
+       ↓
+Axios / REST APIs
+       ↓
+FastAPI
+
+🎯 Recruitment Workflow
+Job → Application → AI Screening → Shortlist
+                         ↓
+                    Interview
+                         ↓
+                      Offer
+                         ↓
+                   Hired / Rejected
+       ↓
+SQLAlchemy
+       ↓
+PostgreSQL
