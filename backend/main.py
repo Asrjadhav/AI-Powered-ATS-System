@@ -37,6 +37,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/healthz", tags=["Health"])
+@app.get("/health", tags=["Health"])
 @app.get("/api/health", tags=["Health"])
 def health_check(db: Session = Depends(get_db)):
     """
