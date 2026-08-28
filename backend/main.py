@@ -5,14 +5,31 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from database import get_db, engine, Base
-import models # Load all models into SQLAlchemy Base metadata
+import models # Load all 11 models into SQLAlchemy Base metadata
 
+# 1. Safely create all missing PostgreSQL tables on startup (non-destructive)
+try:
+    Base.metadata.create_all(bind=engine)
+    print("[SUCCESS] PostgreSQL database tables initialized successfully!")
+except Exception as _e:
+    print(f"[NOTE] Database table initialization note: {_e}")
+
+# 2. Add missing columns safely if upgrading existing legacy tables
 try:
     with engine.connect() as _conn:
         _conn.execute(text('ALTER TABLE candidates ADD COLUMN IF NOT EXISTS "totalExperienceMonths" INTEGER DEFAULT 0;'))
         _conn.commit()
 except Exception:
     pass
+
+# 3. Seed default records safely if tables are brand new (idempotent checks)
+try:
+    from seed_notifications import seed_notifications
+    from seed_email_templates import seed_email_templates
+    seed_notifications()
+    seed_email_templates()
+except Exception as _seed_err:
+    print(f"[NOTE] Default data seeding note: {_seed_err}")
 
 app = FastAPI(
     title="AI ATS FastAPI Backend",
