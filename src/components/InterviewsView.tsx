@@ -8,6 +8,7 @@ import axios from "axios";
 import { InterviewRepository } from "../repositories/interviewRepository";
 import { ApplicationRepository } from "../repositories/applicationRepository";
 import { CandidateRepository } from "../repositories/candidateRepository";
+import { formatJobId } from "../repositories/repositoryUtils";
 import { 
   Calendar as CalendarIcon, 
   Clock, 
@@ -36,7 +37,9 @@ import {
   CalendarDays,
   UserCheck,
   CheckCircle2,
-  FileText
+  FileText,
+  Trash2,
+  ArrowRight
 } from "lucide-react";
 import { Interview, InterviewStatus, InterviewType, RecommendationType, Application, ApplicationStatus } from "../types";
 
@@ -76,9 +79,9 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
   const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
   const [calendarView, setCalendarView] = useState<"month" | "week">("month");
   
-  // Date states for calendars (Initialized to July 1, 2026)
-  const [currentDate, setCurrentDate] = useState<Date>(new Date(2026, 6, 1)); 
-  const [selectedCalendarDate, setSelectedCalendarDate] = useState<Date | null>(new Date(2026, 6, 1));
+  // Date states for calendars (Initialized to current date)
+  const [currentDate, setCurrentDate] = useState<Date>(new Date()); 
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState<Date | null>(new Date());
 
   // Dialog / Modal triggers
   const [showScheduleModal, setShowScheduleModal] = useState(false);
@@ -91,6 +94,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
   // Selected interview for editing
   const [editingInterview, setEditingInterview] = useState<Interview | null>(null);
   const [interviewIdPendingCancel, setInterviewIdPendingCancel] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
 
   const triggerToast = (message: string, type: "success" | "error" | "info" = "success") => {
@@ -100,9 +104,9 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
 
   // Form States - Scheduling
   const [selectedAppId, setSelectedAppId] = useState("");
-  const [roundName, setRoundName] = useState("Technical Interview – Round 1");
+  const [roundName, setRoundName] = useState("Technical Interview 1");
   const [interviewerName, setInterviewerName] = useState("");
-  const [interviewDate, setInterviewDate] = useState("2026-07-02");
+  const [interviewDate, setInterviewDate] = useState(new Date().toISOString().split("T")[0]);
   const [interviewTime, setInterviewTime] = useState("14:00");
   const [interviewType, setInterviewType] = useState<InterviewType>(InterviewType.ONLINE);
   const [platform, setPlatform] = useState("Google Meet");
@@ -185,14 +189,29 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
     return `${y}-${m}-${d}`;
   };
 
+  const isUpcomingStatus = (st: any): boolean => {
+    const s = String(st || "").toUpperCase();
+    return s === "UPCOMING" || s === "SCHEDULED" || s === "PENDING";
+  };
+
+  const isCompletedStatus = (st: any): boolean => {
+    return String(st || "").toUpperCase() === "COMPLETED";
+  };
+
+  const isCancelledStatus = (st: any): boolean => {
+    return String(st || "").toUpperCase() === "CANCELLED";
+  };
+
   const isToday = (dateString: string): boolean => {
+    if (!dateString) return false;
     const todayStr = formatDateString(new Date());
-    return dateString === "2026-07-01" || dateString === todayStr; // Target local date is July 1, 2026 or real system today
+    return dateString === todayStr;
   };
 
   const isUpcoming = (dateString: string): boolean => {
+    if (!dateString) return false;
     const todayStr = formatDateString(new Date());
-    return (dateString > "2026-07-01" && dateString !== "2026-07-01") || (dateString > todayStr && dateString !== todayStr);
+    return dateString > todayStr;
   };
 
   // Helper to find associated application for an interview
@@ -217,17 +236,41 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
 
   const getResolvedCandidateName = (item: any) => {
     const assocApp = getAssocApp(item);
-    const cand = assocApp?.candidate || assocApp || {};
-    const name = item.candidateName || cand.name || `${cand.firstName || ""} ${cand.lastName || ""}`.trim() || assocApp?.name;
-    if (!name || name.toLowerCase().includes("unnamed") || name.toLowerCase().includes("new candidate") || name === "Candidate") {
-      return "Candidate Profile";
+    const candFromApp = assocApp?.candidate || (assocApp && assocApp.firstName ? assocApp : null);
+
+    const cId = String(item.candidateId || "").replace(/^app-/, "").toLowerCase();
+    const cEmail = String(item.candidateEmail || "").toLowerCase();
+    const foundCand = Array.isArray(candidates) ? candidates.find(c => {
+      const idMatch = String(c.id || c.candidateId || "").replace(/^app-/, "").toLowerCase();
+      const emailMatch = String(c.email || "").toLowerCase();
+      return (cId && idMatch === cId) || (cEmail && emailMatch === cEmail);
+    }) : null;
+
+    const candidateObj = foundCand || candFromApp;
+    if (candidateObj) {
+      const realName = candidateObj.name || `${candidateObj.firstName || ""} ${candidateObj.lastName || ""}`.trim();
+      if (realName && realName !== "Candidate" && !realName.toLowerCase().includes("unnamed")) {
+        return realName;
+      }
     }
-    return name;
+
+    if (item.candidateName && item.candidateName !== "Candidate" && item.candidateName !== "Candidate Profile" && !item.candidateName.toLowerCase().includes("unnamed")) {
+      return item.candidateName;
+    }
+
+    const readableCandId = formatJobId(item.candidateId || "CAND-0001").replace("JOB-", "CAND-");
+    return `Candidate (${readableCandId})`;
   };
 
   const getResolvedJobTitle = (item: any) => {
     const assocApp = getAssocApp(item);
     return assocApp?.appliedJob || assocApp?.job?.title || assocApp?.jobTitle || assocApp?.candidate?.currentRole || item.jobTitle || "Open Position";
+  };
+
+  const getResolvedJobId = (item: any) => {
+    const assocApp = getAssocApp(item);
+    const rawId = item.jobId || assocApp?.jobId || assocApp?.job?.id || assocApp?.candidate?.jobId || "";
+    return formatJobId(rawId);
   };
 
   const validInterviews = interviews.filter(item => {
@@ -236,20 +279,19 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
 
   // Filters logic
   const filteredInterviews = validInterviews.filter((item) => {
-    // If we clicked a specific date in calendar, filter strictly by that date
     if (viewMode === "calendar" && selectedCalendarDate) {
       return item.date === formatDateString(selectedCalendarDate);
     }
 
     switch (activeFilter) {
       case "today":
-        return isToday(item.date) && item.status === InterviewStatus.UPCOMING;
+        return isToday(item.date) && isUpcomingStatus(item.status);
       case "upcoming":
-        return isUpcoming(item.date) && item.status === InterviewStatus.UPCOMING;
+        return isUpcoming(item.date) && isUpcomingStatus(item.status);
       case "completed":
-        return item.status === InterviewStatus.COMPLETED;
+        return isCompletedStatus(item.status);
       case "cancelled":
-        return item.status === InterviewStatus.CANCELLED;
+        return isCancelledStatus(item.status);
       default:
         return true;
     }
@@ -313,7 +355,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
         const selectedCand = candidates.find(c => String(c.candidateId || c.id) === String(selectedAppId));
         const candName = selectedCand ? (selectedCand.name || `${selectedCand.firstName || ""} ${selectedCand.lastName || ""}`.trim()) : "Candidate";
         const jobTitle = selectedCand ? (selectedCand.appliedJob || selectedCand.jobTitle || selectedCand.job?.title || selectedCand.currentRole || "Open Position") : "Open Position";
-        const jobId = selectedCand ? (selectedCand.jobId || selectedCand.job?.id || "job-1") : "job-1";
+        const jobId = selectedCand ? (selectedCand.jobId || selectedCand.job?.id || "JOB-0001") : "JOB-0001";
         const candId = selectedCand ? (selectedCand.candidateId || selectedCand.id) : selectedAppId;
 
         const existingApp = applications.find(a => String(a.candidateId || "").replace(/^app-/, "").toLowerCase() === String(candId).replace(/^app-/, "").toLowerCase() || String(a.applicationId || "").replace(/^app-/, "").toLowerCase() === String(candId).replace(/^app-/, "").toLowerCase());
@@ -356,7 +398,14 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
       setScheduleNotes("");
       setLocation("");
       setViewMode("list");
-      setActiveFilter("all");
+      const todayStr = formatDateString(new Date());
+      if (interviewDate === todayStr) {
+        setActiveFilter("today");
+      } else if (interviewDate > todayStr) {
+        setActiveFilter("upcoming");
+      } else {
+        setActiveFilter("all");
+      }
       setSelectedCalendarDate(null);
       await fetchInterviewsAndApps();
       window.dispatchEvent(new Event("trigger-notification-sync"));
@@ -411,6 +460,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
   const handleCancelInterview = async (interviewId: string, skipConfirm = false) => {
     try {
       await InterviewRepository.cancel(interviewId);
+      triggerToast("Interview cancelled successfully.", "info");
       await fetchInterviewsAndApps();
       window.dispatchEvent(new Event("trigger-notification-sync"));
       window.dispatchEvent(new Event("applications-updated"));
@@ -418,6 +468,27 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
       window.dispatchEvent(new Event("candidates-updated"));
     } catch (err: any) {
       console.error("Error cancelling interview:", err);
+      triggerToast("Failed to cancel interview.", "error");
+    }
+  };
+
+  const handleDeleteInterview = async (interviewId: string, skipConfirm = false) => {
+    if (!skipConfirm) {
+      if (!window.confirm("Are you sure you want to delete this interview record permanently?")) {
+        return;
+      }
+    }
+    try {
+      await InterviewRepository.delete(interviewId);
+      triggerToast("Interview record deleted successfully.", "success");
+      await fetchInterviewsAndApps();
+      window.dispatchEvent(new Event("trigger-notification-sync"));
+      window.dispatchEvent(new Event("applications-updated"));
+      window.dispatchEvent(new Event("interviews-updated"));
+      window.dispatchEvent(new Event("candidates-updated"));
+    } catch (err: any) {
+      console.error("Error deleting interview:", err);
+      triggerToast("Failed to delete interview record.", "error");
     }
   };
 
@@ -501,10 +572,10 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
 
   // Stats Counters
   const totalInterviewsCount = validInterviews.length;
-  const todayCount = validInterviews.filter(i => isToday(i.date) && i.status === InterviewStatus.UPCOMING).length;
-  const upcomingCount = validInterviews.filter(i => isUpcoming(i.date) && i.status === InterviewStatus.UPCOMING).length;
-  const completedCount = validInterviews.filter(i => i.status === InterviewStatus.COMPLETED).length;
-  const cancelledCount = validInterviews.filter(i => i.status === InterviewStatus.CANCELLED).length;
+  const todayCount = validInterviews.filter(i => isToday(i.date) && isUpcomingStatus(i.status)).length;
+  const upcomingCount = validInterviews.filter(i => isUpcoming(i.date) && isUpcomingStatus(i.status)).length;
+  const completedCount = validInterviews.filter(i => isCompletedStatus(i.status)).length;
+  const cancelledCount = validInterviews.filter(i => isCancelledStatus(i.status)).length;
 
   const renderFeedbackStars = (score: number) => {
     return (
@@ -520,59 +591,256 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
     );
   };
 
-  // Timeline render component inside card
-  const renderInterviewCardTimeline = (app: any) => {
-    if (!app) return null;
-    
-    const milestones = [
-      { key: ApplicationStatus.APPLIED, label: "Applied" },
-      { key: ApplicationStatus.SCREENING, label: "AI Screening" },
-      { key: "Scheduled", label: "Scheduled" },
-      { key: "Completed", label: "Completed" },
-      { key: ApplicationStatus.OFFERED, label: "Offer" },
-    ];
+  const getFeedbackObj = (interview: any) => {
+    if (!interview) return null;
+    const fb = interview.feedback;
+    if (!fb && !interview.technicalScore && !interview.communicationScore) return null;
 
-    // Determine candidate progress based on application status & interview statuses
-    const currentStatus = app.status;
-    let activeIndex = 0;
-    
-    if (currentStatus === ApplicationStatus.APPLIED) activeIndex = 0;
-    else if (currentStatus === ApplicationStatus.SCREENING) activeIndex = 1;
-    else if (currentStatus === ApplicationStatus.INTERVIEWING) {
-      // Find if we have completed interviews
-      const appInterviews = interviews.filter(i => i.applicationId === app.id);
-      const hasCompleted = appInterviews.some(i => i.status === InterviewStatus.COMPLETED);
-      const hasUpcoming = appInterviews.some(i => i.status === InterviewStatus.UPCOMING);
-      
-      if (hasCompleted) activeIndex = 3;
-      else if (hasUpcoming) activeIndex = 2;
-      else activeIndex = 1;
-    } else if (currentStatus === ApplicationStatus.OFFERED) activeIndex = 4;
-    else if (currentStatus === "Hired") activeIndex = 5;
+    if (typeof fb === "string" && fb.trim()) {
+      try {
+        const parsed = JSON.parse(fb);
+        if (parsed && typeof parsed === "object") {
+          return {
+            technicalScore: Number(parsed.technicalScore ?? (interview.technicalScore || 8)),
+            communicationScore: Number(parsed.communicationScore ?? (interview.communicationScore || 8)),
+            problemSolvingScore: Number(parsed.problemSolvingScore ?? 8),
+            comments: String(parsed.comments ?? fb),
+            recommendation: String(parsed.recommendation || "Hire")
+          };
+        }
+      } catch (e) {
+        return {
+          technicalScore: Number(interview.technicalScore || 8),
+          communicationScore: Number(interview.communicationScore || 8),
+          problemSolvingScore: 8,
+          comments: String(fb),
+          recommendation: "Hire"
+        };
+      }
+    }
+
+    if (typeof fb === "object" && fb !== null) {
+      return {
+        technicalScore: Number(fb.technicalScore ?? (interview.technicalScore || 8)),
+        communicationScore: Number(fb.communicationScore ?? (interview.communicationScore || 8)),
+        problemSolvingScore: Number(fb.problemSolvingScore ?? 8),
+        comments: String(fb.comments || ""),
+        recommendation: String(fb.recommendation || "Hire")
+      };
+    }
+
+    return {
+      technicalScore: Number(interview.technicalScore || 8),
+      communicationScore: Number(interview.communicationScore || 8),
+      problemSolvingScore: 8,
+      comments: "",
+      recommendation: "Hire"
+    };
+  };
+
+  const getNextStageInfo = (interviewItem: any) => {
+    const roundStr = String(interviewItem?.round || "").toLowerCase();
+    if (roundStr.includes("hr")) {
+      return { label: "Move to Offer Stage", target: "offer" };
+    } else if (roundStr.includes("1") || (roundStr.includes("technical") && !roundStr.includes("2"))) {
+      return { label: "Move to Technical Round 2", target: "tech2" };
+    } else {
+      return { label: "Move to HR Interview", target: "hr" };
+    }
+  };
+
+  const handleMoveToNextStage = async (interviewItem: any) => {
+    if (!interviewItem) return;
+    const assocApp = getAssocApp(interviewItem);
+    const roundInfo = getNextStageInfo(interviewItem);
+    const candName = interviewItem.candidateName || assocApp?.candidateName || "Candidate";
+    const jobTitle = interviewItem.jobTitle || assocApp?.appliedRole || "Job Position";
+
+    try {
+      setActionLoading(interviewItem.id);
+      if (roundInfo.target === "tech2") {
+        await InterviewRepository.create({
+          candidateId: interviewItem.candidateId,
+          jobId: interviewItem.jobId,
+          applicationId: interviewItem.applicationId,
+          candidateName: candName,
+          candidateEmail: interviewItem.candidateEmail || assocApp?.candidateEmail || "",
+          jobTitle: jobTitle,
+          round: "Technical Round 2",
+          date: new Date(Date.now() + 86400000 * 2).toISOString().split("T")[0],
+          time: "11:00",
+          interviewer: "Lead Technical Evaluator",
+          status: "Scheduled",
+          meetingLink: "Google Meet"
+        });
+        triggerToast(`Moved ${candName} to Technical Round 2!`, "success");
+      } else if (roundInfo.target === "offer") {
+        if (assocApp?.id) {
+          await ApplicationRepository.updateStatus(assocApp.id, "Offered");
+        } else if (interviewItem.candidateId) {
+          await axios.patch(`/api/candidates/${interviewItem.candidateId}`, { status: "Offered" }, { headers: { "X-Skip-Interceptor": "true" } });
+        }
+        triggerToast(`Moved ${candName} to Offer Stage!`, "success");
+      } else {
+        await InterviewRepository.create({
+          candidateId: interviewItem.candidateId,
+          jobId: interviewItem.jobId,
+          applicationId: interviewItem.applicationId,
+          candidateName: candName,
+          candidateEmail: interviewItem.candidateEmail || assocApp?.candidateEmail || "",
+          jobTitle: jobTitle,
+          round: "HR Interview",
+          date: new Date(Date.now() + 86400000 * 3).toISOString().split("T")[0],
+          time: "15:00",
+          interviewer: "HR Manager",
+          status: "Scheduled",
+          meetingLink: "Google Meet"
+        });
+        triggerToast(`Moved ${candName} to HR Interview!`, "success");
+      }
+
+      await fetchInterviewsAndApps();
+      window.dispatchEvent(new Event("trigger-notification-sync"));
+      window.dispatchEvent(new Event("applications-updated"));
+      window.dispatchEvent(new Event("interviews-updated"));
+      window.dispatchEvent(new Event("candidates-updated"));
+      window.dispatchEvent(new Event("offers-updated"));
+      setShowFeedbackDetailModal(false);
+      setSelectedInterview(null);
+    } catch (err: any) {
+      console.error("Error moving candidate to next stage:", err);
+      triggerToast("Failed to move candidate to next stage.", "error");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  // Dynamic Timeline render component inside card and modal
+  const renderCandidateStageTimeline = (app: any, interview?: any) => {
+    const currentStatus = String(app?.status || interview?.status || "Applied");
+    const appInterviews = interviews.filter(i => {
+      if (app?.id && i.applicationId === app.id) return true;
+      if (app?.candidateId && i.candidateId === app.candidateId) return true;
+      if (interview?.candidateId && i.candidateId === interview.candidateId) return true;
+      return false;
+    });
+
+    const isRejected =
+      currentStatus.toLowerCase() === "rejected" ||
+      String(interview?.status).toLowerCase() === "cancelled" ||
+      (interview?.feedback?.recommendation && String(interview.feedback.recommendation).toLowerCase() === "reject");
+
+    const currentRound = String(interview?.round || "").toLowerCase();
+
+    const hasTech1 = appInterviews.some(i => {
+      const r = String(i.round || "").toLowerCase();
+      return r.includes("1") || r.includes("round 1");
+    }) || currentRound.includes("1") || currentRound.includes("round 1");
+
+    const hasTech2 = appInterviews.some(i => {
+      const r = String(i.round || "").toLowerCase();
+      return r.includes("2") || r.includes("round 2");
+    }) || currentRound.includes("2") || currentRound.includes("round 2");
+
+    const isSingleTech = (!hasTech1 && !hasTech2 && currentRound.includes("technical interview") && !currentRound.includes("1") && !currentRound.includes("2")) || 
+      (appInterviews.length === 1 && String(appInterviews[0]?.round || "").toLowerCase() === "technical interview");
+
+    const isAppliedDone = true;
+    const isScreeningDone = currentStatus.toLowerCase() !== "applied";
+
+    const isTech1Done = appInterviews.some(i => {
+      const r = String(i.round || "").toLowerCase();
+      return (r.includes("1") || r.includes("round 1")) && isCompletedStatus(i.status);
+    }) || (hasTech2) || (interview && (currentRound.includes("1") || currentRound.includes("round 1")) && isCompletedStatus(interview.status));
+
+    const isTech2Done = appInterviews.some(i => {
+      const r = String(i.round || "").toLowerCase();
+      return (r.includes("2") || r.includes("round 2")) && isCompletedStatus(i.status);
+    }) || (interview && (currentRound.includes("2") || currentRound.includes("round 2")) && isCompletedStatus(interview.status));
+
+    const isSingleTechDone = appInterviews.some(i => {
+      const r = String(i.round || "").toLowerCase();
+      return r === "technical interview" && isCompletedStatus(i.status);
+    }) || (interview && currentRound === "technical interview" && isCompletedStatus(interview.status));
+
+    const isHRInterviewDone = appInterviews.some(i => {
+      const r = String(i.round || "").toLowerCase();
+      return r.includes("hr") && isCompletedStatus(i.status);
+    }) || (interview && currentRound.includes("hr") && isCompletedStatus(interview.status));
+
+    const isOfferDone = currentStatus.toLowerCase() === "offered" || currentStatus.toLowerCase() === "hired";
+
+    let stages: { key: string; label: string; isDone: boolean; isActive: boolean; isRejected?: boolean }[] = [];
+
+    const isScheduledNow = isUpcomingStatus(interview?.status);
+    const isHRRoundNow = currentRound.includes("hr");
+    const isTech2Now = currentRound.includes("2") || currentRound.includes("round 2");
+
+    if (isRejected) {
+      stages = [
+        { key: "applied", label: "Applied", isDone: isAppliedDone, isActive: false },
+        { key: "screening", label: "AI Screening", isDone: isScreeningDone, isActive: false },
+        { key: "interview", label: isSingleTech ? "Technical Interview" : "Technical Interview 1", isDone: isSingleTech ? isSingleTechDone : isTech1Done, isActive: false },
+        { key: "rejected", label: "Rejected", isDone: false, isActive: true, isRejected: true },
+      ];
+    } else if (isSingleTech) {
+      stages = [
+        { key: "applied", label: "Applied", isDone: isAppliedDone, isActive: false },
+        { key: "screening", label: "AI Screening", isDone: isScreeningDone, isActive: !isScreeningDone && currentStatus.toLowerCase() === "screening" },
+        { key: "tech", label: "Technical Interview", isDone: isSingleTechDone, isActive: !isSingleTechDone && isScheduledNow && !isHRRoundNow },
+        { key: "hr", label: "HR Interview", isDone: isHRInterviewDone, isActive: isSingleTechDone && !isHRInterviewDone && isHRRoundNow },
+        { key: "offer", label: "Offer", isDone: isOfferDone, isActive: isOfferDone },
+      ];
+    } else {
+      stages = [
+        { key: "applied", label: "Applied", isDone: isAppliedDone, isActive: false },
+        { key: "screening", label: "AI Screening", isDone: isScreeningDone, isActive: !isScreeningDone && currentStatus.toLowerCase() === "screening" },
+        { key: "tech1", label: "Technical Interview 1", isDone: isTech1Done, isActive: !isTech1Done && isScheduledNow && !isTech2Now && !isHRRoundNow },
+        { key: "tech2", label: "Technical Interview 2", isDone: isTech2Done, isActive: (isTech1Done || isTech2Now) && !isTech2Done && !isHRRoundNow },
+        { key: "hr", label: "HR Interview", isDone: isHRInterviewDone, isActive: (isTech2Done || isHRRoundNow) && !isHRInterviewDone },
+        { key: "offer", label: "Offer", isDone: isOfferDone, isActive: isOfferDone },
+      ];
+    }
 
     return (
       <div className="border-t border-slate-100 pt-4 mt-4 bg-slate-50/50 p-3.5 rounded-lg border">
         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2.5">Candidate Stage Progress</p>
         <div className="relative flex items-center justify-between">
-          <div className="absolute left-1 right-1 top-1/2 -translate-y-1/2 h-0.5 bg-slate-200 -z-0" />
-          {milestones.map((milestone, idx) => {
-            const isCompleted = idx < activeIndex;
-            const isActive = idx === activeIndex;
+          <div className="absolute left-2 right-2 top-1/2 -translate-y-1/2 h-0.5 bg-slate-200 -z-0" />
+          {stages.map((stage, idx) => {
+            const isCompleted = stage.isDone;
+            const isActive = stage.isActive;
+            const isRejectedStage = stage.isRejected;
+
             return (
-              <div key={milestone.key} className="flex flex-col items-center relative z-10">
+              <div key={stage.key} className="flex flex-col items-center relative z-10">
                 <div className={`h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold border transition-all ${
-                  isCompleted 
-                    ? "bg-indigo-600 border-indigo-600 text-white shadow-xs" 
-                    : isActive 
-                      ? "bg-white border-indigo-500 text-indigo-600 ring-4 ring-indigo-500/10 scale-110" 
-                      : "bg-white border-slate-300 text-slate-400"
+                  isRejectedStage
+                    ? "bg-rose-600 border-rose-600 text-white shadow-xs animate-pulse"
+                    : isCompleted 
+                      ? "bg-indigo-600 border-indigo-600 text-white shadow-xs" 
+                      : isActive 
+                        ? "bg-white border-indigo-500 text-indigo-600 ring-4 ring-indigo-500/15 scale-110 font-bold" 
+                        : "bg-white border-slate-300 text-slate-400 font-normal"
                 }`}>
-                  {isCompleted ? <Check className="h-3 w-3" /> : idx + 1}
+                  {isRejectedStage ? (
+                    <XCircle className="h-3 w-3 text-white" />
+                  ) : isCompleted ? (
+                    <Check className="h-3 w-3" />
+                  ) : (
+                    idx + 1
+                  )}
                 </div>
                 <span className={`text-[9px] font-semibold mt-1.5 whitespace-nowrap ${
-                  isActive ? "text-indigo-600 font-bold" : isCompleted ? "text-slate-600" : "text-slate-400"
+                  isRejectedStage
+                    ? "text-rose-600 font-bold"
+                    : isCompleted
+                      ? "text-indigo-600 font-bold"
+                      : isActive
+                        ? "text-slate-900 font-bold"
+                        : "text-slate-400"
                 }`}>
-                  {milestone.label}
+                  {stage.label}
                 </span>
               </div>
             );
@@ -634,7 +902,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
               setSelectedAppId(applications[0]?.id || "");
               setRoundName("Technical Interview");
               setInterviewerName("");
-              setInterviewDate("2026-07-02");
+              setInterviewDate(new Date().toISOString().split("T")[0]);
               setInterviewTime("14:00");
               setInterviewType(InterviewType.ONLINE);
               setPlatform("Google Meet");
@@ -792,9 +1060,12 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                                 <User className="h-4 w-4 text-slate-400 shrink-0" />
                                 <span>{getResolvedCandidateName(item)}</span>
                               </h4>
-                              <p className="text-xs text-slate-500 font-medium flex items-center gap-1.5">
+                              <p className="text-xs text-slate-500 font-medium flex items-center gap-1.5 flex-wrap">
                                 <Briefcase className="h-3.5 w-3.5 text-slate-400 shrink-0" />
                                 <span>Applied: {getResolvedJobTitle(item)}</span>
+                                {getResolvedJobId(item) && (
+                                  <span className="font-mono text-[10px] text-slate-400 font-semibold">({getResolvedJobId(item)})</span>
+                                )}
                               </p>
                             </div>
 
@@ -885,120 +1156,158 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                           )}
 
                           {/* Candidate stage progress bar */}
-                          {assocApp && renderInterviewCardTimeline(assocApp)}
+                          {renderCandidateStageTimeline(assocApp, item)}
 
                           {/* Feedback Details if Completed */}
-                          {item.status === InterviewStatus.COMPLETED && item.feedback && (
-                            <div className="bg-emerald-50/30 border border-emerald-100 p-4 rounded-lg mt-1 space-y-3">
-                              <div className="flex items-center justify-between">
-                                <span className="font-display font-semibold text-xs text-emerald-800 flex items-center gap-1">
-                                  <Award className="h-4 w-4 text-emerald-600 animate-pulse" />
-                                  <span>Candidate Evaluation Feedback</span>
-                                </span>
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                                  item.feedback.recommendation === RecommendationType.HIRE
-                                    ? "bg-emerald-100 border-emerald-300 text-emerald-800"
-                                    : item.feedback.recommendation === RecommendationType.HOLD
-                                      ? "bg-amber-100 border-amber-300 text-amber-800"
-                                      : "bg-rose-100 border-rose-300 text-rose-800"
-                                }`}>
-                                  Rec: {item.feedback.recommendation}
-                                </span>
-                              </div>
+                          {isCompletedStatus(item.status) && getFeedbackObj(item) && (() => {
+                            const fbObj = getFeedbackObj(item)!;
+                            return (
+                              <div className="bg-emerald-50/30 border border-emerald-100 p-4 rounded-lg mt-1 space-y-3">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-display font-semibold text-xs text-emerald-800 flex items-center gap-1">
+                                    <Award className="h-4 w-4 text-emerald-600 animate-pulse" />
+                                    <span>Candidate Evaluation Feedback</span>
+                                  </span>
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                                    fbObj.recommendation.toLowerCase().includes("hire")
+                                      ? "bg-emerald-100 border-emerald-300 text-emerald-800"
+                                      : fbObj.recommendation.toLowerCase().includes("hold")
+                                        ? "bg-amber-100 border-amber-300 text-amber-800"
+                                        : "bg-rose-100 border-rose-300 text-rose-800"
+                                  }`}>
+                                    Rec: {fbObj.recommendation}
+                                  </span>
+                                </div>
 
-                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs border-t border-emerald-100/50 pt-2.5">
-                                <div>
-                                  <p className="text-slate-400 font-semibold">Technical Panel</p>
-                                  {renderFeedbackStars(item.feedback.technicalScore)}
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs border-t border-emerald-100/50 pt-2.5">
+                                  <div>
+                                    <p className="text-slate-400 font-semibold">Technical Panel</p>
+                                    {renderFeedbackStars(fbObj.technicalScore)}
+                                  </div>
+                                  <div>
+                                    <p className="text-slate-400 font-semibold">Communication</p>
+                                    {renderFeedbackStars(fbObj.communicationScore)}
+                                  </div>
+                                  <div>
+                                    <p className="text-slate-400 font-semibold">Problem Solving</p>
+                                    {renderFeedbackStars(fbObj.problemSolvingScore)}
+                                  </div>
                                 </div>
-                                <div>
-                                  <p className="text-slate-400 font-semibold">Communication</p>
-                                  {renderFeedbackStars(item.feedback.communicationScore)}
-                                </div>
-                                <div>
-                                  <p className="text-slate-400 font-semibold">Problem Solving</p>
-                                  {renderFeedbackStars(item.feedback.problemSolvingScore)}
-                                </div>
-                              </div>
 
-                              <div className="bg-white p-3 rounded-md border border-emerald-100 text-xs">
-                                <p className="text-slate-700 leading-relaxed font-serif italic">
-                                  "{item.feedback.comments}"
-                                </p>
+                                <div className="bg-white p-3 rounded-md border border-emerald-100 text-xs">
+                                  <p className="text-slate-700 leading-relaxed font-serif italic">
+                                    "{fbObj.comments || 'Evaluated session.'}"
+                                  </p>
+                                </div>
                               </div>
-                            </div>
-                          )}
+                            );
+                          })()}
 
                           {/* Card Footer: Interactive Actions */}
-                          {item.status === InterviewStatus.UPCOMING ? (
-                            <div className="flex items-center justify-end gap-3 border-t border-slate-100 pt-3 mt-1.5" onClick={(e) => e.stopPropagation()}>
-                              <button 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleOpenEditModal(item);
-                                }}
-                                className="px-3 py-1.5 border border-slate-200 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-150 text-slate-500 font-semibold text-xs rounded-md transition-all cursor-pointer"
-                              >
-                                Edit Schedule
-                              </button>
-                              {interviewIdPendingCancel === item.id ? (
-                                <div className="inline-flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-                                  <button 
-                                    onClick={async (e) => {
-                                      e.stopPropagation();
-                                      await handleCancelInterview(item.id, true);
-                                      setInterviewIdPendingCancel(null);
-                                    }}
-                                    className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs rounded-md transition-all cursor-pointer"
-                                  >
-                                    Confirm Cancel
-                                  </button>
+                          <div className="flex items-center justify-between border-t border-slate-100 pt-3 mt-1.5" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteInterview(item.id);
+                              }}
+                              className="px-3 py-1.5 border border-rose-200 hover:bg-rose-50 text-rose-600 font-semibold text-xs rounded-md transition-all cursor-pointer flex items-center gap-1.5"
+                              title="Permanently remove interview session from database"
+                            >
+                              <Trash2 className="h-3.5 w-3.5 text-rose-500" />
+                              <span>Delete Session</span>
+                            </button>
+
+                            <div className="flex items-center gap-2.5">
+                              {isUpcomingStatus(item.status) ? (
+                                <>
                                   <button 
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      setInterviewIdPendingCancel(null);
+                                      handleOpenEditModal(item);
                                     }}
-                                    className="px-2.5 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-500 font-semibold text-xs rounded-md transition-all cursor-pointer"
+                                    className="px-3 py-1.5 border border-slate-200 hover:bg-indigo-50 hover:text-indigo-600 text-slate-500 font-semibold text-xs rounded-md transition-all cursor-pointer"
                                   >
-                                    Dismiss
+                                    Edit Schedule
+                                  </button>
+                                  {interviewIdPendingCancel === item.id ? (
+                                    <div className="inline-flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                                      <button 
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
+                                          await handleCancelInterview(item.id, true);
+                                          setInterviewIdPendingCancel(null);
+                                        }}
+                                        className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs rounded-md transition-all cursor-pointer"
+                                      >
+                                        Confirm Cancel
+                                      </button>
+                                      <button 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setInterviewIdPendingCancel(null);
+                                        }}
+                                        className="px-2.5 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-500 font-semibold text-xs rounded-md transition-all cursor-pointer"
+                                      >
+                                        Dismiss
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button 
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setInterviewIdPendingCancel(item.id);
+                                      }}
+                                      className="px-3 py-1.5 border border-slate-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-100 text-slate-500 font-semibold text-xs rounded-md transition-all cursor-pointer"
+                                    >
+                                      Cancel Session
+                                    </button>
+                                  )}
+                                  <button 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleOpenInterviewDetails(item);
+                                    }}
+                                    className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-md transition-all cursor-pointer flex items-center gap-1"
+                                  >
+                                    <MessageSquare className="h-3 w-3 text-white" />
+                                    <span>Submit Review Feedback</span>
+                                  </button>
+                                </>
+                              ) : isCompletedStatus(item.status) ? (
+                                <div className="flex items-center gap-2">
+                                  <button 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleOpenInterviewDetails(item);
+                                    }}
+                                    className="px-3.5 py-1.5 border border-emerald-200 hover:bg-emerald-50 text-emerald-700 font-semibold text-xs rounded-md transition-all cursor-pointer flex items-center gap-1"
+                                  >
+                                    <Award className="h-3.5 w-3.5 text-emerald-600" />
+                                    <span>View Details & Feedback</span>
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleMoveToNextStage(item);
+                                    }}
+                                    disabled={actionLoading === item.id}
+                                    className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-md transition-all cursor-pointer flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+                                  >
+                                    {actionLoading === item.id ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <ArrowRight className="h-3.5 w-3.5" />
+                                    )}
+                                    <span>{getNextStageInfo(item).label}</span>
                                   </button>
                                 </div>
-                              ) : (
-                                <button 
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setInterviewIdPendingCancel(item.id);
-                                  }}
-                                  className="px-3 py-1.5 border border-slate-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-100 text-slate-500 font-semibold text-xs rounded-md transition-all cursor-pointer"
-                                >
-                                  Cancel Session
-                                </button>
-                              )}
-                              <button 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleOpenInterviewDetails(item);
-                                }}
-                                className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-md transition-all cursor-pointer flex items-center gap-1"
-                              >
-                                <MessageSquare className="h-3 w-3 text-white" />
-                                <span>Submit Review Feedback</span>
-                              </button>
+                              ) : isCancelledStatus(item.status) ? (
+                                <span className="text-xs font-bold text-rose-500 bg-rose-50 border border-rose-100 px-2.5 py-1 rounded-md">
+                                  Session Cancelled
+                                </span>
+                              ) : null}
                             </div>
-                          ) : item.status === InterviewStatus.COMPLETED ? (
-                            <div className="flex items-center justify-end gap-3 border-t border-slate-100 pt-3 mt-1.5" onClick={(e) => e.stopPropagation()}>
-                              <button 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleOpenInterviewDetails(item);
-                                }}
-                                className="px-4 py-1.5 border border-emerald-200 hover:bg-emerald-50 text-emerald-700 font-semibold text-xs rounded-md transition-all cursor-pointer flex items-center gap-1"
-                              >
-                                <Award className="h-3.5 w-3.5 text-emerald-600" />
-                                <span>View Details & Feedback</span>
-                              </button>
-                            </div>
-                          ) : null}
+                          </div>
                         </div>
                       );
                     })}
@@ -1070,7 +1379,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                         const dayInterviews = validInterviews.filter(i => i.date === dateStr);
                         const isCurrentMonth = day.getMonth() === currentDate.getMonth();
                         const isSelected = selectedCalendarDate && formatDateString(selectedCalendarDate) === dateStr;
-                        const isTodayDate = dateStr === "2026-07-01"; // Target date July 1st
+                        const isTodayDate = dateStr === formatDateString(new Date());
 
                         return (
                           <div
@@ -1208,25 +1517,30 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                   <CalendarIcon className="h-4 w-4 text-indigo-600" />
                   <span>
                     {viewMode === "calendar" && selectedCalendarDate 
-                      ? `Schedule for July ${selectedCalendarDate.getDate()}` 
+                      ? `Schedule for ${selectedCalendarDate.toLocaleString("en-US", { month: "long" })} ${selectedCalendarDate.getDate()}` 
                       : "Today's Focus Schedule"}
                   </span>
                 </h4>
                 <span className="text-[10px] bg-slate-100 text-slate-600 font-bold px-2 py-0.5 rounded-full font-mono">
                   {viewMode === "calendar" && selectedCalendarDate 
                     ? formatDateString(selectedCalendarDate) 
-                    : "2026-07-01"}
+                    : formatDateString(new Date())}
                 </span>
               </div>
 
               {/* Day focus interviews listing */}
               <div className="space-y-3.5">
                 {(() => {
+                  const realTodayStr = formatDateString(new Date());
                   const targetDateStr = viewMode === "calendar" && selectedCalendarDate 
                     ? formatDateString(selectedCalendarDate) 
-                    : "2026-07-01";
+                    : realTodayStr;
                   
-                  const targetDayInterviews = validInterviews.filter(i => i.date === targetDateStr);
+                  let targetDayInterviews = validInterviews.filter(i => (i.date === targetDateStr || isToday(i.date)) && isUpcomingStatus(i.status));
+                  if (targetDayInterviews.length === 0 && viewMode !== "calendar") {
+                    // Show upcoming focus interviews sorted by date
+                    targetDayInterviews = validInterviews.filter(i => isUpcomingStatus(i.status)).slice(0, 5);
+                  }
                   
                   if (targetDayInterviews.length === 0) {
                     return (
@@ -1246,12 +1560,12 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                     >
                       <div className="flex justify-between items-center">
                         <span className="text-[10px] font-mono font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded">
-                          {int.time}
+                          {int.time} ({int.date})
                         </span>
                         <span className={`text-[10px] font-bold px-2 py-0.5 border rounded-full ${
-                          int.status === InterviewStatus.UPCOMING 
+                          isUpcomingStatus(int.status)
                             ? "bg-indigo-50 border-indigo-150 text-indigo-700 animate-pulse" 
-                            : int.status === InterviewStatus.COMPLETED 
+                            : isCompletedStatus(int.status)
                               ? "bg-emerald-50 border-emerald-150 text-emerald-700" 
                               : "bg-rose-50 border-rose-150 text-rose-700"
                         }`}>
@@ -1272,17 +1586,14 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                       )}
 
                       <div className="pt-2 border-t border-slate-150/50 flex justify-end">
-                        {int.status === InterviewStatus.UPCOMING ? (
+                        {isUpcomingStatus(int.status) ? (
                           <span className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1">
                             <MessageSquare className="h-3 w-3" />
                             <span>Add Feedback & Details</span>
                           </span>
-                        ) : int.status === InterviewStatus.COMPLETED ? (
-                          <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
-                            <CheckCircle className="h-3 w-3" />
-                            <span>View Evaluation</span>
-                          </span>
-                        ) : null}
+                        ) : (
+                          <span className="text-[10px] text-slate-500 font-medium">View Session Record</span>
+                        )}
                       </div>
                     </div>
                   ));
@@ -1390,8 +1701,8 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                     className="w-full px-4 py-2.5 rounded-lg border border-slate-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm font-medium transition-all bg-white"
                   >
                     <option value="Technical Interview">Technical Interview</option>
-                    <option value="Technical Interview – Round 1">Technical Interview – Round 1</option>
-                    <option value="Technical Interview – Round 2">Technical Interview – Round 2</option>
+                    <option value="Technical Interview 1">Technical Interview 1</option>
+                    <option value="Technical Interview 2">Technical Interview 2</option>
                     <option value="HR Interview">HR Interview</option>
                   </select>
                 </div>
@@ -1566,7 +1877,9 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
               <div className="bg-slate-50 p-4 rounded-lg border border-slate-200/60">
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Candidate Session</p>
                 <h4 className="font-bold text-sm text-indigo-700 mt-1">{getResolvedCandidateName(selectedInterview)}</h4>
-                <p className="text-xs text-slate-500 font-semibold mt-0.5">{selectedInterview.round} • {getResolvedJobTitle(selectedInterview)}</p>
+                <p className="text-xs text-slate-500 font-semibold mt-0.5">
+                  {selectedInterview.round} • {getResolvedJobTitle(selectedInterview)} {getResolvedJobId(selectedInterview) && `(Job ID: ${getResolvedJobId(selectedInterview)})`}
+                </p>
               </div>
 
               {/* Technical Score Slider */}
@@ -1780,6 +2093,9 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                     <div className="space-y-1">
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Applied Position</p>
                       <p className="text-sm font-semibold text-slate-800">{getResolvedJobTitle(selectedInterview)}</p>
+                      {getResolvedJobId(selectedInterview) && (
+                        <p className="text-xs font-mono text-slate-400 font-medium mt-0.5">Job ID: {getResolvedJobId(selectedInterview)}</p>
+                      )}
                     </div>
                     <div className="space-y-1">
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Scheduled Date</p>
@@ -1833,6 +2149,9 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                   )}
                 </div>
 
+                {/* Candidate Stage Timeline */}
+                {renderCandidateStageTimeline(getAssocApp(selectedInterview), selectedInterview)}
+
                 {/* Join Session Link if Online & Upcoming */}
                 {selectedInterview.type === InterviewType.ONLINE && selectedInterview.status === InterviewStatus.UPCOMING && (
                   <div className="bg-indigo-50/50 border border-indigo-100 rounded-lg p-4 flex items-center justify-between gap-3">
@@ -1864,50 +2183,53 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
 
               {/* Right Column: Feedback Form OR Display */}
               <div className="space-y-5">
-                {selectedInterview.status === InterviewStatus.COMPLETED && selectedInterview.feedback ? (
-                  /* Feedback display for completed interviews */
-                  <div className="space-y-4">
-                    <h4 className="font-display font-bold text-sm text-slate-900 border-b border-slate-100 pb-2 flex items-center gap-2">
-                      <Award className="h-4 w-4 text-emerald-600" />
-                      <span>Interviewer Feedback</span>
-                    </h4>
+                {isCompletedStatus(selectedInterview.status) && getFeedbackObj(selectedInterview) ? (() => {
+                  const fbObj = getFeedbackObj(selectedInterview)!;
+                  return (
+                    /* Feedback display for completed interviews */
+                    <div className="space-y-4">
+                      <h4 className="font-display font-bold text-sm text-slate-900 border-b border-slate-100 pb-2 flex items-center gap-2">
+                        <Award className="h-4 w-4 text-emerald-600" />
+                        <span>Interviewer Feedback</span>
+                      </h4>
 
-                    <div className="flex items-center justify-between p-3.5 bg-emerald-50/40 border border-emerald-100 rounded-lg">
-                      <span className="text-xs font-bold text-emerald-800">Board Recommendation</span>
-                      <span className={`text-xs font-bold px-3 py-1 rounded-full border ${
-                        selectedInterview.feedback.recommendation === RecommendationType.HIRE
-                          ? "bg-emerald-100 border-emerald-300 text-emerald-800"
-                          : selectedInterview.feedback.recommendation === RecommendationType.HOLD
-                            ? "bg-amber-100 border-amber-300 text-amber-800"
-                            : "bg-rose-100 border-rose-300 text-rose-800"
-                      }`}>
-                        {selectedInterview.feedback.recommendation}
-                      </span>
-                    </div>
+                      <div className="flex items-center justify-between p-3.5 bg-emerald-50/40 border border-emerald-100 rounded-lg">
+                        <span className="text-xs font-bold text-emerald-800">Board Recommendation</span>
+                        <span className={`text-xs font-bold px-3 py-1 rounded-full border ${
+                          fbObj.recommendation.toLowerCase().includes("hire")
+                            ? "bg-emerald-100 border-emerald-300 text-emerald-800"
+                            : fbObj.recommendation.toLowerCase().includes("hold")
+                              ? "bg-amber-100 border-amber-300 text-amber-800"
+                              : "bg-rose-100 border-rose-300 text-rose-800"
+                        }`}>
+                          {fbObj.recommendation}
+                        </span>
+                      </div>
 
-                    <div className="space-y-3.5 border-t border-slate-100 pt-3">
-                      <div className="flex justify-between items-center text-xs">
-                        <span className="font-semibold text-slate-500">Technical Capability</span>
-                        {renderFeedbackStars(selectedInterview.feedback.technicalScore)}
+                      <div className="space-y-3.5 border-t border-slate-100 pt-3">
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="font-semibold text-slate-500">Technical Capability</span>
+                          {renderFeedbackStars(fbObj.technicalScore)}
+                        </div>
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="font-semibold text-slate-500">Communication & Presentation</span>
+                          {renderFeedbackStars(fbObj.communicationScore)}
+                        </div>
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="font-semibold text-slate-500">Problem Solving & Logic</span>
+                          {renderFeedbackStars(fbObj.problemSolvingScore)}
+                        </div>
                       </div>
-                      <div className="flex justify-between items-center text-xs">
-                        <span className="font-semibold text-slate-500">Communication & Presentation</span>
-                        {renderFeedbackStars(selectedInterview.feedback.communicationScore)}
-                      </div>
-                      <div className="flex justify-between items-center text-xs">
-                        <span className="font-semibold text-slate-500">Problem Solving & Logic</span>
-                        {renderFeedbackStars(selectedInterview.feedback.problemSolvingScore)}
-                      </div>
-                    </div>
 
-                    <div className="space-y-1.5 border-t border-slate-100 pt-4">
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Assessment Comments</p>
-                      <div className="bg-emerald-50/20 border border-emerald-100/50 rounded-lg p-4 text-xs text-slate-700 leading-relaxed font-serif italic">
-                        "{selectedInterview.feedback.comments}"
+                      <div className="space-y-1.5 border-t border-slate-100 pt-4">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Assessment Comments</p>
+                        <div className="bg-emerald-50/20 border border-emerald-100/50 rounded-lg p-4 text-xs text-slate-700 leading-relaxed font-serif italic">
+                          "{fbObj.comments || 'Evaluated session details.'}"
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ) : selectedInterview.status === InterviewStatus.UPCOMING ? (
+                  );
+                })() : isUpcomingStatus(selectedInterview.status) ? (
                   /* Feedback submission form for upcoming interviews */
                   <form onSubmit={async (e) => {
                     e.preventDefault();
@@ -1917,7 +2239,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                     }
                     try {
                       setSubmittingFeedback(true);
-                      await axios.post(`/api/interviews/${selectedInterview.id}/feedback`, {
+                      await InterviewRepository.submitFeedback(selectedInterview.id, {
                         technicalScore,
                         communicationScore,
                         problemSolvingScore,
@@ -2093,28 +2415,59 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
 
             {/* Modal Footer */}
             <div className="p-4 border-t border-slate-100 flex justify-between bg-slate-50 rounded-b-xl">
-              {selectedInterview.status === InterviewStatus.UPCOMING ? (
+              <div className="flex items-center gap-2">
+                {isUpcomingStatus(selectedInterview.status) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowFeedbackDetailModal(false);
+                      handleOpenEditModal(selectedInterview);
+                    }}
+                    className="px-4 py-2 border border-indigo-200 hover:bg-indigo-50 text-indigo-700 font-semibold text-xs rounded-lg transition-all cursor-pointer shadow-xs"
+                  >
+                    Edit Schedule Details
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (window.confirm("Are you sure you want to delete this interview record permanently?")) {
+                      setShowFeedbackDetailModal(false);
+                      await handleDeleteInterview(selectedInterview.id, true);
+                    }
+                  }}
+                  className="px-4 py-2 border border-rose-200 hover:bg-rose-50 text-rose-600 font-semibold text-xs rounded-lg transition-all cursor-pointer shadow-xs flex items-center gap-1.5"
+                >
+                  <Trash2 className="h-3.5 w-3.5 text-rose-500" />
+                  <span>Delete Session</span>
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleMoveToNextStage(selectedInterview)}
+                  disabled={actionLoading === selectedInterview.id}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-lg transition-all cursor-pointer shadow-xs flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {actionLoading === selectedInterview.id ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  )}
+                  <span>{getNextStageInfo(selectedInterview).label}</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => {
                     setShowFeedbackDetailModal(false);
-                    handleOpenEditModal(selectedInterview);
+                    setSelectedInterview(null);
                   }}
-                  className="px-4 py-2 border border-indigo-200 hover:bg-indigo-50 text-indigo-700 font-semibold text-xs rounded-lg transition-all cursor-pointer shadow-xs"
+                  className="px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-semibold text-xs rounded-lg transition-all cursor-pointer shadow-xs"
                 >
-                  Edit Schedule Details
+                  Close Details
                 </button>
-              ) : <div />}
-              <button
-                type="button"
-                onClick={() => {
-                  setShowFeedbackDetailModal(false);
-                  setSelectedInterview(null);
-                }}
-                className="px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-semibold text-xs rounded-lg transition-all cursor-pointer shadow-xs"
-              >
-                Close Details
-              </button>
+              </div>
             </div>
           </div>
         </div>

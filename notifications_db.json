@@ -1,1 +1,38 @@
-[]
+[
+  {
+    "id": "notif-1787207197429-gy9u",
+    "type": "candidate_applied",
+    "title": "Candidate Profile Added",
+    "description": "Candidate ekjrfh jernht was successfully registered by HR.",
+    "timestamp": "11:56 am today",
+    "isRead": false,
+    "priority": "MEDIUM",
+    "createdAt": "2026-08-20T06:26:37.429Z",
+    "candidateName": "ekjrfh jernht",
+    "jobTitle": "Software Engineer"
+  },
+  {
+    "id": "notif-1787207142970-qk7f",
+    "type": "candidate_applied",
+    "title": "Candidate Profile Added",
+    "description": "Candidate wte qe4r was successfully registered by HR.",
+    "timestamp": "11:55 am today",
+    "isRead": false,
+    "priority": "MEDIUM",
+    "createdAt": "2026-08-20T06:25:42.980Z",
+    "candidateName": "wte qe4r",
+    "jobTitle": "Software Engineer"
+  },
+  {
+    "id": "notif-1787033676571-l9kj",
+    "type": "candidate_applied",
+    "title": "Candidate Profile Added",
+    "description": "Candidate sgt sdre was successfully registered by HR.",
+    "timestamp": "11:44 am today",
+    "isRead": false,
+    "priority": "MEDIUM",
+    "createdAt": "2026-08-18T06:14:36.614Z",
+    "candidateName": "sgt sdre",
+    "jobTitle": "Software Engineer"
+  }
+]

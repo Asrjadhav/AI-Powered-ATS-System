@@ -39,6 +39,7 @@ export function normalizeCandidateStatus(status?: string): string {
   if (s === "offer sent" || s === "offer_sent" || s === "offered" || s === "pending offer") return "Offered";
   if (s === "hired" || s === "accepted") return "Hired";
   if (s === "rejected") return "Rejected";
+  if (s === "interview cancelled" || s === "cancelled") return "Interview Cancelled";
   if (s === "talent pool" || s === "talent_pool") return "Talent Pool";
   return status;
 }
@@ -103,7 +104,7 @@ export function isHiredStage(cand: any): boolean {
 export function isRejectedStage(cand: any): boolean {
   if (!cand) return false;
   const norm = normalizeCandidateStatus(cand.status || cand.candidate?.status).toLowerCase();
-  return norm === "rejected";
+  return norm === "rejected" || norm === "interview cancelled" || norm === "cancelled";
 }
 
 export function filterCandidatesByStage(candidates: any[], filterStatus: string, filterToday = false, matchThreshold = DEFAULT_MATCH_THRESHOLD): any[] {

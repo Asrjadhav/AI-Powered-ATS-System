@@ -1,11 +1,36 @@
+# Dependencies & Package Managers
 node_modules/
 venv/
+.pnpm-store/
+
+# Build & Output Directories
 build/
 dist/
 coverage/
+
+# System & OS Files
 .DS_Store
 *.log
-.env*
+
+# Environment & Secret Files (MUST NEVER BE COMMITTED)
+.env
+.env.*
+*.env
+backend/.env
+backend/*.env
+.env.local
+.env.development
+.env.production
 !.env.example
+!backend/.env.example
+
+# Python Cache & Bytecode
 __pycache__/
 *.pyc
+*.pyo
+
+# Runtime Storage, Uploads, & OAuth Tokens
+google_oauth_token.json
+backend/uploads/
+backend/uploads/resumes/
+scratch/

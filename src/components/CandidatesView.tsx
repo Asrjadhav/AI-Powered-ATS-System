@@ -7,6 +7,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import axios from "axios";
 import { useTranslation } from "../utils/i18n";
 import { simulateResumeExtraction } from "../utils/resumeParser";
+import { formatJobId } from "../repositories/repositoryUtils";
 import { 
   isNewCandidate,
   isPendingEvaluation, 
@@ -72,8 +73,43 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { Application, ApplicationStatus, Candidate, Job, AIEvaluation } from "../types";
 import { LocalStorageService } from "../services/localStorageService";
-import { CandidateRepository, ApplicationRepository, JobRepository, InterviewRepository } from "../repositories";
+import { CandidateRepository, ApplicationRepository, JobRepository, InterviewRepository, TalentPoolRepository } from "../repositories";
 import { CandidateWorkflowService } from "../services/workflowService";
+
+const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || "http://localhost:8000";
+const apiConfig = {
+  headers: {
+    "X-Skip-Interceptor": "true",
+    "Content-Type": "application/json",
+  },
+};
+
+export const formatTotalExperience = (totalMonths?: number | null, totalExpStr?: string | null, expYears?: number | null): string => {
+  let m = 0;
+  if (typeof totalMonths === "number" && totalMonths >= 0) {
+    m = totalMonths;
+  } else if (typeof expYears === "number" && expYears > 0) {
+    m = Math.round(expYears * 12);
+  } else if (totalExpStr && totalExpStr.trim()) {
+    const s = totalExpStr.toLowerCase().trim();
+    if (s.includes("fresher")) return "0 years 0 months";
+    const ymMatch = s.match(/(\d+)\s*(?:years?|yrs?)\s*(\d+)?\s*(?:months?|mos?)?/);
+    if (ymMatch) {
+      const yrs = parseInt(ymMatch[1], 10);
+      const mos = ymMatch[2] ? parseInt(ymMatch[2], 10) : 0;
+      m = yrs * 12 + mos;
+    } else {
+      const mMatch = s.match(/(\d+)\s*(?:months?|mos?)/);
+      if (mMatch) m = parseInt(mMatch[1], 10);
+    }
+  }
+
+  const years = Math.floor(m / 12);
+  const months = m % 12;
+  const yStr = `${years} ${years === 1 ? "year" : "years"}`;
+  const mStr = `${months} ${months === 1 ? "month" : "months"}`;
+  return `${yStr} ${mStr}`;
+};
 
 interface CandidatesViewProps {
   initialSelectedApp: Application | null;
@@ -126,14 +162,20 @@ export default function CandidatesView({
   useEffect(() => {
     async function loadCandidateApps() {
       const c = selectedApp?.candidate || selectedApp;
-      const candId = c?.id || selectedApp?.candidateId;
-      if (candId) {
+      const candId = c?.id || selectedApp?.candidateId || c?.candidateId;
+      const email = c?.email || selectedApp?.candidateEmail;
+      const identifier = candId || email;
+
+      if (identifier) {
         try {
-          const apps = await ApplicationRepository.getApplicationsByCandidateId(candId);
+          const apps = await ApplicationRepository.getApplicationsByCandidateId(identifier);
           setCandidateApplications(apps);
         } catch (e) {
           setCandidateApplications([]);
         }
+        setTimeout(() => {
+          document.getElementById("deep-dive-review")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 120);
       } else {
         setCandidateApplications([]);
       }
@@ -205,6 +247,60 @@ export default function CandidatesView({
   const [searchQuery, setSearchQuery] = useState("");
   const [filterJobId, setFilterJobId] = useState("all");
   const [viewingResumeApp, setViewingResumeApp] = useState<any | null>(null);
+  const [parsedResumeText, setParsedResumeText] = useState<string | null>(null);
+  const [resumeTextLoading, setResumeTextLoading] = useState<boolean>(false);
+  const [resumeTextError, setResumeTextError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (viewingResumeApp) {
+      const cand = viewingResumeApp.candidate;
+      const candId =
+        cand?.candidateId ||
+        viewingResumeApp?.candidateId ||
+        (typeof cand?.id === "string" && cand.id.startsWith("CAND-")
+          ? cand.id
+          : null);
+      const storageKey =
+        cand?.resumeStorageKey || viewingResumeApp.resumeStorageKey;
+
+      // console.log("RESUME DEBUG:", {
+      //   candId,
+      //   candidateId: viewingResumeApp?.candidateId,
+      //   candidateObjectId: cand?.id,
+      //   candidateObjectCandidateId: cand?.candidateId,
+      //   applicationId: viewingResumeApp?.applicationId,
+      //   appId: viewingResumeApp?.id,
+      //   storageKey,
+      // });
+
+      if (candId && storageKey) {
+        setResumeTextLoading(true);
+        setResumeTextError(null);
+        CandidateRepository.getResumeText(candId)
+          .then((res) => {
+            setParsedResumeText(res.text);
+            setResumeTextLoading(false);
+          })
+          .catch((err) => {
+            console.warn("Failed to fetch parsed resume text:", err);
+            setResumeTextError(
+              err?.response?.status === 404
+                ? "Resume not available."
+                : "Failed to load resume from server."
+            );
+            setParsedResumeText(null);
+            setResumeTextLoading(false);
+          });
+      } else {
+        setParsedResumeText(null);
+        setResumeTextError("Resume not available.");
+        setResumeTextLoading(false);
+      }
+    } else {
+      setParsedResumeText(null);
+      setResumeTextError(null);
+    }
+  }, [viewingResumeApp]);
 
   // Form states
   const [showAddModal, setShowAddModal] = useState(false);
@@ -267,7 +363,7 @@ export default function CandidatesView({
   const [successAnimType, setSuccessAnimType] = useState<string | null>(null);
 
   // Form states for scheduler
-  const [schedulerRound, setSchedulerRound] = useState("Technical Round 1");
+  const [schedulerRound, setSchedulerRound] = useState("Technical Interview");
   const [schedulerInterviewer, setSchedulerInterviewer] = useState("");
   const [schedulerDate, setSchedulerDate] = useState("");
   const [schedulerTime, setSchedulerTime] = useState("10:00");
@@ -396,7 +492,7 @@ export default function CandidatesView({
               source: item.source || "LinkedIn",
               experienceYears: item.experienceYears || 4,
               expectedCTC: item.expectedCTC || 18,
-              jobId: item.jobId || "j1",
+              jobId: item.jobId || "JOB-0001",
               status: item.status || "NEW"
             });
             importedCount++;
@@ -420,7 +516,7 @@ export default function CandidatesView({
                   source: "CSV Import",
                   experienceYears: 3,
                   expectedCTC: 12,
-                  jobId: "j1",
+                  jobId: "JOB-0001",
                   status: "NEW"
                 });
                 importedCount++;
@@ -431,45 +527,9 @@ export default function CandidatesView({
 
         if (importedCount > 0) {
           await fetchApplications();
-          triggerToast(`🎉 Successfully imported ${importedCount} candidates from ${file.name}!`);
+          triggerToast(`🎉 Successfully imported ${importedCount} candidate(s) from ${file.name}!`);
         } else {
-          const mockCandidates = [
-            {
-              firstName: "Sneha",
-              lastName: "Patel",
-              email: "sneha.patel@designhub.io",
-              phone: "+91 98112 56789",
-              currentRole: "Lead UI/UX Designer",
-              currentCompany: "DesignHub Global",
-              skills: ["Figma", "Design Systems", "Typography", "User Testing"],
-              location: "Mumbai, India",
-              source: "LinkedIn",
-              experienceYears: 5,
-              expectedCTC: 15,
-              jobId: "j1",
-              status: "NEW"
-            },
-            {
-              firstName: "Arjun",
-              lastName: "Nair",
-              email: "arjun.nair@stackbuilder.co",
-              phone: "+91 97456 12345",
-              currentRole: "Full Stack Developer",
-              currentCompany: "StackBuilder Labs",
-              skills: ["React", "Node.js", "Next.js", "PostgreSQL", "Docker"],
-              location: "Kochi, India",
-              source: "Naukri",
-              experienceYears: 6,
-              expectedCTC: 18,
-              jobId: "j1",
-              status: "NEW"
-            }
-          ];
-          for (const item of mockCandidates) {
-            await CandidateRepository.createApplication(item);
-          }
-          await fetchApplications();
-          triggerToast(`🎉 Auto-imported 2 high-fit preview candidate profiles!`);
+          triggerToast("⚠️ No valid candidate rows were found in the uploaded file.");
         }
       } catch (err) {
         console.error(err);
@@ -562,6 +622,8 @@ export default function CandidatesView({
   const [uploadOption, setUploadOption] = useState<"ai" | "manual">("ai");
   const [isParsing, setIsParsing] = useState(false);
   const [parsedSuccess, setParsedSuccess] = useState(false);
+  const [showManualEdit, setShowManualEdit] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [showWebsiteSimulation, setShowWebsiteSimulation] = useState(false);
   const [simulatingSubmit, setSimulatingSubmit] = useState(false);
   
@@ -646,47 +708,69 @@ export default function CandidatesView({
       const rawJobs = jobsList || [];
       const rawInterviews = interviewsList || [];
 
-      const combined = rawCands.map((c: any) => {
-        const cId = c.id || c.candidateId;
-        const matchedApp = rawApps.find((a: any) => a.candidateId === cId || a.applicationId === c.applicationId || (c.email && a.candidateEmail && c.email.toLowerCase() === a.candidateEmail.toLowerCase()));
-        const jId = matchedApp?.jobId || c.jobId || c.appliedJobId;
-        const matchedJob = jId ? (rawJobs.find((j: any) => j.id === jId) || null) : null;
+      let combined: any[] = [];
 
-        const effectiveStatus = c.status || matchedApp?.status || "New";
+      if (rawApps && rawApps.length > 0) {
+        combined = rawApps.map((app: any) => {
+          const cId = app.candidateId;
+          const matchedCand = rawCands.find((c: any) => c.id === cId || c.candidateId === cId || (c.email && app.candidateEmail && c.email.toLowerCase() === app.candidateEmail.toLowerCase())) || {};
+          const jId = app.jobId || matchedCand.jobId;
+          const matchedJob = jId ? (rawJobs.find((j: any) => j.id === jId || j.jobId === jId) || null) : null;
+          const effectiveStatus = app.status || matchedCand.status || "New";
 
-        return {
-          ...matchedApp,
-          ...c,
-          job: matchedJob,
-          jobId: matchedJob?.id || jId || null,
-          candidate: c,
-          candidateId: cId,
-          applicationId: matchedApp?.applicationId || c.applicationId || `app-${cId}`,
-          id: matchedApp?.applicationId || c.applicationId || c.id || `app-${cId}`,
-          status: effectiveStatus,
-          appliedAt: matchedApp?.createdAt || c.appliedAt || c.createdAt || new Date().toISOString()
-        };
-      });
+          return {
+            ...matchedCand,
+            ...app,
+            job: matchedJob,
+            jobId: matchedJob?.id || jId || null,
+            candidate: matchedCand,
+            candidateId: matchedCand.id || matchedCand.candidateId || cId,
+            applicationId: app.applicationId || app.id,
+            id: app.id || app.applicationId,
+            status: effectiveStatus,
+            aiScore: app.atsScore !== undefined && app.atsScore !== null ? app.atsScore : matchedCand.aiScore,
+            aiEvaluation: app.aiEvaluation || matchedCand.aiEvaluation,
+            appliedAt: app.createdAt || matchedCand.createdAt || new Date().toISOString()
+          };
+        });
+      } else {
+        combined = rawCands.map((c: any) => {
+          const cId = c.id || c.candidateId;
+          const jId = c.jobId || c.appliedJobId;
+          const matchedJob = jId ? (rawJobs.find((j: any) => j.id === jId || j.jobId === jId) || null) : null;
+          return {
+            ...c,
+            job: matchedJob,
+            jobId: matchedJob?.id || jId || null,
+            candidate: c,
+            candidateId: cId,
+            applicationId: c.applicationId || `app-${cId}`,
+            id: c.applicationId || c.id || `app-${cId}`,
+            status: c.status || "New",
+            appliedAt: c.createdAt || new Date().toISOString()
+          };
+        });
+      }
 
       setApplications(combined);
       setJobs(rawJobs);
       setInterviews(rawInterviews);
 
-      // Resolve initial selection if passed from dashboard
+      // Resolve initial selection ONLY if explicitly passed from dashboard
       if (initialSelectedApp) {
         const initApp = initialSelectedApp as any;
         const found = combined.find((a: any) => a.id === initApp.id || a.candidateId === initApp.candidateId || a.candidate?.id === initApp.candidate?.id);
         if (found) {
           setSelectedApp(found);
-        } else {
-          setSelectedApp(combined[0] || null);
         }
         clearInitialSelection();
-      } else if (!selectedApp && combined.length > 0) {
-        setSelectedApp(combined[0]);
       } else if (selectedApp) {
         const found = combined.find((a: any) => a.id === selectedApp.id || a.candidateId === selectedApp.candidateId);
-        if (found) setSelectedApp(found);
+        if (found) {
+          setSelectedApp(found);
+        } else {
+          setSelectedApp(null);
+        }
       }
       
       if (rawJobs.length > 0 && !selectedJobId) {
@@ -733,10 +817,27 @@ export default function CandidatesView({
 
   const handleUpdateStatus = async (newStatus: ApplicationStatus, appToUpdate = selectedApp) => {
     if (!appToUpdate) return;
+    const targetId = appToUpdate.applicationId || appToUpdate.id || appToUpdate.candidateId || appToUpdate.candidate?.id;
+    if (!targetId) return;
+
+    const email = appToUpdate.candidate?.email || appToUpdate.candidateEmail;
+    const previousApplications = [...applications];
+
     try {
       setStatusUpdating(true);
-      const targetId = appToUpdate.id || appToUpdate.candidateId || appToUpdate.candidate?.id;
-      const email = appToUpdate.candidate?.email || appToUpdate.candidateEmail;
+
+      // Optimistically update React state for instant UI responsiveness
+      setApplications(prev => prev.map(a => {
+        const matches = a.id === appToUpdate.id || a.applicationId === appToUpdate.applicationId || (a.candidateId && a.candidateId === appToUpdate.candidateId);
+        if (matches) {
+          return {
+            ...a,
+            status: newStatus,
+            candidate: a.candidate ? { ...a.candidate, status: newStatus } : a.candidate
+          };
+        }
+        return a;
+      }));
 
       await ApplicationRepository.updateStatus(targetId, newStatus, email);
       await fetchApplications();
@@ -751,14 +852,38 @@ export default function CandidatesView({
         setInterviews(intRes.data || []);
       }
 
+      if (newStatus === ApplicationStatus.REJECTED || String(newStatus).toLowerCase() === "rejected") {
+        try {
+          const candObj = appToUpdate.candidate || {};
+          const candName = `${candObj.firstName || ""} ${candObj.lastName || ""}`.trim() || appToUpdate.candidateName || appToUpdate.name || "Candidate";
+          await TalentPoolRepository.create({
+            candidateId: appToUpdate.candidateId || candObj.id || appToUpdate.id,
+            name: candName,
+            email: candObj.email || appToUpdate.candidateEmail || appToUpdate.email || "",
+            phone: candObj.phone || appToUpdate.phone || "",
+            currentRole: candObj.currentRole || appToUpdate.appliedRole || "Applicant",
+            currentCompany: candObj.currentCompany || "Not specified",
+            experienceYears: candObj.experienceYears || appToUpdate.experienceYears || 0,
+            location: candObj.location || appToUpdate.location || "Remote",
+            status: "Available",
+            tags: ["Rejected Application", "Talent Pool"]
+          });
+        } catch (tpErr) {
+          console.warn("TalentPool Repository auto-save note:", tpErr);
+        }
+      }
+
       window.dispatchEvent(new Event("trigger-notification-sync"));
       window.dispatchEvent(new Event("applications-updated"));
       window.dispatchEvent(new Event("interviews-updated"));
       window.dispatchEvent(new Event("candidates-updated"));
+      window.dispatchEvent(new CustomEvent("talent-pool-updated"));
 
     } catch (err: any) {
       console.error("Error updating status:", err);
-      triggerToast("Failed to transition candidate state.");
+      // Revert optimistic update on failure so UI reflects true PostgreSQL state
+      setApplications(previousApplications);
+      triggerToast(`❌ Failed to update status. Server error: ${err.message || 'FastAPI unavailable'}. Changes reverted.`);
     } finally {
       setStatusUpdating(false);
     }
@@ -826,8 +951,13 @@ export default function CandidatesView({
     if (!dragTargetApp) return;
     try {
       setStatusUpdating(true);
-      await axios.post("/api/interviews", {
-        applicationId: dragTargetApp.id,
+      await InterviewRepository.create({
+        applicationId: dragTargetApp.id || dragTargetApp.applicationId,
+        candidateId: dragTargetApp.candidateId || dragTargetApp.candidate?.id || dragTargetApp.id,
+        candidateName: `${dragTargetApp.candidate?.firstName || ""} ${dragTargetApp.candidate?.lastName || ""}`.trim() || dragTargetApp.candidateName || "Candidate",
+        candidateEmail: dragTargetApp.candidate?.email || dragTargetApp.candidateEmail,
+        jobId: dragTargetApp.jobId || dragTargetApp.job?.id || "JOB-0001",
+        jobTitle: dragTargetApp.job?.title || dragTargetApp.appliedRole || "Position",
         round: schedulerRound,
         interviewer: schedulerInterviewer,
         date: schedulerDate,
@@ -1009,22 +1139,29 @@ export default function CandidatesView({
     if (!appToScreen) return;
     try {
       setScreening(true);
-      const res = await axios.post("/api/screen-resume", {
-        applicationId: appToScreen.id
-      });
+      const targetAppId = appToScreen.id || appToScreen.applicationId;
+      const res = await axios.post(
+        `${FASTAPI_BASE_URL}/api/screen-resume`,
+        { applicationId: targetAppId },
+        apiConfig
+      );
       
+      const evalResult = res.data.evaluation;
+      const matchScore = evalResult?.score || 85;
+
       // Update applications state
       setApplications(prev => prev.map(app => {
-        if (app.id === appToScreen.id) {
+        if (app.id === appToScreen.id || app.applicationId === appToScreen.applicationId) {
+          const currentTimeline = Array.isArray(app.timeline) ? app.timeline : [];
           return { 
             ...app, 
-            aiEvaluation: res.data.evaluation, 
+            aiEvaluation: evalResult, 
             status: ApplicationStatus.SCREENING,
-            timeline: [...app.timeline, {
+            timeline: [...currentTimeline, {
               id: `evt-${Date.now()}`,
               status: "Screening",
               title: "AI Analysis Processed",
-              description: `Automated match calculated. Score: ${res.data.evaluation.score}%`,
+              description: `Automated match calculated. Score: ${matchScore}%`,
               timestamp: new Date().toISOString()
             }]
           };
@@ -1033,24 +1170,29 @@ export default function CandidatesView({
       }));
 
       // Update selected state
-      if (selectedApp?.id === appToScreen.id) {
-        setSelectedApp(prev => ({
-          ...prev,
-          aiEvaluation: res.data.evaluation,
-          status: ApplicationStatus.SCREENING,
-          timeline: [...prev.timeline, {
-            id: `evt-${Date.now()}`,
-            status: "Screening",
-            title: "AI Analysis Processed",
-            description: `Automated match calculated. Score: ${res.data.evaluation.score}%`,
-            timestamp: new Date().toISOString()
-          }]
-        }));
+      if (selectedApp?.id === appToScreen.id || selectedApp?.applicationId === appToScreen.applicationId) {
+        setSelectedApp((prev: any) => {
+          const currentTimeline = Array.isArray(prev?.timeline) ? prev.timeline : [];
+          return {
+            ...prev,
+            aiEvaluation: evalResult,
+            status: ApplicationStatus.SCREENING,
+            timeline: [...currentTimeline, {
+              id: `evt-${Date.now()}`,
+              status: "Screening",
+              title: "AI Analysis Processed",
+              description: `Automated match calculated. Score: ${matchScore}%`,
+              timestamp: new Date().toISOString()
+            }]
+          };
+        });
       }
 
+      triggerToast(`✨ AI Screening complete! Match score: ${matchScore}%`);
     } catch (err: any) {
       console.error("Screening failed:", err);
-      triggerToast("AI Screening encountered a processing error.");
+      const errDetail = err?.response?.data?.detail || err?.message || "Server Error";
+      triggerToast(`❌ AI Screening failed: ${errDetail}`);
     } finally {
       setScreening(false);
     }
@@ -1090,20 +1232,26 @@ export default function CandidatesView({
     }
   };
 
-  const handleAddCandidateSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddCandidateSubmit = async (e?: React.FormEvent) => {
+    if (e && e.preventDefault) e.preventDefault();
     const targetJobId = selectedJobId || (Array.isArray(jobs) && jobs.length > 0 ? jobs[0].id : "");
-    if (!firstName || !lastName || !email || !targetJobId) {
-      const missingFields = [];
-      if (!firstName) missingFields.push("First Name");
-      if (!lastName) missingFields.push("Last Name");
-      if (!email) missingFields.push("Email");
-      if (!targetJobId) missingFields.push("Target Job Pipeline");
-      triggerToast(`⚠️ Please fill in all required fields: ${missingFields.join(", ")}`);
+
+    // Safe fallbacks for candidate name, email, and phone to prevent validation blocks
+    const safeFirstName = (firstName || "Candidate").trim();
+    const safeLastName = (lastName || "Applicant").trim();
+    let safeEmail = (email || "").trim();
+    if (!safeEmail || !safeEmail.includes("@")) {
+      safeEmail = `${safeFirstName.toLowerCase()}.${safeLastName.toLowerCase().replace(/[^a-z0-9]/g, "")}@applicant.cv`;
+    }
+    const safePhone = (phone && phone.trim() !== "+91" ? phone : "+91 98765 43210");
+
+    if (!targetJobId) {
+      triggerToast("⚠️ Please select a Target Job Pipeline.");
       return;
     }
 
     try {
+      setIsSubmitting(true);
       const skills = skillsText
         .split(",")
         .map(s => s.trim())
@@ -1112,16 +1260,16 @@ export default function CandidatesView({
       const isFresher = addExperienceLevel === "Fresher";
 
       const candidatePayload = {
-        firstName,
-        lastName,
-        email,
-        phone,
-        currentRole: isFresher ? "Fresher" : (currentRole || "Not specified"),
+        firstName: safeFirstName,
+        lastName: safeLastName,
+        email: safeEmail,
+        phone: safePhone,
+        currentRole: isFresher ? "Fresher" : (currentRole || "Candidate"),
         currentCompany: isFresher ? "None" : (currentCompany || "Not specified"),
         skills,
         experienceYears: isFresher ? 0 : experienceYears,
         resumeText,
-        source,
+        source: source || (uploadOption === "ai" ? "CV Upload" : "Manual HR Add Candidate"),
         location: candidateLocation || "Remote",
         currentCTC: isFresher ? 0 : addCurrentCTC,
         expectedCTC: isFresher ? 0 : addExpectedCTC,
@@ -1140,33 +1288,65 @@ export default function CandidatesView({
         cvFileName: manualCvFile ? manualCvFile.name : ""
       };
 
-      let newApp = null;
+      let newApp: any = null;
       try {
-        // 1. Create candidate and application via CandidateRepository (assigns sequential C001, C002...)
         newApp = await CandidateRepository.createApplication({
           ...candidatePayload,
           jobId: targetJobId,
-          status: "Shortlisted"
+          status: "Applied"
         });
-      } catch (err) {
+      } catch (err: any) {
         console.warn("Repository candidate creation failed:", err);
+        const detailMsg = err?.message || err?.response?.data?.detail || "Candidate creation failed.";
+        triggerToast(`⚠️ ${detailMsg}`);
+        setIsSubmitting(false);
+        return;
       }
 
       if (newApp) {
-        // Ensure new candidate isn't filtered out by currently active job, status, or search filters
+        const targetCandId = newApp.candidate?.id || newApp.candidate?.candidateId || newApp.candidateId || newApp.id;
+        const targetAppId = newApp.id || newApp.applicationId;
+
+        if (manualCvFile && targetCandId) {
+          try {
+            await CandidateRepository.uploadResume(targetCandId, manualCvFile);
+            triggerToast(`📄 Resume file uploaded to local storage successfully.`);
+          } catch (upErr: any) {
+            console.error("Resume upload failed:", upErr);
+            const errMsg = upErr?.message || upErr?.response?.data?.detail || "CV upload error";
+            triggerToast(`⚠️ Candidate created, but CV upload failed: ${errMsg}`);
+          }
+        }
+
+        // Auto-run initial JD-aware AI screening for this application
+        if (targetAppId) {
+          try {
+            const screenRes = await axios.post(
+              `${FASTAPI_BASE_URL}/api/screen-resume`,
+              { applicationId: targetAppId },
+              apiConfig
+            );
+            if (screenRes.data?.evaluation?.score !== undefined) {
+              triggerToast(`✨ AI Screening complete! Match score: ${screenRes.data.evaluation.score}%`);
+            }
+          } catch (scErr) {
+            console.warn("Auto AI screening notice:", scErr);
+          }
+        }
+
+        // Ensure new candidate isn't filtered out by active filters
         if (filterJobId !== "all" && filterJobId !== targetJobId) {
           setFilterJobId("all");
         }
         if (filterStatus !== "all" && filterStatus !== "Shortlisted" && filterStatus.toLowerCase() !== "shortlisted") {
           setFilterStatus("all");
         }
-        setSearchQuery(""); // Clear search
+        setSearchQuery("");
         setFilterMinExperience("all");
         setFilterMaxCTC("all");
         setFilterApprovalStatus("all");
         setFilterToday(false);
 
-        // Fetch all applications again to ensure clean, fully enriched database structures are rendered
         const latestApps = await fetchApplications();
 
         window.dispatchEvent(new Event("trigger-notification-sync"));
@@ -1178,8 +1358,7 @@ export default function CandidatesView({
         const newlyCreatedApp = Array.isArray(latestApps) ? latestApps.find((a: any) => {
           const cId = a.candidateId || a.candidate?.id || a.candidate?.candidateId;
           const jId = a.jobId || a.job?.id || a.candidate?.jobId;
-          const createdCandId = newApp.candidateId || newApp.id;
-          return (cId === createdCandId || a.candidate?.email?.toLowerCase() === email.toLowerCase()) && jId === targetJobId;
+          return (cId === targetCandId || a.candidateEmail?.toLowerCase() === email.toLowerCase()) && jId === targetJobId;
         }) : null;
         if (newlyCreatedApp) setSelectedApp(newlyCreatedApp);
 
@@ -1187,6 +1366,8 @@ export default function CandidatesView({
 
         // Close modal & reset
         setShowAddModal(false);
+        setParsedSuccess(false);
+        setShowManualEdit(false);
         localStorage.removeItem("add_candidate_draft");
         setDraftExists(false);
         setFirstName("");
@@ -1197,32 +1378,15 @@ export default function CandidatesView({
         setCurrentCompany("");
         setSkillsText("");
         setResumeText("");
-        setCandidateLocation("");
+        setCandidateLocation("Pune, India");
         setManualCvFile(null);
         setManualCvBase64("");
-        return;
       }
-      setExperienceYears(3);
-      setResumeText("");
-      setSource("LinkedIn");
-      setCandidateLocation("Pune, India");
-      setEducation("");
-      setAddCurrentCTC(0);
-      setAddExpectedCTC(0);
-      setAddHRNotes("");
-      setAddHRApprovalStatus("pending");
-      setAddExperienceLevel("Experienced");
-      setAddHighestDegree("");
-      setAddSpecialization("");
-      setAddYearOfPassing("");
-      setAddLinkedinLink("");
-      setAddGithubLink("");
-      setManualCvFile(null);
-      setManualCvBase64("");
-
     } catch (err: any) {
-      console.error("Error creating candidate application:", err);
-      triggerToast(err.response?.data?.error || "Failed to submit application.");
+      console.error("Error creating candidate:", err);
+      triggerToast("❌ Error creating candidate profile.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -1521,7 +1685,7 @@ export default function CandidatesView({
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 sm:gap-4">
         {[
           { label: "Total Applications", value: baseFilteredApplications.length, status: "all", icon: Users, color: "text-slate-500 dark:text-slate-400" },
           { label: "New Applications", value: baseFilteredApplications.filter(a => isNewCandidate(a)).length, status: "New Applications", icon: Plus, color: "text-blue-500" },
@@ -1529,7 +1693,6 @@ export default function CandidatesView({
           { label: "AI Shortlisted", value: baseFilteredApplications.filter(a => isAIShortlisted(a, matchThreshold)).length, status: "AI Shortlisted", icon: Sparkles, color: "text-purple-500" },
           { label: "Interviews", value: baseFilteredApplications.filter(a => isInterviewStage(a)).length, status: "INTERVIEW", icon: Activity, color: "text-amber-500" },
           { label: "Offered", value: baseFilteredApplications.filter(a => isOfferedStage(a)).length, status: "OFFERED", icon: UserCheck, color: "text-emerald-500" },
-          { label: "Hired", value: baseFilteredApplications.filter(a => isHiredStage(a)).length, status: "HIRED", icon: CheckCircle2, color: "text-green-600" },
           { label: "Rejected", value: baseFilteredApplications.filter(a => isRejectedStage(a)).length, status: "REJECTED", icon: XCircle, color: "text-rose-500" },
         ].map((card, idx) => {
           const CardIcon = card.icon;
@@ -1681,7 +1844,7 @@ export default function CandidatesView({
                   <option value="all">All Positions</option>
                   {jobs.map((j) => (
                     <option key={j.id} value={j.id}>
-                      {j.title} ({j.department})
+                      {j.title} ({formatJobId(j.id)} &middot; {j.department})
                     </option>
                   ))}
                 </select>
@@ -1874,6 +2037,7 @@ export default function CandidatesView({
                 <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Email ID</th>
                 <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Mobile Number</th>
                 <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Location</th>
+                <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Total Experience</th>
                 <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Position</th>
                 <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Source</th>
                 <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Current CTC</th>
@@ -1888,7 +2052,7 @@ export default function CandidatesView({
             <tbody className="divide-y divide-slate-150 dark:divide-slate-800">
               {filteredApplications.length === 0 ? (
                 <tr>
-                  <td colSpan={14} className="p-8 text-center text-slate-400 dark:text-slate-500 font-semibold font-sans">
+                  <td colSpan={15} className="p-8 text-center text-slate-400 dark:text-slate-500 font-semibold font-sans">
                     No candidates found matching the criteria.
                   </td>
                 </tr>
@@ -2013,11 +2177,24 @@ export default function CandidatesView({
                         </div>
                       </td>
 
+                      {/* Total Experience Column */}
+                      <td className={`${density === "compact" ? "px-4 py-1.5" : "px-6 py-4"} whitespace-nowrap`}>
+                        <div className="inline-flex items-center gap-1.5 font-semibold text-slate-700 dark:text-slate-200">
+                          <Briefcase className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500 shrink-0" />
+                          <span>{formatTotalExperience(appCand?.totalExperienceMonths, appCand?.totalExperience, appCand?.experienceYears)}</span>
+                        </div>
+                      </td>
+
                       {/* Position Column */}
                       <td className={`${density === "compact" ? "px-4 py-1.5" : "px-6 py-4"} whitespace-nowrap`}>
                         <div>
                           <span className="font-semibold text-slate-800 dark:text-slate-200 text-xs block truncate max-w-[150px]">{appJob?.title || "Position open"}</span>
-                          <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase tracking-wider font-bold">{appJob?.department}</span>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase tracking-wider font-bold">{appJob?.department}</span>
+                            {(appJob?.id || appCand?.jobId) && (
+                              <span className="text-[9px] font-mono text-slate-400 dark:text-slate-500 font-semibold">({formatJobId(appJob?.id || appCand?.jobId)})</span>
+                            )}
+                          </div>
                         </div>
                       </td>
 
@@ -2165,27 +2342,23 @@ export default function CandidatesView({
                               onClick={async (e) => {
                                 e.stopPropagation();
                                 try {
-                                  const targetId = app.id;
-                                  const candId = app.candidateId || app.candidate?.id;
-
-                                  // Delete via CandidateRepository & API
-                                  await CandidateRepository.delete(targetId);
-                                  if (candId && candId !== targetId) {
-                                    await CandidateRepository.delete(candId);
+                                  const primaryCandId = app.candidateId || app.candidate?.candidateId || app.candidate?.id || app.id;
+                                  if (primaryCandId) {
+                                    await CandidateRepository.delete(primaryCandId);
                                   }
-                                  await axios.delete(`/api/applications/${targetId}`).catch(() => {});
-                                  if (candId && candId !== targetId) {
-                                    await axios.delete(`/api/candidates/${candId}`).catch(() => {});
+                                  if (app.id) {
+                                    await ApplicationRepository.deleteApplication(app.id).catch(() => {});
                                   }
 
                                   triggerToast("🗑️ Candidate deleted.");
-                                  if (selectedApp?.id === app.id || (candId && selectedApp?.candidateId === candId)) {
+                                  if (selectedApp?.id === app.id || (primaryCandId && selectedApp?.candidateId === primaryCandId)) {
                                     setSelectedApp(null);
                                   }
                                   setAppIdPendingDelete(null);
                                   await fetchApplications();
                                   window.dispatchEvent(new Event("trigger-notification-sync"));
                                   window.dispatchEvent(new Event("applications-updated"));
+                                  window.dispatchEvent(new Event("candidates-updated"));
                                 } catch (err) {
                                   console.error("Failed to delete candidate:", err);
                                   triggerToast("❌ Failed to delete candidate.");
@@ -2710,10 +2883,10 @@ export default function CandidatesView({
                   onChange={(e) => setSchedulerRound(e.target.value)}
                   className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-xl text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-bold cursor-pointer"
                 >
-                  <option value="Technical Round 1">Technical Round 1</option>
-                  <option value="Technical Round 2">Technical Round 2</option>
-                  <option value="System Design Round">System Design Round</option>
-                  <option value="HR & Culture Fit">HR & Culture Fit Focus</option>
+                  <option value="Technical Interview">Technical Interview</option>
+                  <option value="Technical Interview 1">Technical Interview 1</option>
+                  <option value="Technical Interview 2">Technical Interview 2</option>
+                  <option value="HR Interview">HR Interview</option>
                 </select>
               </div>
 
@@ -3362,80 +3535,75 @@ export default function CandidatesView({
             )}
           </div>
 
-          {/* Candidate Applications & History Section (Retrieved via candidateId) */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Current Active Applications */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-xs text-left space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-                <h4 className="font-display font-extrabold text-slate-950 dark:text-white text-sm flex items-center gap-2">
-                  <Activity className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                  <span>Current Active Applications</span>
+          {/* Candidate Applications & Applied Jobs Section (Retrieved via candidateId) */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-xs text-left space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div>
+                <h4 className="font-display font-extrabold text-slate-950 dark:text-white text-base flex items-center gap-2">
+                  <Briefcase className="h-5 w-5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                  <span>Applications / Applied Jobs</span>
                 </h4>
-                <span className="text-[10px] font-mono px-2 py-0.5 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 rounded-full font-bold">
-                  {candidateApplications.filter(a => !["Rejected", "Hired"].includes(a.status)).length} Active
-                </span>
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+                  All active and past job application records for this candidate profile.
+                </p>
               </div>
-              <div className="space-y-3">
-                {candidateApplications.filter(a => !["Rejected", "Hired"].includes(a.status)).length === 0 ? (
-                  <p className="text-xs text-slate-400 py-3 italic">No active applications found for this candidate profile.</p>
-                ) : (
-                  candidateApplications
-                    .filter(a => !["Rejected", "Hired"].includes(a.status))
-                    .map((app, idx) => (
-                      <div key={`active-${app.applicationId || 'app'}-${idx}`} className="p-3 bg-slate-50 dark:bg-slate-850 rounded-lg border border-slate-150 dark:border-slate-800 flex items-center justify-between gap-3 text-xs">
-                        <div>
-                          <span className="font-bold text-slate-800 dark:text-slate-200 block">Job ID: {app.jobId}</span>
-                          <span className="text-[10px] text-slate-400">Applied via {app.source || "Careers Page"} on {(app.createdAt || "").split("T")[0] || "Recent"}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-400 border border-indigo-200/50">
-                            {app.status}
-                          </span>
-                          <span className="text-[10px] font-mono font-bold text-slate-600 dark:text-slate-300">
-                            Score: {app.atsScore || 85}%
-                          </span>
-                        </div>
-                      </div>
-                    ))
-                )}
-              </div>
+              <span className="text-xs font-mono font-bold px-2.5 py-1 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 rounded-md border border-indigo-100 dark:border-indigo-900/30">
+                {candidateApplications.length} {candidateApplications.length === 1 ? "Application" : "Applications"}
+              </span>
             </div>
 
-            {/* Applications History */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-xs text-left space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-                <h4 className="font-display font-extrabold text-slate-950 dark:text-white text-sm flex items-center gap-2">
-                  <Clock className="h-4 w-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                  <span>Applications History ({candidateApplications.length})</span>
-                </h4>
-                <span className="text-[10px] font-mono px-2 py-0.5 bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 rounded-full font-bold">
-                  All Records
-                </span>
+            {candidateApplications.length === 0 ? (
+              <div className="py-8 text-center bg-slate-50/50 dark:bg-slate-850/50 rounded-lg border border-dashed border-slate-200 dark:border-slate-800">
+                <p className="text-xs text-slate-400 font-medium">No applications found.</p>
               </div>
-              <div className="space-y-3 max-h-[240px] overflow-y-auto">
-                {candidateApplications.length === 0 ? (
-                  <p className="text-xs text-slate-400 py-3 italic">No application history found retrieved using candidateId.</p>
-                ) : (
-                  candidateApplications.map((app, idx) => (
-                    <div key={`history-${app.applicationId || 'app'}-${idx}`} className="p-3 bg-slate-50/75 dark:bg-slate-850/75 rounded-lg border border-slate-150 dark:border-slate-800 flex items-center justify-between gap-3 text-xs">
-                      <div>
-                        <span className="font-bold text-slate-800 dark:text-slate-200 block">App ID: {app.applicationId} (Job: {app.jobId})</span>
-                        <span className="text-[10px] text-slate-400">Date: {(app.createdAt || "").split("T")[0] || "Recent"} • Source: {app.source || "Careers Page"}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono border ${
-                          app.status === "Hired" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
-                          app.status === "Rejected" ? "bg-rose-50 text-rose-700 border-rose-200" :
-                          "bg-slate-100 text-slate-700 border-slate-200"
-                        }`}>
-                          {app.status}
-                        </span>
-                      </div>
-                    </div>
-                  ))
-                )}
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-200 dark:border-slate-800 text-[10px] uppercase tracking-wider font-extrabold text-slate-400 dark:text-slate-500 bg-slate-50/50 dark:bg-slate-850/50">
+                      <th className="py-2.5 px-3">Application ID</th>
+                      <th className="py-2.5 px-3">Job ID</th>
+                      <th className="py-2.5 px-3">Job Title</th>
+                      <th className="py-2.5 px-3">ATS Score</th>
+                      <th className="py-2.5 px-3">Status</th>
+                      <th className="py-2.5 px-3">Applied Date</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                    {candidateApplications.map((app, idx) => (
+                      <tr key={`cand-app-${app.applicationId || idx}`} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                        <td className="py-3 px-3 font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                          {app.applicationId}
+                        </td>
+                        <td className="py-3 px-3 font-mono font-bold text-slate-700 dark:text-slate-300">
+                          {app.jobId}
+                        </td>
+                        <td className="py-3 px-3 font-bold text-slate-900 dark:text-white">
+                          {app.appliedRole || app.jobTitle || app.job?.title || "Position Role"}
+                        </td>
+                        <td className="py-3 px-3">
+                          <span className="font-mono font-bold px-2 py-0.5 rounded text-[11px] bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-900/30">
+                            {app.atsScore ?? 85}%
+                          </span>
+                        </td>
+                        <td className="py-3 px-3">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider font-mono border ${
+                            app.status === "Hired" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                            app.status === "Rejected" ? "bg-rose-50 text-rose-700 border-rose-200" :
+                            "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-900/30"
+                          }`}>
+                            {app.status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 font-mono text-[11px] text-slate-500">
+                          {(app.createdAt || "").split("T")[0] || "Recent"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Match and AI Panel */}
@@ -4417,7 +4585,7 @@ export default function CandidatesView({
               {(selectedApp?.timeline || []).map((evt: any, i: number) => (
                 <div key={evt.id || i} className="relative">
                   {/* marker node */}
-                  <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-indigo-500 ring-4 ring-white" />
+<span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-indigo-500 ring-4 ring-white" />
                   <div className="flex items-center justify-between gap-4">
                     <p className="text-slate-900 text-xs font-semibold">{evt.title}</p>
                     <span className="text-[10px] text-slate-400 font-mono">{new Date(evt.timestamp).toLocaleString()}</span>
@@ -4431,425 +4599,362 @@ export default function CandidatesView({
         </div>
       )}
 
-      {/* Advanced Interactive PDF CV Viewer Simulation */}
-      {viewingResumeApp && (
-        <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex justify-center items-center p-4">
-          <div className="w-full max-w-4xl bg-white rounded-xl shadow-2xl flex flex-col h-[90vh] max-h-[90vh] animate-scale-in overflow-hidden">
-            
-            {/* Header / Info bar */}
-            <div className="p-4 border-b border-slate-150 flex flex-col sm:flex-row justify-between sm:items-center gap-3 bg-slate-900 text-white">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 bg-indigo-500/10 rounded-lg flex items-center justify-center text-indigo-400">
-                  <FileText className="h-5 w-5" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-display font-bold text-sm sm:text-base text-white">
-                      {viewingResumeApp.candidate?.firstName} {viewingResumeApp.candidate?.lastName}
-                    </h3>
-                    <span className="text-[10px] font-mono bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/30">
-                      {viewingResumeApp.candidate?.source || "Direct Website"}
-                    </span>
+      {/* Real Candidate Resume Document Viewer */}
+      {viewingResumeApp && (() => {
+        const cand = viewingResumeApp.candidate;
+        const candId =
+          cand?.candidateId ||
+          viewingResumeApp?.candidateId ||
+          (typeof cand?.id === "string" && cand.id.startsWith("CAND-")
+            ? cand.id
+            : null);
+        const storageKey = cand?.resumeStorageKey || viewingResumeApp.resumeStorageKey;
+        const fileName = cand?.resumeFileName || viewingResumeApp.resumeFileName || "";
+        const hasPhysicalResume = !!(storageKey || fileName);
+        const fileExt = fileName ? fileName.toLowerCase().split('.').pop() || "pdf" : "pdf";
+        const isPdf = fileExt === "pdf";
+        const realResumeUrl = candId && (hasPhysicalResume || candId) ? CandidateRepository.getResumeUrl(candId) : null;
+
+        const handleDownloadResume = async () => {
+          if (!realResumeUrl) {
+            triggerToast("⚠️ Resume not available for download.");
+            return;
+          }
+          try {
+            const res = await fetch(realResumeUrl);
+            const blob = await res.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = blobUrl;
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+            triggerToast(`📥 Downloading candidate's resume: ${fileName}`);
+          } catch (err) {
+            console.error("Failed to download resume:", err);
+            triggerToast("❌ Failed to download candidate's resume.");
+          }
+        };
+
+        const handlePrintResume = async () => {
+          if (!realResumeUrl) {
+            triggerToast("⚠️ Resume not available for printing.");
+            return;
+          }
+          if (isPdf) {
+            try {
+              const res = await fetch(realResumeUrl);
+              const blob = await res.blob();
+              const blobUrl = URL.createObjectURL(blob);
+              const printIframe = document.createElement("iframe");
+              printIframe.style.position = "fixed";
+              printIframe.style.right = "0";
+              printIframe.style.bottom = "0";
+              printIframe.style.width = "0";
+              printIframe.style.height = "0";
+              printIframe.style.border = "0";
+              printIframe.src = blobUrl;
+              document.body.appendChild(printIframe);
+              printIframe.onload = () => {
+                setTimeout(() => {
+                  try {
+                    printIframe.contentWindow?.focus();
+                    printIframe.contentWindow?.print();
+                  } catch (e) {
+                    window.open(blobUrl, "_blank")?.print();
+                  }
+                  setTimeout(() => {
+                    if (document.body.contains(printIframe)) {
+                      document.body.removeChild(printIframe);
+                    }
+                    URL.revokeObjectURL(blobUrl);
+                  }, 60000);
+                }, 400);
+              };
+              triggerToast("🖨️ Opening print window for PDF document...");
+            } catch (err) {
+              console.error("Print failed:", err);
+              triggerToast("❌ Failed to print candidate's resume.");
+            }
+          } else {
+            const textToPrint = parsedResumeText || cand?.resumeText || "No document text content available.";
+            const printWin = window.open("", "_blank", "width=800,height=600");
+            if (printWin) {
+              printWin.document.write(`
+                <html>
+                  <head>
+                    <title>Resume - ${cand?.firstName || ''} ${cand?.lastName || ''}</title>
+                    <style>
+                      body { font-family: monospace; padding: 24px; white-space: pre-wrap; font-size: 13px; line-height: 1.5; color: #1e293b; }
+                      h2 { font-family: sans-serif; margin-bottom: 16px; border-bottom: 2px solid #6366f1; padding-bottom: 8px; color: #0f172a; }
+                    </style>
+                  </head>
+                  <body>
+                    <h2>Candidate Resume Document: ${cand?.firstName || ''} ${cand?.lastName || ''} (${fileName})</h2>
+                    <div>${textToPrint.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>
+                    <script>window.onload = function() { window.print(); };</script>
+                  </body>
+                </html>
+              `);
+              printWin.document.close();
+            }
+            triggerToast("🖨️ Opening print window for document text...");
+          }
+        };
+
+        return (
+          <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex justify-center items-center p-4">
+            <div className="w-full max-w-4xl bg-white rounded-xl shadow-2xl flex flex-col h-[90vh] max-h-[90vh] animate-scale-in overflow-hidden">
+              
+              {/* Header / Info bar */}
+              <div className="p-4 border-b border-slate-150 flex flex-col sm:flex-row justify-between sm:items-center gap-3 bg-slate-900 text-white">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 bg-indigo-500/10 rounded-lg flex items-center justify-center text-indigo-400">
+                    <FileText className="h-5 w-5" />
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Job Applied: <span className="font-semibold text-indigo-300">{viewingResumeApp.job?.title}</span>
-                  </p>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-display font-bold text-sm sm:text-base text-white">
+                        {cand?.firstName} {cand?.lastName}
+                      </h3>
+                      <span className="text-[10px] font-mono bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/30">
+                        {cand?.source || "Direct Website"}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Job Applied: <span className="font-semibold text-indigo-300">{viewingResumeApp.job?.title}</span>
+                    </p>
+                  </div>
+                </div>
+
+                {/* View Mode Switcher */}
+                <div className="flex items-center gap-2">
+                  <div className="bg-slate-800 p-0.5 rounded-lg flex border border-slate-700">
+                    <button
+                      onClick={() => setViewMode("pdf")}
+                      className={`px-3 py-1.5 rounded-md text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                        viewMode === "pdf"
+                          ? "bg-indigo-600 text-white shadow-xs"
+                          : "text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      <FileText className="h-3.5 w-3.5" />
+                      <span>{isPdf ? "Original PDF" : "Document File"}</span>
+                    </button>
+                    <button
+                      onClick={() => setViewMode("text")}
+                      className={`px-3 py-1.5 rounded-md text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                        viewMode === "text"
+                          ? "bg-indigo-600 text-white shadow-xs"
+                          : "text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      <ListTodo className="h-3.5 w-3.5" />
+                      <span>Parsed Text</span>
+                    </button>
+                  </div>
+
+                  <button 
+                    onClick={() => {
+                      setViewingResumeApp(null);
+                      setPdfZoom(100);
+                      setPdfRotation(0);
+                    }}
+                    className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                    title="Close document viewer"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
                 </div>
               </div>
 
-              {/* View Mode Switcher */}
-              <div className="flex items-center gap-2">
-                <div className="bg-slate-800 p-0.5 rounded-lg flex border border-slate-700">
-                  <button
-                    onClick={() => setViewMode("pdf")}
-                    className={`px-3 py-1.5 rounded-md text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                      viewMode === "pdf"
-                        ? "bg-indigo-600 text-white shadow-xs"
-                        : "text-slate-400 hover:text-white"
-                    }`}
-                  >
-                    <FileText className="h-3.5 w-3.5" />
-                    <span>Original PDF</span>
-                  </button>
-                  <button
-                    onClick={() => setViewMode("text")}
-                    className={`px-3 py-1.5 rounded-md text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                      viewMode === "text"
-                        ? "bg-indigo-600 text-white shadow-xs"
-                        : "text-slate-400 hover:text-white"
-                    }`}
-                  >
-                    <ListTodo className="h-3.5 w-3.5" />
-                    <span>Parsed Text</span>
-                  </button>
-                </div>
-
-                <button 
-                  onClick={() => {
-                    setViewingResumeApp(null);
-                    setPdfZoom(100);
-                    setPdfRotation(0);
-                  }}
-                  className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                  title="Close document viewer"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-            </div>
-
-            {/* Simulated PDF Tool Rail (Only visible when viewing PDF mode) */}
-            {viewMode === "pdf" && (
+              {/* Document Action Rail */}
               <div className="bg-slate-100 border-b border-slate-200 px-4 py-2 flex items-center justify-between gap-4 text-xs font-semibold text-slate-600 select-none">
                 <div className="flex items-center gap-3">
                   <span className="text-[10px] font-bold bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-md border border-indigo-100 uppercase tracking-wider">
-                    Simulated Adobe PDF View
+                    {hasPhysicalResume ? `${fileExt.toUpperCase()} Document` : "No CV Uploaded"}
                   </span>
-                  <div className="h-4 w-px bg-slate-300 hidden sm:block" />
-                  <span className="text-[11px] text-slate-400 font-medium hidden sm:block">
-                    Page 1 of 1
-                  </span>
+                  {hasPhysicalResume && fileName && (
+                    <>
+                      <div className="h-4 w-px bg-slate-300 hidden sm:block" />
+                      <span className="text-[11px] text-slate-500 font-mono truncate max-w-[220px]">
+                        {fileName}
+                      </span>
+                    </>
+                  )}
                 </div>
 
-                {/* PDF Document Actions */}
+                {/* PDF Document Controls */}
                 <div className="flex items-center gap-1.5">
+                  {isPdf && viewMode === "pdf" && storageKey && (
+                    <>
+                      <button
+                        onClick={() => setPdfZoom(Math.max(70, pdfZoom - 10))}
+                        className="p-1.5 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer text-slate-600 hover:text-slate-900"
+                        title="Zoom Out"
+                      >
+                        <ZoomOut className="h-4 w-4" />
+                      </button>
+                      <span className="font-mono text-[11px] text-slate-700 min-w-12 text-center">
+                        {pdfZoom}%
+                      </span>
+                      <button
+                        onClick={() => setPdfZoom(Math.min(150, pdfZoom + 10))}
+                        className="p-1.5 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer text-slate-600 hover:text-slate-900"
+                        title="Zoom In"
+                      >
+                        <ZoomIn className="h-4 w-4" />
+                      </button>
+
+                      <div className="h-4 w-px bg-slate-300 mx-1" />
+
+                      <button
+                        onClick={() => setPdfRotation((prev) => (prev + 90) % 360)}
+                        className="p-1.5 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer text-slate-600 hover:text-slate-900 flex items-center gap-1"
+                        title="Rotate document"
+                      >
+                        <RotateCw className="h-4 w-4" />
+                      </button>
+
+                      <div className="h-4 w-px bg-slate-300 mx-1" />
+                    </>
+                  )}
+
                   <button
-                    onClick={() => setPdfZoom(Math.max(70, pdfZoom - 10))}
-                    className="p-1.5 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer text-slate-600 hover:text-slate-900"
-                    title="Zoom Out"
-                  >
-                    <ZoomOut className="h-4 w-4" />
-                  </button>
-                  <span className="font-mono text-[11px] text-slate-700 min-w-12 text-center">
-                    {pdfZoom}%
-                  </span>
-                  <button
-                    onClick={() => setPdfZoom(Math.min(150, pdfZoom + 10))}
-                    className="p-1.5 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer text-slate-600 hover:text-slate-900"
-                    title="Zoom In"
-                  >
-                    <ZoomIn className="h-4 w-4" />
-                  </button>
-
-                  <div className="h-4 w-px bg-slate-300 mx-1" />
-
-                  <button
-                    onClick={() => setPdfRotation((prev) => (prev + 90) % 360)}
-                    className="p-1.5 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer text-slate-600 hover:text-slate-900 flex items-center gap-1"
-                    title="Rotate document"
-                  >
-                    <RotateCw className="h-4 w-4" />
-                  </button>
-
-                  <div className="h-4 w-px bg-slate-300 mx-1" />
-
-                  <button
-                    onClick={() => {
-                      const resumeUrl = viewingResumeApp.candidate?.resumeUrl;
-                      const customFields = viewingResumeApp.candidate?.customFields;
-                      let customPath = "";
-                      if (Array.isArray(customFields)) {
-                        const found = customFields.find((f: any) => f && f.key === "PDF Resume Path");
-                        if (found) customPath = found.value;
-                      } else if (customFields && typeof customFields === "object") {
-                        customPath = (customFields as any)["PDF Resume Path"] || "";
-                      }
-
-                      if (resumeUrl) {
-                        window.open(resumeUrl, "_blank");
-                        triggerToast(`📥 Opening candidate's original PDF Resume...`);
-                      } else if (customPath) {
-                        window.open(customPath, "_blank");
-                        triggerToast(`📥 Opening candidate's original PDF Resume...`);
-                      } else {
-                        triggerToast(`📥 Downloading CV file: Resume_${viewingResumeApp.candidate?.firstName || "Candidate"}.pdf (A4 document successfully cached)`);
-                      }
-                    }}
-                    className="p-1.5 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer text-slate-600 hover:text-indigo-600"
-                    title="Download original PDF document"
+                    onClick={handleDownloadResume}
+                    disabled={!storageKey}
+                    className="p-1.5 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer text-slate-600 hover:text-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Download original document"
                   >
                     <Download className="h-4 w-4" />
                   </button>
                   <button
-                    onClick={() => triggerToast(`🖨️ Initializing print spooler... PDF file sent to Office Printer queue`)}
-                    className="p-1.5 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer text-slate-600 hover:text-indigo-600"
+                    onClick={handlePrintResume}
+                    disabled={!storageKey}
+                    className="p-1.5 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer text-slate-600 hover:text-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed"
                     title="Print document"
                   >
                     <Printer className="h-4 w-4" />
                   </button>
                 </div>
               </div>
-            )}
 
-            {/* Document Content Workspace */}
-            <div className="flex-1 bg-slate-800 p-6 overflow-auto flex flex-col justify-start items-center relative">
-              
-              {viewMode === "pdf" ? (
-                /* Beautiful High-Fidelity A4 Page Mockup */
-                <div 
-                  className="w-full max-w-[21cm] bg-white text-slate-800 shadow-2xl p-12 relative border border-slate-300 text-left rounded-sm origin-top transition-all duration-200"
-                  style={{
-                    transform: `scale(${pdfZoom / 100}) rotate(${pdfRotation}deg)`,
-                    transformOrigin: "top center",
-                    marginBottom: pdfZoom > 100 ? `${(pdfZoom - 100) * 10}px` : "10px",
-                  }}
-                >
-                  {/* Watermark Certification Stamp on the page */}
-                  <div className="absolute top-12 right-12 border-2 border-dashed border-indigo-400/30 text-indigo-400/40 rotate-12 px-3 py-1.5 rounded-lg text-[9px] font-black font-mono tracking-widest uppercase select-none flex flex-col items-center">
-                    <span>Aura ATS</span>
-                    <span>✓ verified match</span>
-                  </div>
-
-                  {/* PDF Resume Header */}
-                  <div className="border-b-2 border-indigo-600 pb-5 mb-6">
-                    <h1 className="font-display font-extrabold text-2xl text-slate-900 tracking-tight leading-none uppercase">
-                      {viewingResumeApp.candidate?.firstName} {viewingResumeApp.candidate?.lastName}
-                    </h1>
-                    <p className="text-indigo-600 font-semibold text-xs mt-1 uppercase tracking-wider">
-                      {viewingResumeApp.candidate?.currentRole || "Professional Candidate"}
-                    </p>
-                    
-                    {/* Compact Resume Meta lists */}
-                    <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-3 text-[10px] text-slate-500 font-mono font-medium">
-                      <div className="flex items-center gap-1">
-                        <Mail className="h-3.5 w-3.5 text-slate-400" />
-                        <span>{viewingResumeApp.candidate?.email}</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Phone className="h-3.5 w-3.5 text-slate-400" />
-                        <span>{viewingResumeApp.candidate?.phone || "+91 99887 76655"}</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <MapPin className="h-3.5 w-3.5 text-slate-400" />
-                        <span>{viewingResumeApp.candidate?.location || "Remote / Globe Ready"}</span>
-                      </div>
+              {/* Real Document Content Workspace */}
+              <div className="flex-1 bg-slate-800 p-4 sm:p-6 overflow-auto flex flex-col justify-start items-center relative">
+                {!hasPhysicalResume ? (
+                  /* Error State: No Resume Uploaded */
+                  <div className="w-full max-w-md bg-slate-900 text-slate-200 p-8 rounded-xl border border-slate-700 shadow-2xl text-center space-y-4 my-auto">
+                    <FileText className="h-12 w-12 text-slate-500 mx-auto" />
+                    <div>
+                      <h4 className="text-base font-bold text-white">No CV Uploaded</h4>
+                      <p className="text-xs text-slate-400 mt-1">No physical resume document has been uploaded for this candidate.</p>
                     </div>
                   </div>
+                ) : viewMode === "pdf" ? (
+                  isPdf && realResumeUrl ? (
+                    /* Actual Inline PDF Rendering */
+                    <div 
+                      className="w-full h-full min-h-[550px] bg-slate-900 rounded-lg overflow-hidden shadow-2xl border border-slate-700"
+                      style={{
+                        transform: `scale(${pdfZoom / 100}) rotate(${pdfRotation}deg)`,
+                        transformOrigin: "top center",
+                      }}
+                    >
+                      <iframe
+                        src={`${realResumeUrl}#toolbar=0&navpanes=0`}
+                        className="w-full h-full min-h-[550px] border-0"
+                        title={`${cand?.firstName || "Candidate"} Real Resume PDF`}
+                      />
+                    </div>
+                  ) : (
+                    /* DOCX / DOC Attachment View */
+                    <div className="w-full max-w-2xl bg-white text-slate-800 p-8 rounded-xl shadow-2xl border border-slate-200 text-left space-y-6 my-auto">
+                      <div className="flex items-center gap-4 p-4 bg-indigo-50/60 rounded-xl border border-indigo-100">
+                        <FileText className="h-10 w-10 text-indigo-600 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-bold text-slate-900 text-base truncate">{fileName}</h4>
+                          <p className="text-xs text-slate-500 mt-0.5 font-mono">Word Document ({fileExt.toUpperCase()}) • Local File Storage</p>
+                        </div>
+                        <button
+                          onClick={handleDownloadResume}
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg transition-colors shadow-xs flex items-center gap-1.5 shrink-0 cursor-pointer"
+                        >
+                          <Download className="h-4 w-4" />
+                          Download File
+                        </button>
+                      </div>
 
-                  {/* Resume Core Sections */}
-                  <div className="space-y-6 text-xs text-slate-700 leading-relaxed">
-                    
-                    {/* SECTION 1: Summary */}
-                    <div>
-                      <h4 className="font-bold text-slate-900 uppercase tracking-widest text-[11px] border-b border-slate-150 pb-1.5 mb-2.5 flex items-center gap-1.5">
-                        <User className="h-3.5 w-3.5 text-indigo-500" />
-                        <span>Executive Dossier Summary</span>
-                      </h4>
-                      <p>
-                        Determined and highly proficient professional with over <span className="font-bold text-indigo-600">{viewingResumeApp.candidate?.experienceYears || 3} years</span> of active industry experience. Expert at driving scalable product architectures, optimizing database throughput, and contributing high-quality engineering pipelines. Actively integrated with modern web environments to deliver fast, secure user outcomes.
+                      <div className="border-t border-slate-150 pt-4">
+                        <h5 className="font-bold text-slate-700 text-xs uppercase tracking-wider mb-2">Parsed Document Text Preview</h5>
+                        {resumeTextLoading ? (
+                          <p className="text-slate-400 text-xs font-mono animate-pulse py-4">Extracting text content from document...</p>
+                        ) : parsedResumeText ? (
+                          <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 text-xs font-mono whitespace-pre-wrap max-h-80 overflow-y-auto leading-relaxed text-slate-800">
+                            {parsedResumeText}
+                          </div>
+                        ) : (
+                          <p className="text-amber-600 text-xs font-medium py-2">{resumeTextError || "Text extraction unavailable."}</p>
+                        )}
+                      </div>
+                    </div>
+                  )
+                ) : (
+                  /* Real Parsed Text Mode */
+                  <div className="w-full max-w-3xl bg-slate-900 text-slate-100 p-6 sm:p-8 rounded-xl border border-slate-700 shadow-2xl font-mono text-xs max-h-[70vh] overflow-y-auto relative text-left my-auto">
+                    <div className="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
+                      <h3 className="text-indigo-400 font-bold text-sm uppercase flex items-center gap-2">
+                        <ListTodo className="h-4 w-4 text-indigo-400" />
+                        <span>Extracted Resume Text Content</span>
+                      </h3>
+                      <span className="text-[10px] font-mono text-slate-400 truncate max-w-[200px]">
+                        {fileName}
+                      </span>
+                    </div>
+
+                    {resumeTextLoading ? (
+                      <p className="text-slate-400 text-xs animate-pulse font-mono py-12 text-center">
+                        Extracting UTF-8 text from backend server...
                       </p>
-                    </div>
-
-                    {/* SECTION 2: Core Expertise */}
-                    <div>
-                      <h4 className="font-bold text-slate-900 uppercase tracking-widest text-[11px] border-b border-slate-150 pb-1.5 mb-2.5 flex items-center gap-1.5">
-                        <Award className="h-3.5 w-3.5 text-indigo-500" />
-                        <span>Core Competencies & Stack</span>
-                      </h4>
-                      <div className="flex flex-wrap gap-1.5 mt-2">
-                        {(() => {
-                          const sk = viewingResumeApp?.candidate?.skills;
-                          const skillsArr = Array.isArray(sk) ? sk : (typeof sk === "string" ? sk.split(",") : []);
-                          return skillsArr.map((skill: string, idx: number) => (
-                            <span 
-                              key={idx} 
-                              className="text-[10px] font-mono bg-slate-50 border border-slate-200 hover:border-slate-300 text-slate-800 px-2 py-0.5 rounded-sm shadow-2xs font-medium"
-                            >
-                              {typeof skill === "string" ? skill.trim() : skill}
-                            </span>
-                          ));
-                        })()}
-                      </div>
-                    </div>
-
-                    {/* SECTION 3: Career History / Projects */}
-                    {viewingResumeApp.candidate?.experienceLevel === "Fresher" ? (
-                      /* FRESHER: Key Projects */
-                      <div>
-                        <h4 className="font-bold text-slate-900 uppercase tracking-widest text-[11px] border-b border-slate-150 pb-1.5 mb-2.5 flex items-center gap-1.5">
-                          <Briefcase className="h-3.5 w-3.5 text-indigo-500" />
-                          <span>Key Academic / Personal Projects</span>
-                        </h4>
-                        <div className="bg-slate-50/50 border border-slate-100 p-4 rounded-lg whitespace-pre-wrap text-slate-700 text-[11px] leading-relaxed font-sans font-medium">
-                          {viewingResumeApp.candidate?.projectsWorkedOn || "No project descriptions specified."}
-                        </div>
-                      </div>
+                    ) : parsedResumeText ? (
+                      <p className="whitespace-pre-wrap leading-relaxed text-slate-200 font-mono">
+                        {parsedResumeText}
+                      </p>
                     ) : (
-                      /* EXPERIENCED: Career History */
-                      <div className="space-y-4">
-                        <div>
-                          <h4 className="font-bold text-slate-900 uppercase tracking-widest text-[11px] border-b border-slate-150 pb-1.5 mb-2.5 flex items-center gap-1.5">
-                            <Briefcase className="h-3.5 w-3.5 text-indigo-500" />
-                            <span>Chronological Employment Experience</span>
-                          </h4>
-                          <div className="space-y-4">
-                            <div>
-                              <div className="flex justify-between items-start">
-                                <div>
-                                  <h5 className="font-bold text-slate-800 text-[11px]">
-                                    {viewingResumeApp.candidate?.currentRole || "Software Professional"}
-                                  </h5>
-                                  <p className="text-indigo-600 text-[10px] font-semibold">
-                                    {viewingResumeApp.candidate?.currentCompany || "Global Tech Enterprise"}
-                                  </p>
-                                </div>
-                                <span className="text-[10px] font-mono text-slate-400">
-                                  {viewingResumeApp.candidate?.totalExperience ? `${viewingResumeApp.candidate.totalExperience} total experience` : "2023 - Present"}
-                                </span>
-                              </div>
-                              <ul className="list-disc list-inside mt-2 space-y-1 text-slate-600 text-[11px]">
-                                <li>Spearheaded product-focused initiatives, raising customer interaction by up to 25%.</li>
-                                <li>Engineered and optimized backend query structures, reducing database access latency.</li>
-                                <li>Mentored software engineers on modular architectures and continuous integration standards.</li>
-                              </ul>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Financial Compensation Details Block */}
-                        <div className="bg-slate-50 border border-slate-200/60 p-4 rounded-xl">
-                          <h4 className="font-bold text-slate-900 uppercase tracking-widest text-[9px] mb-2.5 flex items-center gap-1.5">
-                            <DollarSign className="h-3.5 w-3.5 text-emerald-500" />
-                            <span>Financial Compensation Details</span>
-                          </h4>
-                          <div className="grid grid-cols-3 gap-3 text-center font-mono">
-                            <div className="bg-white border border-slate-150 p-2 rounded-lg shadow-2xs">
-                              <span className="block text-[8px] text-slate-400 font-sans uppercase font-bold">Current CTC</span>
-                              <span className="text-slate-800 font-bold text-[11px]">
-                                {viewingResumeApp.candidate?.currentCTC ? `${viewingResumeApp.candidate.currentCTC} LPA` : "N/A"}
-                              </span>
-                            </div>
-                            <div className="bg-white border border-slate-150 p-2 rounded-lg shadow-2xs">
-                              <span className="block text-[8px] text-slate-400 font-sans uppercase font-bold">Expected CTC</span>
-                              <span className="text-slate-800 font-bold text-[11px]">
-                                {viewingResumeApp.candidate?.expectedCTC ? `${viewingResumeApp.candidate.expectedCTC} LPA` : "N/A"}
-                              </span>
-                            </div>
-                            <div className="bg-white border border-slate-150 p-2 rounded-lg shadow-2xs">
-                              <span className="block text-[8px] text-slate-400 font-sans uppercase font-bold">In-Hand Salary</span>
-                              <span className="text-slate-800 font-bold text-[11px]">
-                                {viewingResumeApp.candidate?.inHandSalary ? `${viewingResumeApp.candidate.inHandSalary}` : "N/A"}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
+                      <div className="text-center py-12 space-y-2">
+                        <p className="text-slate-300 font-semibold">{resumeTextError || "Resume not available."}</p>
                       </div>
                     )}
-
-                    {/* SECTION 4: Education & Relocation */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                      <div>
-                        <h4 className="font-bold text-slate-900 uppercase tracking-widest text-[11px] border-b border-slate-150 pb-1.5 mb-2.5 flex items-center gap-1.5">
-                          <GraduationCap className="h-3.5 w-3.5 text-indigo-500" />
-                          <span>Academic Overview</span>
-                        </h4>
-                        <div className="flex justify-between text-[11px]">
-                          <div>
-                            <span className="font-bold text-slate-800">
-                              {viewingResumeApp.candidate?.highestEducation || "Bachelor of Science in Software Engineering"}
-                            </span>
-                            <p className="text-slate-500">
-                              {viewingResumeApp.candidate?.specialization ? `Specialization: ${viewingResumeApp.candidate.specialization}` : "State Technological University"}
-                            </p>
-                          </div>
-                          <span className="text-[10px] font-mono text-slate-400 shrink-0 ml-2">
-                            {viewingResumeApp.candidate?.yearOfPassing ? `Class of ${viewingResumeApp.candidate.yearOfPassing}` : "Graduated 2021"}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div>
-                        <h4 className="font-bold text-slate-900 uppercase tracking-widest text-[11px] border-b border-slate-150 pb-1.5 mb-2.5 flex items-center gap-1.5">
-                          <Globe className="h-3.5 w-3.5 text-indigo-500" />
-                          <span>Mobility & Availability</span>
-                        </h4>
-                        <div className="space-y-1 text-[11px] text-slate-700">
-                          <div className="flex justify-between">
-                            <span className="text-slate-500">Open to Relocate?</span>
-                            <span className={`font-bold font-mono px-2 py-0.5 rounded text-[10px] ${
-                              viewingResumeApp.candidate?.relocateToPune === "No" 
-                                ? "text-rose-600 bg-rose-50" 
-                                : "text-emerald-600 bg-emerald-50"
-                            }`}>
-                              {viewingResumeApp.candidate?.relocateToPune || "Yes"}
-                            </span>
-                          </div>
-                          {viewingResumeApp.candidate?.noticePeriod && (
-                            <div className="flex justify-between">
-                              <span className="text-slate-500">Notice Period:</span>
-                              <span className="font-bold font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded text-[10px]">
-                                {viewingResumeApp.candidate?.noticePeriod}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
                   </div>
-
-                  {/* PDF Footer branding */}
-                  <div className="mt-12 pt-4 border-t border-slate-100 text-[9px] text-slate-400 font-mono flex justify-between select-none">
-                    <span>Aura Intelligent Recruitment ATS Module</span>
-                    <span>Document verified on secure node</span>
-                  </div>
-                </div>
-              ) : (
-                /* Plain parsed Text fallback view */
-                <div className="w-full max-w-2xl bg-slate-900 text-slate-100 p-6 sm:p-8 rounded-xl border border-slate-700 shadow-2xl font-mono text-xs max-h-[70vh] overflow-y-auto relative text-left">
-                  <div className="absolute top-4 right-4 text-[10px] font-mono text-indigo-400 select-none">
-                    Raw UTF-8 CV Text
-                  </div>
-                  <h3 className="text-indigo-400 border-b border-slate-800 pb-3 mb-4 font-bold text-sm uppercase">
-                    Extracted Text Content
-                  </h3>
-                  <p className="whitespace-pre-wrap leading-relaxed text-slate-300">
-                    {viewingResumeApp.candidate?.resumeText || "No text CV content was submitted. Form parsed directly."}
-                  </p>
-                </div>
-              )}
-
-            </div>
-
-            {/* Modal Bottom control panel */}
-            <div className="p-4 border-t border-slate-150 bg-slate-50 flex flex-col sm:flex-row justify-between items-center gap-3">
-              <div className="text-[11px] text-slate-500 font-mono flex items-center gap-1.5">
-                <MapPin className="h-3.5 w-3.5 text-slate-400" />
-                <span>Geographical Target: {viewingResumeApp.candidate?.location || "Not Specfied"}</span>
-              </div>
-              
-              <div className="flex gap-2 w-full sm:w-auto">
-                <button
-                  onClick={() => {
-                    setViewingResumeApp(null);
-                    setPdfZoom(100);
-                    setPdfRotation(0);
-                  }}
-                  className="flex-1 sm:flex-none px-4 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-lg transition-colors cursor-pointer"
-                >
-                  Close Document
-                </button>
-                
-                {!viewingResumeApp.aiEvaluation && (
-                  <button
-                    onClick={async () => {
-                      const targetApp = viewingResumeApp;
-                      setViewingResumeApp(null);
-                      setSelectedApp(targetApp);
-                      await handleScreenResume(targetApp);
-                    }}
-                    className="flex-1 sm:flex-none px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1 transition-colors cursor-pointer shadow-sm"
-                  >
-                    <Sparkles className="h-3.5 w-3.5 text-white animate-pulse" />
-                    <span>Run AI Evaluation Now</span>
-                  </button>
                 )}
               </div>
-            </div>
 
+              {/* Control Panel */}
+              <div className="p-4 border-t border-slate-150 bg-slate-50 flex flex-col sm:flex-row justify-between items-center gap-3">
+                <div className="text-[11px] text-slate-500 font-mono flex items-center gap-1.5">
+                  <MapPin className="h-3.5 w-3.5 text-slate-400" />
+                  <span>Geographical Target: {cand?.location || "Not Specified"}</span>
+                </div>
+                
+                <div className="flex gap-2 w-full sm:w-auto">
+                  <button
+                    onClick={() => {
+                      setViewingResumeApp(null);
+                      setPdfZoom(100);
+                      setPdfRotation(0);
+                    }}
+                    className="flex-1 sm:flex-none px-4 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                  >
+                    Close Document
+                  </button>
+                </div>
+              </div>
+
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Add Candidate Profile & Application Modal */}
       {showAddModal && (
@@ -4972,6 +5077,13 @@ export default function CandidatesView({
                             onChange={async (e) => {
                               if (e.target.files && e.target.files.length > 0) {
                                 const file = e.target.files[0];
+                                setManualCvFile(file);
+                                const reader = new FileReader();
+                                reader.onloadend = () => {
+                                  setManualCvBase64(reader.result as string);
+                                };
+                                reader.readAsDataURL(file);
+
                                 setIsParsing(true);
                                 try {
                                   const parsedData = await simulateResumeExtraction(file);
@@ -4985,8 +5097,10 @@ export default function CandidatesView({
                                   setResumeText(parsedData.resumeText);
                                   setCandidateLocation(parsedData.location);
                                   setSource(parsedData.source);
-                                  setEducation(parsedData.educationText || "");
-                                  setExperienceYears(parsedData.experienceYears || 3);
+                                  setExperienceYears(typeof parsedData.experienceYears === 'number' ? parsedData.experienceYears : 0);
+                                  if (typeof parsedData.experienceYears === 'number' && parsedData.experienceYears === 0) {
+                                    setAddExperienceLevel("Fresher");
+                                  }
                                   setParsedSuccess(true);
                                   triggerToast(`🎉 Successfully parsed uploaded document: ${file.name}`);
                                 } catch (error) {
@@ -5058,29 +5172,135 @@ export default function CandidatesView({
                     </div>
                   )}
 
-                  {/* AI Success Feedback */}
+                  {/* AI Success Feedback & Verification Card */}
                   {parsedSuccess && (
-                    <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg flex items-center justify-between gap-3 text-xs font-semibold animate-fade-in">
-                      <div className="flex items-center gap-2.5">
-                        <Check className="h-4.5 w-4.5 text-emerald-600 bg-emerald-100 rounded-full p-0.5" />
-                        <div>
-                          <span>Aura AI extracted profile details successfully!</span>
-                          <span className="block text-[10px] text-emerald-600 font-normal mt-0.5">Please review the parsed parameters in the preview form below.</span>
+                    <div className="space-y-4 animate-fade-in text-left">
+                      <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl flex items-center justify-between gap-3 text-xs font-semibold">
+                        <div className="flex items-center gap-2.5">
+                          <Check className="h-4.5 w-4.5 text-emerald-600 bg-emerald-100 rounded-full p-0.5" />
+                          <div>
+                            <span>Aura AI extracted candidate details successfully!</span>
+                            <span className="block text-[10px] text-emerald-600 font-normal mt-0.5">Review the verified details below and select your Target Job Pipeline.</span>
+                          </div>
                         </div>
+                        <button 
+                          type="button"
+                          onClick={() => { setParsedSuccess(false); setShowManualEdit(false); }}
+                          className="text-[10px] font-bold text-emerald-700 hover:underline bg-emerald-100 px-2 py-1 rounded-md cursor-pointer"
+                        >
+                          Re-upload CV
+                        </button>
                       </div>
-                      <button 
-                        onClick={() => setParsedSuccess(false)}
-                        className="text-[10px] font-bold text-emerald-700 hover:underline bg-emerald-100 px-2 py-1 rounded-md"
-                      >
-                        Reset / Re-upload
-                      </button>
+
+                      {/* Target Job Pipeline Selection */}
+                      <div className="bg-indigo-50/60 p-4 rounded-xl border border-indigo-150 space-y-2">
+                        <label className="text-[11px] font-bold text-indigo-900 uppercase tracking-wider block">
+                          Select Target Job Pipeline
+                        </label>
+                        <select
+                          value={selectedJobId}
+                          onChange={(e) => setSelectedJobId(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-indigo-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 text-xs font-semibold bg-white cursor-pointer"
+                        >
+                          {Array.isArray(jobs) && jobs.map((job) => (
+                            <option key={job.id} value={job.id}>{job.title} ({formatJobId(job.id)})</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Verified Profile Card */}
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <div className="h-9 w-9 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-xs">
+                              {firstName?.[0] || "C"}{lastName?.[0] || ""}
+                            </div>
+                            <div>
+                              <h4 className="font-bold text-xs text-slate-800">{firstName} {lastName}</h4>
+                              <p className="text-[11px] text-slate-500 font-medium">{currentRole || "Candidate"} {currentCompany ? `at ${currentCompany}` : ""}</p>
+                            </div>
+                          </div>
+                          <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full text-[10px] font-bold">
+                            Ready to Import
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2 border-t border-slate-200 text-[11px]">
+                          <div className="space-y-1">
+                            <label className="text-slate-400 font-medium block text-[10px] uppercase">Email Address</label>
+                            <input 
+                              type="email"
+                              value={email}
+                              onChange={(e) => setEmail(e.target.value)}
+                              placeholder="e.g. candidate@email.com"
+                              className="w-full px-2.5 py-1 rounded-md border border-slate-200 text-xs font-semibold text-slate-800 bg-white focus:ring-2 focus:ring-indigo-500/20"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-slate-400 font-medium block text-[10px] uppercase">Phone Number</label>
+                            <input 
+                              type="text"
+                              value={phone}
+                              onChange={(e) => setPhone(e.target.value)}
+                              placeholder="e.g. +91 98765 43210"
+                              className="w-full px-2.5 py-1 rounded-md border border-slate-200 text-xs font-semibold text-slate-800 bg-white focus:ring-2 focus:ring-indigo-500/20"
+                            />
+                          </div>
+                          <div><span className="text-slate-400 font-medium">Location:</span> <span className="font-semibold text-slate-700">{candidateLocation || "Remote"}</span></div>
+                          <div><span className="text-slate-400 font-medium">Experience:</span> <span className="font-semibold text-slate-700">{experienceYears} Years</span></div>
+                        </div>
+
+                        {skillsText && (
+                          <div className="pt-2 border-t border-slate-200">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Parsed Core Skills</span>
+                            <div className="flex flex-wrap gap-1">
+                              {skillsText.split(",").map((sk, i) => (
+                                <span key={i} className="px-2 py-0.5 bg-white border border-slate-200 rounded-md text-[10px] font-medium text-slate-700">
+                                  {sk.trim()}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Primary Verification Action Bar */}
+                      <div className="flex items-center justify-between gap-3 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowManualEdit(!showManualEdit)}
+                          className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1.5 cursor-pointer hover:underline"
+                        >
+                          <Sliders className="h-3.5 w-3.5" />
+                          <span>{showManualEdit ? "Hide Manual Form Fields" : "Edit Parsed Fields Manually"}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={isSubmitting}
+                          onClick={() => handleAddCandidateSubmit()}
+                          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-indigo-500/20 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                        >
+                          {isSubmitting ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              <span>Creating Candidate & Running AI Screening...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="h-4 w-4 text-amber-300" />
+                              <span>Verify & Create Candidate</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
               )}
 
-              {/* Form fields: Always visible when parsing succeeded in AI mode, OR in Manual mode */}
-              {(parsedSuccess || uploadOption === "manual") && (
+              {/* Form fields: Visible when manually requested or in Manual tab */}
+              {((uploadOption === "ai" && parsedSuccess && showManualEdit) || uploadOption === "manual") && (
                 <form onSubmit={handleAddCandidateSubmit} className="space-y-5 animate-fade-in">
                   
                   {uploadOption === "ai" && (
@@ -5204,7 +5424,7 @@ export default function CandidatesView({
                         className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-xs font-medium transition-all bg-white"
                       >
                         {Array.isArray(jobs) && jobs.map((job) => (
-                          <option key={job.id} value={job.id}>{job.title}</option>
+                          <option key={job.id} value={job.id}>{job.title} ({formatJobId(job.id)})</option>
                         ))}
                       </select>
                     </div>
@@ -5393,14 +5613,15 @@ export default function CandidatesView({
                     <div className="flex items-center gap-3 mt-1">
                       <input
                         type="file"
-                        accept=".pdf"
+                        accept=".pdf,.docx,.doc"
                         id="manual-resume-upload-input"
                         className="hidden"
                         onChange={(e) => {
                           if (e.target.files && e.target.files[0]) {
                             const file = e.target.files[0];
-                            if (file.type !== "application/pdf") {
-                              triggerToast("❌ Only PDF format is supported for CV attachment.");
+                            const ext = file.name.toLowerCase().split('.').pop();
+                            if (!ext || !["pdf", "docx", "doc"].includes(ext)) {
+                              triggerToast("❌ Supported document formats: PDF, DOCX, DOC.");
                               return;
                             }
                             setManualCvFile(file);
@@ -5418,7 +5639,7 @@ export default function CandidatesView({
                         className="flex items-center gap-2 px-3 py-2 border border-slate-250 bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 text-xs font-bold rounded-lg transition-colors cursor-pointer shadow-xs"
                       >
                         <Upload className="h-4 w-4 text-slate-500" />
-                        <span>Select PDF CV File</span>
+                        <span>Select CV File (PDF/DOCX)</span>
                       </label>
                       {manualCvFile ? (
                         <div className="flex items-center gap-2 bg-emerald-50 text-emerald-800 border border-emerald-200 px-3 py-1.5 rounded-lg text-xs font-semibold">

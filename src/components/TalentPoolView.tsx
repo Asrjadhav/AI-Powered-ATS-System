@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from "motion/react";
 import axios from "axios";
 import { LocalStorageService } from "../services/localStorageService";
 import { TalentPoolRepository } from "../repositories";
+import { formatJobId } from "../repositories/repositoryUtils";
 import { 
   Users, 
   Sparkles, 
@@ -397,9 +398,11 @@ export default function TalentPoolView() {
     fetchCandidates();
     window.addEventListener("trigger-notification-sync", fetchCandidates);
     window.addEventListener("applications-updated", fetchCandidates);
+    window.addEventListener("talent-pool-updated", fetchCandidates);
     return () => {
       window.removeEventListener("trigger-notification-sync", fetchCandidates);
       window.removeEventListener("applications-updated", fetchCandidates);
+      window.removeEventListener("talent-pool-updated", fetchCandidates);
     };
   }, []);
 
@@ -957,6 +960,11 @@ export default function TalentPoolView() {
       {/* Header Info Panel */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 dark:text-slate-400 mb-1">
+            <span>Recruitment</span>
+            <span>&gt;</span>
+            <span className="font-bold text-slate-600 dark:text-slate-300">Talent Pool</span>
+          </div>
           <h2 className="text-xl font-extrabold text-slate-950 dark:text-white tracking-tight flex items-center gap-2.5">
             <Database className="h-6 w-6 text-indigo-600" />
             <span>Talent Pool Repository</span>
@@ -1971,7 +1979,12 @@ export default function TalentPoolView() {
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <p className="text-[10px] font-bold text-slate-400">APPLIED FOR</p>
-                        <p className="font-bold text-slate-800 dark:text-slate-200 mt-0.5">{selectedCandidate.recruitmentHistory?.appliedJob || selectedCandidate.appliedJob || "Job Opening"}</p>
+                        <p className="font-bold text-slate-800 dark:text-slate-200 mt-0.5">
+                          {selectedCandidate.recruitmentHistory?.appliedJob || selectedCandidate.appliedJob || "Job Opening"}
+                          {(selectedCandidate.jobId || selectedCandidate.recruitmentHistory?.jobId) && (
+                            <span className="text-[10px] font-mono text-slate-400 font-normal block mt-0.5">Job ID: {formatJobId(selectedCandidate.jobId || selectedCandidate.recruitmentHistory?.jobId)}</span>
+                          )}
+                        </p>
                       </div>
                       <div>
                         <p className="text-[10px] font-bold text-slate-400">PREVIOUS STAGE</p>

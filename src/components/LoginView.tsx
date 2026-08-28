@@ -11,7 +11,10 @@ import {
   AlertCircle,
   ShieldCheck,
   Sparkles,
-  ChevronLeft
+  ChevronLeft,
+  Eye,
+  EyeOff,
+  Loader2
 } from "lucide-react";
 
 interface LoginViewProps {
@@ -49,6 +52,8 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
     }
     return "";
   });
+
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -116,71 +121,62 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
 
   return (
     <div 
-      className="h-screen w-full text-slate-100 flex flex-col justify-between items-center p-4 sm:p-6 lg:p-8 relative overflow-y-auto lg:overflow-hidden font-sans"
+      className="min-h-screen w-full bg-[#07111F] flex flex-col justify-between items-center p-4 sm:p-6 lg:p-8 relative overflow-y-auto font-sans selection:bg-[#2563EB] selection:text-white"
       style={{
-        backgroundImage: 'linear-gradient(135deg, rgba(8, 12, 32, 0.35) 0%, rgba(18, 8, 40, 0.65) 100%), url("https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=1920&q=85")',
+        backgroundColor: '#07111F',
+        backgroundImage: 'linear-gradient(180deg, rgba(7, 17, 31, 0.50) 0%, rgba(11, 21, 37, 0.65) 100%), url("https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=1920&q=85")',
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundAttachment: 'fixed'
       }}
     >
-      
-      {/* Glow highlight visual elements with beautiful backdrop-blur */}
-      <div className="absolute inset-0 pointer-events-none z-0">
-        <div className="absolute top-[10%] left-[10%] w-[500px] h-[500px] rounded-full bg-indigo-500/15 blur-[120px]" />
-        <div className="absolute bottom-[10%] right-[10%] w-[500px] h-[500px] rounded-full bg-purple-500/15 blur-[140px]" />
-        <div className="absolute top-[40%] left-[30%] w-[350px] h-[350px] rounded-full bg-pink-500/10 blur-[100px]" />
-      </div>
-
-      {/* Top Banner: Elevated Platform Logo */}
-      <div className="w-full max-w-md mx-auto text-center mt-2 lg:mt-4 relative z-10 shrink-0">
-        <div className="inline-flex items-center gap-3 bg-white/5 backdrop-blur-xl px-4 py-2 rounded-2xl border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.3)]">
-          <div className="h-8 w-8 rounded-xl bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center shadow-lg shadow-indigo-500/30">
-            <span className="text-white font-black text-base">E</span>
+      {/* Top Header: Enterprise Platform Logo */}
+      <header className="w-full max-w-md mx-auto text-center mt-3 sm:mt-6 relative z-10 shrink-0">
+        <div className="inline-flex items-center gap-3 bg-slate-900/80 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-slate-700/80 shadow-xl">
+          <div className="h-9 w-9 bg-white rounded-xl flex items-center justify-center p-1 shadow-sm overflow-hidden shrink-0">
+            <img src="/encureit_icon.png" alt="EncureIT Symbol" className="h-full w-full object-contain" />
           </div>
           <div className="text-left">
-            <div className="flex items-center gap-1.5">
-              <span className="font-bold text-sm text-white tracking-tight">
-                Encure<span className="text-indigo-300">IT</span>
+            <div className="flex items-center gap-1">
+              <span className="font-extrabold text-base text-white tracking-tight">
+                Encure<span className="text-[#2563EB]">IT</span>
               </span>
             </div>
-            <p className="text-[8px] text-slate-300 uppercase tracking-widest font-mono font-bold">Talent Acquisition Workspace</p>
+            <p className="text-[10px] text-slate-300 uppercase tracking-widest font-mono font-medium">
+              TALENT ACQUISITION WORKSPACE
+            </p>
           </div>
         </div>
-      </div>
+      </header>
 
-      {/* Center content: Single Premium Glassmorphic Card */}
-      <div className="w-full max-w-md my-auto relative z-10 px-1 py-4">
+      {/* Main Enterprise SaaS Authentication Panel (Clean White Card) */}
+      <main className="w-full max-w-md my-auto relative z-10 px-1 py-4 sm:py-6">
         <AnimatePresence mode="wait">
           <motion.div
             key={view}
-            initial={{ opacity: 0, y: 30, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -30, scale: 0.98 }}
-            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-            className="bg-white/[0.05] backdrop-blur-3xl border border-white/10 p-6 sm:p-8 rounded-[2rem] shadow-[0_25px_60px_rgba(0,0,0,0.5)] relative overflow-hidden"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.25, ease: "easeOut" }}
+            className="bg-white border border-[#E2E8F0] p-6 sm:p-8 rounded-2xl sm:rounded-3xl shadow-2xl shadow-black/50 relative"
           >
-            {/* Colorful light leaks inside card */}
-            <div className="absolute -top-[120px] left-[20%] w-[250px] h-[250px] rounded-full bg-indigo-500/20 blur-[60px] pointer-events-none" />
-            <div className="absolute -bottom-[120px] right-[20%] w-[250px] h-[250px] rounded-full bg-purple-500/20 blur-[60px] pointer-events-none" />
-
             {/* Header Content */}
-            <div className="mb-6 text-center relative z-10">
-              <div className="inline-flex items-center gap-1.5 bg-white/5 px-3 py-1 rounded-full border border-white/10 text-indigo-300 font-mono text-[9px] font-bold tracking-wider uppercase mb-3 shadow-inner">
-                <ShieldCheck className="h-3 w-3 text-indigo-400" />
-                <span>Secure Recruiter Gateway</span>
+            <div className="mb-6 text-center">
+              <div className="inline-flex items-center gap-1.5 bg-blue-50 px-3 py-1 rounded-full border border-blue-100 text-[#2563EB] text-[11px] font-semibold mb-3">
+                <ShieldCheck className="h-3.5 w-3.5 text-[#2563EB]" />
+                <span>Secure Gateway</span>
               </div>
               
-              <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-                {view === "login" && "Welcome Back"}
-                {view === "forgot" && "Reset Password"}
-                {view === "reset" && "Update Passcode"}
-              </h2>
+              <h1 className="text-2xl sm:text-3xl font-bold text-[#0F172A] tracking-tight">
+                {view === "login" && "Welcome back"}
+                {view === "forgot" && "Reset your password"}
+                {view === "reset" && "Update password"}
+              </h1>
               
-              <p className="text-slate-300 text-xs mt-2 max-w-xs mx-auto leading-relaxed">
-                {view === "login" && "Access your smart candidate profiles, resume analytics, and automated schedules."}
-                {view === "forgot" && "Provide your email address to initiate the secure recovery handshake."}
-                {view === "reset" && "Update your credentials for secure workspace entry."}
+              <p className="text-[#64748B] text-xs sm:text-sm mt-1.5 max-w-xs mx-auto leading-relaxed">
+                {view === "login" && "Sign in to your recruiter account to continue."}
+                {view === "forgot" && "Enter your work email address to receive password recovery details."}
+                {view === "reset" && "Enter a new password for your account."}
               </p>
             </div>
 
@@ -193,10 +189,10 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
                   exit={{ opacity: 0, height: 0 }}
                   className="mb-5 overflow-hidden"
                 >
-                  <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex items-start gap-2.5 text-xs text-red-200">
-                    <AlertCircle className="h-4 w-4 shrink-0 text-red-400 mt-0.5" />
+                  <div className="bg-rose-50 border border-rose-200 rounded-xl p-3.5 flex items-start gap-2.5 text-xs text-rose-800">
+                    <AlertCircle className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
                     <div>
-                      <span className="font-bold block mb-0.5">Authorization Error</span>
+                      <span className="font-semibold block mb-0.5">Authentication error</span>
                       <span>{error}</span>
                     </div>
                   </div>
@@ -210,10 +206,10 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
                   exit={{ opacity: 0, height: 0 }}
                   className="mb-5 overflow-hidden"
                 >
-                  <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-4 flex items-start gap-2.5 text-xs text-emerald-200">
-                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400 mt-0.5" />
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 flex items-start gap-2.5 text-xs text-emerald-800">
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 mt-0.5" />
                     <div>
-                      <span className="font-bold block mb-0.5">Operation Successful</span>
+                      <span className="font-semibold block mb-0.5">Success</span>
                       <span>{success}</span>
                     </div>
                   </div>
@@ -221,37 +217,40 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
               )}
             </AnimatePresence>
 
-            {/* Input fields form */}
-            <form onSubmit={handleSubmit} className="space-y-4 relative z-10">
+            {/* Form */}
+            <form onSubmit={handleSubmit} className="space-y-4">
               
-              {/* Email Address */}
+              {/* Work Email */}
               {view !== "reset" && (
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-300 uppercase tracking-widest block pl-1">
-                    Recruiter Email
+                  <label htmlFor="email" className="text-xs font-semibold text-[#334155] block pl-0.5">
+                    Work Email
                   </label>
                   <div className="relative group">
-                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                      <Mail className="h-4 w-4 text-slate-400 group-focus-within:text-indigo-400 transition-colors" />
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-[#2563EB] transition-colors">
+                      <Mail className="h-4 w-4" />
                     </div>
                     <input
+                      id="email"
                       type="email"
                       required
-                      placeholder="hr@encureit.com"
+                      disabled={loading}
+                      placeholder="you@company.com"
+                      autoComplete="email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="w-full pl-11 pr-4 py-3 bg-black/30 border border-white/10 hover:border-white/20 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 rounded-2xl text-xs font-semibold text-white transition-all placeholder:text-slate-500 shadow-inner"
+                      className="w-full pl-10 pr-4 py-2.5 bg-white border border-[#CBD5E1] hover:border-slate-400 focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 rounded-xl text-sm font-normal text-[#0F172A] placeholder:text-slate-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     />
                   </div>
                 </div>
               )}
 
-              {/* Password or resetToken input block */}
+              {/* Password */}
               {view !== "forgot" && (
                 <div className="space-y-1.5">
-                  <div className="flex justify-between items-center pl-1">
-                    <label className="text-[10px] font-bold text-slate-300 uppercase tracking-widest block">
-                      {view === "reset" ? "New Security Password" : "Password"}
+                  <div className="flex justify-between items-center pl-0.5">
+                    <label htmlFor="password" className="text-xs font-semibold text-[#334155] block">
+                      {view === "reset" ? "New Password" : "Password"}
                     </label>
                     
                     {view === "login" && (
@@ -264,7 +263,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
                           setSandboxResetLink(null);
                           setSandboxPreviewUrl(null);
                         }}
-                        className="text-[10px] text-indigo-300 hover:text-indigo-200 font-bold cursor-pointer transition-colors"
+                        className="text-xs text-[#2563EB] hover:text-[#1D4ED8] font-semibold cursor-pointer transition-colors focus:outline-none focus:underline"
                       >
                         Forgot Password?
                       </button>
@@ -272,79 +271,98 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
                   </div>
                   
                   <div className="relative group">
-                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                      <Lock className="h-4 w-4 text-slate-400 group-focus-within:text-indigo-400 transition-colors" />
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-[#2563EB] transition-colors">
+                      <Lock className="h-4 w-4" />
                     </div>
                     <input
-                      type="password"
+                      id="password"
+                      type={showPassword ? "text" : "password"}
                       required
+                      disabled={loading}
                       placeholder="••••••••••••"
+                      autoComplete={view === "login" ? "current-password" : "new-password"}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="w-full pl-11 pr-4 py-3 bg-black/30 border border-white/10 hover:border-white/20 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 rounded-2xl text-xs font-semibold text-white transition-all placeholder:text-slate-500 shadow-inner"
+                      className="w-full pl-10 pr-11 py-2.5 bg-white border border-[#CBD5E1] hover:border-slate-400 focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 rounded-xl text-sm font-normal text-[#0F172A] placeholder:text-slate-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     />
+                    
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-700 focus:outline-none transition-colors cursor-pointer"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4 text-slate-400 hover:text-slate-700" />
+                      ) : (
+                        <Eye className="h-4 w-4 text-slate-400 hover:text-slate-700" />
+                      )}
+                    </button>
                   </div>
                 </div>
               )}
 
-              {/* Remember credentials checkbox */}
+              {/* Keep me signed in */}
               {view === "login" && (
-                <div className="flex items-center justify-between py-0.5 text-xs text-slate-300 select-none pl-1">
+                <div className="flex items-center justify-between py-1 text-xs select-none pl-0.5">
                   <label className="flex items-center gap-2.5 cursor-pointer group">
                     <input
                       type="checkbox"
                       checked={rememberMe}
                       onChange={(e) => setRememberMe(e.target.checked)}
-                      className="rounded border-white/10 bg-black/40 text-indigo-500 focus:ring-indigo-500/30 focus:ring-offset-slate-900 h-4.5 w-4.5 cursor-pointer transition-all"
+                      className="rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB]/20 h-4 w-4 cursor-pointer transition-all"
                     />
-                    <span className="group-hover:text-white transition-colors">Keep me signed in</span>
+                    <span className="group-hover:text-slate-800 transition-colors text-xs font-medium text-[#475569]">Keep me signed in</span>
                   </label>
                 </div>
               )}
 
-              {/* Action Button with fine-tuned micro-animation */}
-              <motion.button
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.99 }}
+              {/* Sign In Button (Professional Enterprise Blue) */}
+              <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-3 px-4 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:opacity-95 disabled:opacity-50 text-white font-extrabold text-xs uppercase tracking-widest rounded-2xl transition-all shadow-[0_10px_25px_rgba(99,102,241,0.3)] hover:shadow-[0_15px_30px_rgba(99,102,241,0.45)] cursor-pointer flex items-center justify-center gap-2 mt-2"
+                className="w-full py-3 px-4 bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-sm rounded-xl transition-all shadow-md shadow-blue-600/20 cursor-pointer flex items-center justify-center gap-2 mt-2 focus:outline-none focus:ring-2 focus:ring-[#2563EB]/40"
               >
-                {loading ? "Authenticating Session..." : (
+                {loading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin text-white" />
+                    <span>Signing in...</span>
+                  </span>
+                ) : (
                   <>
-                    {view === "login" && "Access Workspace"}
+                    {view === "login" && "Sign In"}
                     {view === "forgot" && "Send Recovery Link"}
                     {view === "reset" && "Update Password"}
                     <ArrowRight className="h-4 w-4" />
                   </>
                 )}
-              </motion.button>
+              </button>
             </form>
 
-            {/* Sandbox Developer Recovery Helper Info */}
+            {/* Sandbox Developer Recovery Helper */}
             <AnimatePresence>
               {view === "forgot" && (sandboxResetLink || sandboxPreviewUrl) && (
                 <motion.div
-                  initial={{ opacity: 0, scale: 0.95 }}
+                  initial={{ opacity: 0, scale: 0.98 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  className="mt-4 bg-black/50 border border-indigo-500/30 rounded-2xl p-4 text-xs font-sans relative"
+                  exit={{ opacity: 0, scale: 0.98 }}
+                  className="mt-4 bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs relative"
                 >
-                  <div className="absolute top-[-8px] right-3 bg-gradient-to-r from-indigo-500 to-purple-600 text-[8px] font-mono uppercase font-black px-2 py-0.5 rounded-full text-white tracking-widest">
+                  <div className="absolute top-[-8px] right-3 bg-[#2563EB] text-[9px] font-mono uppercase font-semibold px-2 py-0.5 rounded-full text-white tracking-wider">
                     Sandbox Mode
                   </div>
-                  <div className="flex items-center gap-2 mb-2 text-indigo-300">
-                    <Sparkles className="h-4 w-4 shrink-0 text-indigo-400 animate-pulse" />
-                    <span className="font-bold">Local Simulated Recovery Link</span>
+                  <div className="flex items-center gap-2 mb-2 text-[#2563EB]">
+                    <Sparkles className="h-4 w-4 shrink-0 text-[#2563EB]" />
+                    <span className="font-semibold">Simulated Recovery Link</span>
                   </div>
-                  <p className="text-slate-300 text-[11px] leading-relaxed mb-3">
-                    As there is no external SMTP relay in our sandbox, you can click the shortcut button below to apply the reset password token immediately:
+                  <p className="text-slate-600 text-xs leading-relaxed mb-3">
+                    Click below to apply the reset password token in sandbox mode:
                   </p>
-                  <div className="space-y-2">
+                  <div>
                     {sandboxResetLink && (
                       <a
                         href={sandboxResetLink}
-                        className="block text-center py-2 px-3 bg-indigo-500/20 hover:bg-indigo-500/35 text-indigo-200 hover:text-white border border-indigo-500/30 rounded-xl transition-all font-semibold font-mono text-[10px]"
+                        className="block text-center py-2 px-3 bg-blue-50 hover:bg-blue-100 text-[#2563EB] border border-blue-200 rounded-lg transition-all font-mono text-xs font-medium"
                       >
                         Apply Reset Token & Go
                       </a>
@@ -354,9 +372,9 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
               )}
             </AnimatePresence>
 
-            {/* Back to sign in triggers */}
+            {/* Return to Sign In button */}
             {view !== "login" && (
-              <div className="mt-4 text-center pt-1">
+              <div className="mt-4 text-center pt-2">
                 <button
                   type="button"
                   onClick={() => {
@@ -366,7 +384,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
                     setSandboxResetLink(null);
                     setSandboxPreviewUrl(null);
                   }}
-                  className="inline-flex items-center gap-1.5 text-xs text-slate-300 hover:text-indigo-300 font-semibold bg-transparent border-0 outline-none cursor-pointer transition-colors"
+                  className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-[#2563EB] font-medium bg-transparent border-0 outline-none cursor-pointer transition-colors"
                 >
                   <ChevronLeft className="h-4 w-4" />
                   <span>Return to Sign In</span>
@@ -374,36 +392,32 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
               </div>
             )}
 
-            {/* Handshake security metadata */}
-            <div className="mt-6 pt-4 border-t border-white/10 flex items-center justify-center gap-2 text-slate-400 relative z-10">
-              <Shield className="h-3.5 w-3.5 text-indigo-400" />
-              <span className="text-[9px] font-mono tracking-widest uppercase font-semibold">
-                SECURED SYSTEM PORTAL
-              </span>
+            {/* Subtle Secured Portal Indicator inside card */}
+            <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-center gap-1.5 text-[#64748B] text-xs font-medium">
+              <Shield className="h-3.5 w-3.5 text-[#2563EB]" />
+              <span>Secured System Portal</span>
             </div>
 
           </motion.div>
         </AnimatePresence>
-      </div>
+      </main>
 
-      {/* Bottom Footer Credits */}
-      <div className="w-full max-w-md mx-auto text-center mb-2 lg:mb-4 relative z-10 shrink-0">
+      {/* Footer outside card */}
+      <footer className="w-full max-w-md mx-auto text-center mb-3 sm:mb-6 relative z-10 shrink-0">
         <p className="text-xs text-slate-300">
-          Need recruiter credentials?{" "}
+          Need help signing in?{" "}
           <a
             href="mailto:support@encureit.com"
-            className="text-indigo-300 hover:text-indigo-200 font-bold transition-colors underline underline-offset-4"
+            className="text-blue-400 hover:text-blue-300 font-semibold transition-colors underline underline-offset-4"
           >
-            Contact ATS Support
+            Contact your administrator
           </a>
         </p>
-        <div className="mt-2.5 flex items-center justify-center gap-2 text-[10px] text-slate-400">
+        <div className="mt-2 text-[11px] text-slate-400">
           <span>&copy; {new Date().getFullYear()} EncureIT Systems</span>
         </div>
-      </div>
+      </footer>
       
     </div>
   );
 }
-
-

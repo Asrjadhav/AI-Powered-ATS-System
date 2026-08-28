@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from "react";
 import { useTranslation } from "../utils/i18n";
 import { LocalStorageService } from "../services/localStorageService";
+import { formatJobId } from "../repositories/repositoryUtils";
 import { 
   CandidateRepository, 
   InterviewRepository, 
@@ -687,7 +688,7 @@ export default function DashboardView({ onNavigate, onSelectApplication }: Dashb
                         <span className="text-slate-500 dark:text-slate-400 text-xs font-medium">{cand?.currentRole} at {cand?.currentCompany}</span>
                         <span className="h-1 w-1 rounded-full bg-slate-300 dark:bg-slate-700" />
                         <span className="text-slate-400 dark:text-slate-500 text-xs">Applying for</span>
-                        <span className="text-slate-700 dark:text-slate-300 text-xs font-medium bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded-md">{job?.title}</span>
+                        <span className="text-slate-700 dark:text-slate-350 text-xs font-medium bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded-md">{job?.title} {job?.id ? `(${formatJobId(job.id)})` : ""}</span>
                       </div>
 
                       {/* Candidate Employment Status and Experience */}
@@ -914,7 +915,7 @@ export default function DashboardView({ onNavigate, onSelectApplication }: Dashb
                           {job.title}
                         </span>
                         <span className="text-xs text-slate-400 dark:text-slate-500 font-medium block mt-0.5">
-                          {job.department}
+                          {job.department} &middot; <span className="font-mono text-slate-500 dark:text-slate-400">Job ID: {formatJobId(job.id)}</span>
                         </span>
                       </div>
                     </td>

@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect } from "react";
+import { formatJobId } from "../repositories/repositoryUtils";
 import { 
   FileText, 
   Search, 
@@ -90,7 +91,7 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
 
           return {
             id: rec.applicationId,
-            jobId: rec.jobId || (job ? job.id : "j1"),
+            jobId: rec.jobId || (job ? job.id : "JOB-0001"),
             candidateName: cand ? (cand.name || `${cand.firstName || ""} ${cand.lastName || ""}`.trim() || "Candidate") : "Candidate",
             candidateEmail: cand ? (cand.email || "candidate@example.com") : "candidate@example.com",
             candidateAvatar: cand ? (cand.profileImage || cand.avatar || "") : "",
@@ -352,8 +353,11 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
                         </div>
                       </div>
                     </td>
-                    <td className="py-3.5 px-4 font-medium text-slate-800 dark:text-slate-200">
-                      {app.appliedJob}
+                    <td className="py-3.5 px-4">
+                      <div className="font-medium text-slate-800 dark:text-slate-200">{app.appliedJob}</div>
+                      {app.jobId && (
+                        <div className="text-[10px] font-mono text-slate-400 dark:text-slate-500 font-semibold mt-0.5">Job ID: {formatJobId(app.jobId)}</div>
+                      )}
                     </td>
                     <td className="py-3.5 px-4 text-slate-600 dark:text-slate-300">
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[11px] font-medium text-slate-600 dark:text-slate-300">
@@ -463,7 +467,10 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
               <div className="grid grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl">
                 <div>
                   <span className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Applied Position</span>
-                  <span className="font-semibold text-slate-800 dark:text-slate-200">{selectedApplication.appliedJob}</span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-200 block">{selectedApplication.appliedJob}</span>
+                  {selectedApplication.jobId && (
+                    <span className="text-xs font-mono text-slate-400 dark:text-slate-500 font-medium block mt-0.5">Job ID: {formatJobId(selectedApplication.jobId)}</span>
+                  )}
                 </div>
                 <div>
                   <span className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Department</span>

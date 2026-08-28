@@ -6,6 +6,7 @@ import {
   ChevronDown, ChevronUp
 } from "lucide-react";
 import { JobRepository, CandidateRepository } from "../repositories";
+import { formatJobId } from "../repositories/repositoryUtils";
 
 interface PublicApplyFormProps {
   jobId: string;
@@ -562,7 +563,7 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
                 </div>
                 <div className="space-y-1 text-xs">
                   <p><span className="text-gray-500">Applicant:</span> <strong className="text-gray-800">{fullName}</strong></p>
-                  <p><span className="text-gray-500">Job Position:</span> <strong className="text-gray-800">{selectedJob?.title}</strong></p>
+                  <p><span className="text-gray-500">Job Position:</span> <strong className="text-gray-800">{selectedJob?.title} (Job ID: {formatJobId(selectedJob?.id)})</strong></p>
                   <p><span className="text-gray-500">Department:</span> <strong className="text-gray-800">{selectedJob?.department}</strong></p>
                   <p><span className="text-gray-500">Email ID:</span> <strong className="text-gray-800 font-mono">{email}</strong></p>
                   <p><span className="text-gray-500">Applicant Type:</span> <strong className="text-gray-800">{experienceLevel}</strong></p>
@@ -699,7 +700,7 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
                 <option value="" disabled>-- Choose a Position --</option>
                 {activeJobs.map(job => (
                   <option key={job.id} value={job.id}>
-                    {job.title} ({job.department} / {job.location})
+                    {job.title} ({formatJobId(job.id)} &middot; {job.department} / {job.location})
                   </option>
                 ))}
               </select>
@@ -728,6 +729,7 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
                      {showJD && (
                       <div className="p-4 space-y-4 text-xs text-gray-700 border-t border-gray-150 text-left">
                         <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs border-b pb-3 font-semibold text-gray-500">
+                          <p><span className="text-gray-400">Job ID:</span> <span className="text-gray-700 font-mono font-medium">{formatJobId(selectedJob.id)}</span></p>
                           <p><span className="text-gray-400">Department:</span> <span className="text-gray-700 font-medium">{selectedJob.department}</span></p>
                           <p><span className="text-gray-400">Location:</span> <span className="text-gray-700 font-medium">{selectedJob.location}</span></p>
                           <p><span className="text-gray-400">Work Mode:</span> <span className="text-gray-700 font-medium">{selectedJob.workMode}</span></p>

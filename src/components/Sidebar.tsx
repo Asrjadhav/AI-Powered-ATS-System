@@ -125,8 +125,8 @@ export default function Sidebar({
       {/* Brand Header */}
       <div className="p-6 border-b border-slate-900 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3 cursor-pointer" onClick={() => handleNavigate("dashboard")}>
-          <div className="h-10 w-10 rounded-lg bg-indigo-600 flex items-center justify-center shadow-md shadow-indigo-900/45">
-            <span className="text-white font-black text-xl">E</span>
+          <div className="h-10 w-10 rounded-xl bg-white p-1 flex items-center justify-center shadow-md shadow-indigo-900/45 shrink-0 overflow-hidden">
+            <img src="/encureit_icon.png" alt="EncureIT Logo" className="h-full w-full object-contain" />
           </div>
           <div className="flex flex-col">
             <div className="flex items-center gap-1.5">
@@ -248,7 +248,7 @@ export default function Sidebar({
               className="w-full py-2 px-2.5 bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/20 rounded-lg text-[10px] font-bold tracking-tight transition-all flex items-center justify-center gap-1.5 cursor-pointer uppercase"
             >
               <LogOut className="h-3.5 w-3.5 shrink-0" />
-              <span>Disconnect Console</span>
+              <span>Sign Out</span>
             </button>
           </div>
         )}

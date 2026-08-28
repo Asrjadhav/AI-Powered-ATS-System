@@ -43,7 +43,7 @@ export const StatsRepository = {
 
     const todayStr = new Date().toISOString().split("T")[0];
     const todayInterviews = interviews.filter((i: any) => i.date === todayStr && i.status !== "Cancelled" && i.status !== "CANCELLED").length;
-    const upcomingInterviews = interviews.filter((i: any) => (i.status === "Upcoming" || i.status === "SCHEDULED" || i.status === "Scheduled") && i.date >= todayStr).length;
+    const upcomingInterviews = interviews.filter((i: any) => (i.status === "Upcoming" || i.status === "SCHEDULED" || i.status === "Scheduled") && i.date > todayStr).length;
     const completedInterviews = interviews.filter((i: any) => i.status === "Completed" || i.status === "COMPLETED").length;
     const cancelledInterviews = interviews.filter((i: any) => i.status === "Cancelled" || i.status === "CANCELLED").length;
     const pendingFeedback = interviews.filter((i: any) => (i.status === "Upcoming" || i.status === "SCHEDULED" || i.status === "Scheduled") && i.date < todayStr).length;

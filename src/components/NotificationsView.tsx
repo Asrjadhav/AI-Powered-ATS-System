@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { formatJobId } from "../repositories/repositoryUtils";
 import { NotificationRepository } from "../repositories";
 import { motion, AnimatePresence } from "motion/react";
 import { 
@@ -433,7 +434,7 @@ export default function NotificationsView({ notifications, setNotifications }: N
                           )}
 
                           {notif.jobTitle && (
-                            <span>&middot; Role: <span className="text-slate-600 dark:text-slate-300 font-bold">{notif.jobTitle}</span></span>
+                            <span>&middot; Role: <span className="text-slate-600 dark:text-slate-300 font-bold">{notif.jobTitle} {(notif as any).jobId ? `(Job ID: ${formatJobId((notif as any).jobId)})` : ""}</span></span>
                           )}
                         </div>
                       </div>

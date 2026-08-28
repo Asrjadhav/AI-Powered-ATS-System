@@ -4,74 +4,70 @@
  */
 
 import axios from "axios";
-import { LocalStorageService } from "../services/localStorageService";
-import { generateId } from "./repositoryUtils";
+
+const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || "http://localhost:8000";
+
+const apiConfig = {
+  headers: {
+    "X-Skip-Interceptor": "true",
+    "Content-Type": "application/json",
+  },
+};
 
 export const EmailTemplateRepository = {
   async getAll(): Promise<any[]> {
     try {
-      const res = await axios.get("/api/templates", { headers: { "X-Skip-Interceptor": "true" } });
-      if (Array.isArray(res.data) && res.data.length > 0) {
-        LocalStorageService.set("templates", res.data);
-        return res.data;
-      }
-    } catch (e) {
-      console.error("Error fetching templates from API, falling back to local storage:", e);
+      const response = await axios.get(`${FASTAPI_BASE_URL}/api/templates`, apiConfig);
+      return response.data || [];
+    } catch (err: any) {
+      console.error("EmailTemplateRepository.getAll error:", err?.response?.data || err.message);
+      throw new Error(err?.response?.data?.detail || "Failed to load email templates from FastAPI.");
     }
-    const list = LocalStorageService.get<any[]>("templates", []);
-    return list || [];
+  },
+
+  async getById(id: string): Promise<any | null> {
+    try {
+      const response = await axios.get(`${FASTAPI_BASE_URL}/api/templates/${encodeURIComponent(id)}`, apiConfig);
+      return response.data || null;
+    } catch (err: any) {
+      if (err?.response?.status === 404) return null;
+      console.error("EmailTemplateRepository.getById error:", err?.response?.data || err.message);
+      throw new Error(err?.response?.data?.detail || "Failed to retrieve template details from server.");
+    }
   },
 
   async createOrUpdate(payload: any): Promise<any> {
-    const list = await this.getAll();
-    const now = new Date().toISOString();
-    const currentUser = LocalStorageService.getCurrentUserEmail();
-
-    const existingIndex = payload.id ? list.findIndex(t => t.id === payload.id) : -1;
-    let result: any;
-
-    if (existingIndex !== -1) {
-      result = {
-        ...list[existingIndex],
-        ...payload,
-        updatedAt: now
-      };
-      list[existingIndex] = result;
-    } else {
-      result = {
-        id: payload.id || generateId("temp"),
-        createdAt: now,
-        updatedAt: now,
-        createdBy: currentUser,
-        status: payload.status || "Active",
-        ...payload
-      };
-      list.push(result);
-    }
-
-    LocalStorageService.set("templates", list);
-
     try {
-      await axios.post("/api/templates", result, { headers: { "X-Skip-Interceptor": "true" } });
-    } catch (e) {
-      console.error("Failed to sync template to backend:", e);
+      if (payload.id) {
+        const response = await axios.patch(`${FASTAPI_BASE_URL}/api/templates/${encodeURIComponent(payload.id)}`, payload, apiConfig);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("templates-updated"));
+        }
+        return response.data;
+      } else {
+        const response = await axios.post(`${FASTAPI_BASE_URL}/api/templates`, payload, apiConfig);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("templates-updated"));
+        }
+        return response.data;
+      }
+    } catch (err: any) {
+      console.error("EmailTemplateRepository.createOrUpdate error:", err?.response?.data || err.message);
+      throw new Error(err?.response?.data?.detail || "Failed to save email template.");
     }
-
-    return result;
   },
 
   async delete(id: string): Promise<boolean> {
-    const list = await this.getAll();
-    const filtered = list.filter(t => t.id !== id);
-    LocalStorageService.set("templates", filtered);
-
     try {
-      await axios.delete(`/api/templates/${id}`, { headers: { "X-Skip-Interceptor": "true" } });
-    } catch (e) {
-      console.error("Failed to delete template on backend:", e);
+      await axios.delete(`${FASTAPI_BASE_URL}/api/templates/${encodeURIComponent(id)}`, apiConfig);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("templates-updated"));
+      }
+      return true;
+    } catch (err: any) {
+      console.error("EmailTemplateRepository.delete error:", err?.response?.data || err.message);
+      throw new Error(err?.response?.data?.detail || "Failed to delete email template.");
     }
-
-    return true;
   }
 };
 

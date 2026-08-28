@@ -92,7 +92,13 @@ export default function TopNavbar({
     <header className="hidden lg:flex w-full h-16 bg-white border-b border-slate-200/80 items-center justify-between px-8 shrink-0 z-30 sticky top-0">
       
       {/* Left: Active Page Title */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
+        {(activeTab === "talent_pool" || activeTab === "jobs" || activeTab === "candidates" || activeTab === "interviews" || activeTab === "offers" || activeTab === "email_templates") && (
+          <span className="text-xs font-semibold text-slate-400 font-sans flex items-center gap-1">
+            <span>Recruitment</span>
+            <span>&gt;</span>
+          </span>
+        )}
         <h1 className="font-display font-extrabold text-[16px] text-slate-800 tracking-tight">
           {getTabLabel()}
         </h1>
@@ -256,7 +262,7 @@ export default function TopNavbar({
                   className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer transition-all"
                 >
                   <LogOut className="h-4 w-4 text-rose-400" />
-                  <span>Sign Out Session</span>
+                  <span>Sign Out</span>
                 </button>
               </div>
             </div>

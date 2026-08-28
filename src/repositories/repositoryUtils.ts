@@ -17,6 +17,41 @@ export const generateId = (prefix: string): string => {
   return `${prefix}-${Math.random().toString(36).substring(2, 9)}`;
 };
 
+export function formatJobId(id?: string | null): string {
+  if (!id) return "";
+  const str = String(id).trim();
+  if (/^JOB-\d{4,}$/i.test(str)) {
+    return str.toUpperCase();
+  }
+  const match = str.match(/^(?:j|job|job-)?0*([1-9]\d*)$/i);
+  if (match) {
+    const num = parseInt(match[1], 10);
+    return `JOB-${String(num).padStart(4, "0")}`;
+  }
+  if (str.toLowerCase().startsWith("job-")) {
+    return str.toUpperCase();
+  }
+  return str;
+}
+
+export function getNextJobId(jobs: any[]): string {
+  let maxNum = 0;
+  if (Array.isArray(jobs)) {
+    jobs.forEach((j: any) => {
+      const jid = j?.id || j?.jobId;
+      if (jid) {
+        const match = String(jid).match(/^(?:j|job|job-)?0*([1-9]\d*)$/i);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (num > maxNum) maxNum = num;
+        }
+      }
+    });
+  }
+  maxNum++;
+  return `JOB-${String(maxNum).padStart(4, "0")}`;
+}
+
 export function generateAIMatchScore(payload: any, candidateObj?: any): number {
   if (payload.aiMatchScore && typeof payload.aiMatchScore === "number" && payload.aiMatchScore > 0) {
     return payload.aiMatchScore;
@@ -226,11 +261,13 @@ export function assignSequentialCandidateIds(candidates: any[]): any[] {
   });
   return sorted.map((c, index) => {
     const seqNum = index + 1;
-    const sequentialId = `CAND-${String(seqNum).padStart(3, '0')}`;
+    const fallbackId = `CAND-${String(seqNum).padStart(4, '0')}`;
+    const canonicalCandidateId = c.candidateId || c.id || fallbackId;
+    const canonicalId = c.id || c.candidateId || fallbackId;
     return {
       ...c,
-      id: sequentialId,
-      candidateId: sequentialId
+      id: canonicalId,
+      candidateId: canonicalCandidateId
     };
   });
 }

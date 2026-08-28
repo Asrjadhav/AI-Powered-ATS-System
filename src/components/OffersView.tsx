@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import axios from "axios";
 import { OfferRepository } from "../repositories/offerRepository";
+import { formatJobId } from "../repositories/repositoryUtils";
 import { 
   Award, 
   Clock, 
@@ -1430,7 +1431,7 @@ encureIT Systems Pvt Ltd`;
                           >
                             <div className="min-w-0">
                               <p className="truncate text-slate-700 dark:text-slate-350">{offer.jobTitle}</p>
-                              <p className="text-[10px] text-slate-400 font-mono mt-0.5">{offer.department}</p>
+                              <p className="text-[10px] text-slate-400 font-mono mt-0.5">{offer.department} {offer.jobId ? `(${formatJobId(offer.jobId)})` : ""}</p>
                             </div>
                           </td>
 
@@ -1746,7 +1747,7 @@ encureIT Systems Pvt Ltd`;
                   <h3 className="font-bold text-base text-slate-950 dark:text-white leading-tight">
                     {selectedOffer.candidateName}
                   </h3>
-                  <p className="text-xs text-slate-400 font-mono mt-0.5">{selectedOffer.id} • {selectedOffer.jobTitle}</p>
+                  <p className="text-xs text-slate-400 font-mono mt-0.5">{selectedOffer.id} • {selectedOffer.jobTitle} {selectedOffer.jobId ? `(Job ID: ${formatJobId(selectedOffer.jobId)})` : ""}</p>
                 </div>
               </div>
 

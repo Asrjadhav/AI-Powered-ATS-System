@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from "react";
+import React, { useState, useMemo, useEffect } from "react";
+import { formatJobId } from "../repositories/repositoryUtils";
 import { LocalStorageService } from "../services/localStorageService";
 import { ReportRepository } from "../repositories";
 import { 
@@ -159,6 +160,7 @@ const RECRUITER_LEADERBOARD = [
 
 const JOB_PERFORMANCE = [
   {
+    id: "JOB-0001",
     title: "Senior React Engineer",
     department: "Engineering",
     applications: 245,
@@ -169,6 +171,7 @@ const JOB_PERFORMANCE = [
     status: "Active"
   },
   {
+    id: "JOB-0003",
     title: "Lead AI Developer",
     department: "Engineering",
     applications: 180,
@@ -179,6 +182,7 @@ const JOB_PERFORMANCE = [
     status: "Active"
   },
   {
+    id: "JOB-0002",
     title: "Product Designer",
     department: "Design",
     applications: 142,
@@ -189,6 +193,7 @@ const JOB_PERFORMANCE = [
     status: "Active"
   },
   {
+    id: "JOB-0004",
     title: "Lead Technical Recruiter",
     department: "Human Resources",
     applications: 94,
@@ -199,6 +204,7 @@ const JOB_PERFORMANCE = [
     status: "On Hold"
   },
   {
+    id: "JOB-0005",
     title: "Senior Product Manager",
     department: "Product Management",
     applications: 110,
@@ -946,7 +952,7 @@ export default function ReportsView() {
                     key={job.title}
                     className="border-b border-slate-100/70 hover:bg-slate-50/50 transition-colors"
                   >
-                    <td className="py-3.5 font-bold text-slate-900">{job.title}</td>
+                    <td className="py-3.5 font-bold text-slate-900">{job.title} {job.id ? <span className="font-mono text-xs font-normal text-slate-400 font-semibold">({formatJobId(job.id)})</span> : ""}</td>
                     <td className="py-3.5 text-slate-600 font-semibold">{job.department}</td>
                     <td className="py-3.5 text-center font-semibold font-mono text-slate-700">{job.applications}</td>
                     <td className="py-3.5 text-center font-semibold font-mono text-indigo-600 font-bold">{job.qualified}</td>

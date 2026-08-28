@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { JobRepository, PreferenceRepository } from "../repositories";
+import { formatJobId } from "../repositories/repositoryUtils";
 import { 
   Briefcase, 
   MapPin, 
@@ -688,6 +689,7 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
   // Apply real-time reactive filters
   const filteredJobs = jobList.filter(job => {
     const matchesSearch = 
+      (job.id && job.id.toLowerCase().includes(searchQuery.toLowerCase())) ||
       job.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       job.department.toLowerCase().includes(searchQuery.toLowerCase()) ||
       job.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -728,8 +730,20 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
           </p>
         </div>
         
-        {/* Actions bar: New Job & Import Wizard */}
+        {/* Actions bar: Copy Link, Import Wizard, New Job */}
         <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => {
+              const masterUrl = `${window.location.origin}/?apply=true`;
+              navigator.clipboard.writeText(masterUrl);
+              triggerToast("📋 Copied Master Public Careers Link!");
+            }}
+            className="flex items-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-semibold text-xs px-3.5 py-2.5 rounded-lg transition-all shadow-xs cursor-pointer active:scale-[0.98]"
+          >
+            <Link className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+            <span>Copy Master Careers Link</span>
+          </button>
+
           <button
             onClick={() => setShowImportModal(true)}
             className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs px-3.5 py-2.5 rounded-lg transition-all shadow-sm cursor-pointer"
@@ -746,30 +760,6 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
             <span>New Job Posting</span>
           </button>
         </div>
-      </div>
-
-      {/* Master Shareable Careers Link Box */}
-      <div className="bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-150 dark:border-indigo-900/40 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 text-left shadow-xs">
-        <div className="space-y-1">
-          <h4 className="text-xs font-bold text-indigo-950 dark:text-indigo-300 flex items-center gap-1.5 uppercase font-mono">
-            <Sparkles className="h-4 w-4 text-indigo-500 animate-pulse" />
-            <span>Master Public Careers Link</span>
-          </h4>
-          <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-            HR, share this single link with all prospective candidates. It displays all active job opportunities in a unified selection list, allowing them to apply for any role. Newly created positions will automatically sync in real-time.
-          </p>
-        </div>
-        <button
-          onClick={() => {
-            const masterUrl = `${window.location.origin}/?apply=true`;
-            navigator.clipboard.writeText(masterUrl);
-            triggerToast("Copied Master Public Careers Link!");
-          }}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg transition-all cursor-pointer shadow-sm active:scale-[0.98] shrink-0"
-        >
-          <Link className="h-4 w-4" />
-          <span>Copy Master Careers Link</span>
-        </button>
       </div>
 
       {/* Real-time search and stats strip */}
@@ -987,6 +977,7 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
                 <thead>
                   <tr className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
                     <th className="py-4 px-6">Job Openings & Dept</th>
+                    <th className="py-4 px-6">Job ID</th>
                     <th className="py-4 px-6">Location</th>
                     <th className="py-4 px-6">Type</th>
                     <th className="py-4 px-6">Pipeline Status</th>
@@ -1040,6 +1031,11 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
                             </div>
                             <p className="text-slate-400 dark:text-slate-500 text-xs font-medium mt-0.5">{job.department}</p>
                           </div>
+                        </td>
+                        
+                        {/* Job ID */}
+                        <td className="py-4 px-6 text-slate-600 dark:text-slate-300 font-mono text-xs font-semibold whitespace-nowrap">
+                          {formatJobId(job.id)}
                         </td>
                         
                         {/* Location */}
@@ -1179,9 +1175,14 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
               {/* Header */}
               <div className="p-6 border-b border-slate-150 flex justify-between items-center bg-slate-900 text-white">
                 <div className="space-y-1 flex-1 min-w-0 pr-4 text-left">
-                  <span className="text-[10px] font-mono font-bold uppercase text-indigo-400 bg-indigo-950/70 border border-indigo-500/20 px-2.5 py-0.5 rounded-md">
-                    {selectedJob.department}
-                  </span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] font-mono font-bold uppercase text-indigo-400 bg-indigo-950/70 border border-indigo-500/20 px-2.5 py-0.5 rounded-md">
+                      {selectedJob.department}
+                    </span>
+                    <span className="text-[10px] font-mono font-bold text-slate-300 bg-slate-800 border border-slate-700 px-2.5 py-0.5 rounded-md">
+                      Job ID: {formatJobId(selectedJob.id)}
+                    </span>
+                  </div>
                   <h3 className="font-display font-extrabold text-xl tracking-tight leading-snug mt-1 truncate">
                     {selectedJob.title}
                   </h3>
@@ -2039,21 +2040,21 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex justify-between">
                 <span>Must-Have Requirements</span>
               </label>
-              <textarea rows={3} placeholder="Must-have technical competencies, skills, and qualifications (one per line)..." value={reqsText} onChange={(e) => setReqsText(e.target.value)} className="w-full px-4 py-2.5 rounded-lg border border-slate-200 text-xs font-mono resize-none" />
+              <textarea rows={3} placeholder="Must-have technical competencies, skills, and qualifications (one per line)..." value={reqsText} onChange={(e) => setReqsText(e.target.value)} className="w-full px-4 py-2.5 rounded-lg border border-slate-200 text-sm font-medium resize-none" />
             </div>
 
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex justify-between">
                 <span>Preferred Skills (Nice to Have)</span>
               </label>
-              <textarea rows={2} placeholder="Nice-to-have skills, preferred certifications, or secondary tech stack (one per line)..." value={preferredSkillsText} onChange={(e) => setPreferredSkillsText(e.target.value)} className="w-full px-4 py-2.5 rounded-lg border border-slate-200 text-xs font-mono resize-none" />
+              <textarea rows={2} placeholder="Nice-to-have skills, preferred certifications, or secondary tech stack (one per line)..." value={preferredSkillsText} onChange={(e) => setPreferredSkillsText(e.target.value)} className="w-full px-4 py-2.5 rounded-lg border border-slate-200 text-sm font-medium resize-none" />
             </div>
 
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex justify-between">
                 <span>Benefits & Perks</span>
               </label>
-              <textarea rows={2} placeholder="Health insurance, remote stipends, learning allowance, equity, or PTO (one per line)..." value={benefitsText} onChange={(e) => setBenefitsText(e.target.value)} className="w-full px-4 py-2.5 rounded-lg border border-slate-200 text-xs font-mono resize-none" />
+              <textarea rows={2} placeholder="Health insurance, remote stipends, learning allowance, equity, or PTO (one per line)..." value={benefitsText} onChange={(e) => setBenefitsText(e.target.value)} className="w-full px-4 py-2.5 rounded-lg border border-slate-200 text-sm font-medium resize-none" />
             </div>
 
               {/* Action Bar */}
@@ -2150,7 +2151,7 @@ Role details: We require a Node.js veteran...
 - Mastered esbuild and bundle tools`}
                         value={importText}
                         onChange={(e) => setImportText(e.target.value)}
-                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-xs font-mono transition-all resize-none leading-relaxed"
+                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm font-medium transition-all resize-none leading-relaxed"
                       />
                     </div>
                   ) : (
@@ -2187,7 +2188,7 @@ Role details: We require a Node.js veteran...
                             rows={4}
                             readOnly
                             value={importText}
-                            className="w-full bg-slate-50 px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono text-slate-500 leading-relaxed resize-none focus:outline-none"
+                            className="w-full bg-slate-50 px-3 py-2 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 leading-relaxed resize-none focus:outline-none"
                           />
                         </div>
                       )}

@@ -5,6 +5,7 @@
 
 import axios from "axios";
 import { LocalStorageService } from "../services/localStorageService";
+import { ApplicationRepository } from "./applicationRepository";
 import {
   generateId,
   normalizePipelineStatus,
@@ -38,6 +39,15 @@ export const SUPPORTED_CANDIDATE_SOURCES = [
   "Indeed"
 ] as const;
 
+const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || "http://localhost:8000";
+
+const apiConfig = {
+  headers: {
+    "X-Skip-Interceptor": "true",
+    "Content-Type": "application/json",
+  },
+};
+
 function findCandidateIndex(candidates: any[], id: string): number {
   if (!id) return -1;
   const rawId = String(id).trim();
@@ -61,13 +71,18 @@ function findCandidateIndex(candidates: any[], id: string): number {
 
 export const CandidateRepository = {
   async getAllCandidates(): Promise<any[]> {
-    const res = await axios.get("/api/candidates", { headers: { "X-Skip-Interceptor": "true" } });
-    if (res.data && Array.isArray(res.data)) {
-      const cleaned = cleanOrphanCandidates(res.data);
-      const sequenced = assignSequentialCandidateIds(cleaned);
-      return sequenced;
+    try {
+      const res = await axios.get(`${FASTAPI_BASE_URL}/api/candidates`, apiConfig);
+      if (res.data && Array.isArray(res.data)) {
+        const cleaned = cleanOrphanCandidates(res.data);
+        const sequenced = assignSequentialCandidateIds(cleaned);
+        return sequenced;
+      }
+    } catch (e) {
+      console.warn("CandidateRepository.getAllCandidates API fetch failed, using local storage fallback:", e);
     }
-    return [];
+    const local = LocalStorageService.get<any[]>("candidates", []);
+    return assignSequentialCandidateIds(cleanOrphanCandidates(local));
   },
 
   async getAll(): Promise<any[]> {
@@ -159,6 +174,12 @@ export const CandidateRepository = {
   },
 
   async getById(id: string): Promise<any | null> {
+    try {
+      const res = await axios.get(`${FASTAPI_BASE_URL}/api/candidates/${encodeURIComponent(id)}`, apiConfig);
+      if (res.data) return res.data;
+    } catch (e) {
+      // Fallback to list search
+    }
     const list = await this.getAll();
     const idx = findCandidateIndex(list, id);
     return idx !== -1 ? list[idx] : null;
@@ -169,33 +190,99 @@ export const CandidateRepository = {
     const now = new Date().toISOString();
     const currentUser = LocalStorageService.getCurrentUserEmail();
 
-    const nextNum = currentList.length + 1;
-    const candidateId = payload.candidateId || (payload.id && String(payload.id).startsWith("CAND-") ? payload.id : `CAND-${String(nextNum).padStart(3, '0')}`);
     const status = normalizePipelineStatus(payload.status || "Applied");
     const aiMatchScore = generateAIMatchScore(payload);
 
-    const newCandidate = {
-      ...payload,
-      id: candidateId,
-      candidateId: candidateId,
+    const newCandidatePayload = {
+      firstName: payload.firstName || "Applicant",
+      lastName: payload.lastName || "Candidate",
+      email: payload.email || `candidate.${Date.now()}@example.com`,
+      phone: payload.phone || "+91 9876543210",
+      currentRole: payload.currentRole || "Not specified",
+      currentCompany: payload.currentCompany || "Not specified",
+      skills: payload.skills || [],
+      experienceYears: payload.experienceYears || 0,
+      resumeText: payload.resumeText || "",
+      linkedinUrl: payload.linkedinUrl || "",
+      portfolioUrl: payload.portfolioUrl || "",
+      source: payload.source || "Manual HR Add Candidate",
+      location: payload.location || "Remote",
+      expectedCTC: payload.expectedCTC || 0,
+      currentCTC: payload.currentCTC || 0,
+      hrNotes: payload.hrNotes || "",
+      hrApprovalStatus: payload.hrApprovalStatus || "approved",
+      experienceLevel: payload.experienceLevel || "Experienced",
+      noticePeriod: payload.noticePeriod || "Immediate",
+      status,
+      aiScore: aiMatchScore,
       createdAt: payload.createdAt || now,
       updatedAt: now,
       createdBy: payload.createdBy || currentUser,
-      status,
-      aiScore: aiMatchScore
     };
 
-    const res = await axios.post("/api/candidates", newCandidate, { headers: { "X-Skip-Interceptor": "true" } });
-    const saved = res.data || newCandidate;
+    let savedCandidate: any = null;
+    const targetJobId = payload.jobId || "JOB-0001";
+    try {
+      const res = await axios.post(`${FASTAPI_BASE_URL}/api/candidates?jobId=${encodeURIComponent(targetJobId)}`, newCandidatePayload, apiConfig);
+      savedCandidate = res.data;
+    } catch (e: any) {
+      if (e?.response?.status === 409) {
+        const errorDetail = e.response.data?.detail || "This candidate has already submitted an application for this job position.";
+        throw new Error(errorDetail);
+      }
+      console.warn("CandidateRepository.create API call encountered error, using local fallback:", e?.response?.data || e);
+      const nextNum = currentList.length + 1;
+      const candidateId = payload.candidateId || `CAND-${String(nextNum).padStart(4, '0')}`;
+      savedCandidate = {
+        ...newCandidatePayload,
+        id: candidateId,
+        candidateId,
+      };
+      currentList.unshift(savedCandidate);
+      LocalStorageService.set("candidates", currentList);
+    }
 
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("candidates-updated"));
     }
-    return saved;
+    return savedCandidate;
   },
 
   async createApplication(payload: any): Promise<any> {
-    return this.create(payload);
+    // 1. Create the Candidate record first
+    const candidate = await this.create(payload);
+
+    // 2. Create the associated Application record linking Candidate + Job
+    const targetJobId = payload.jobId || "JOB-0001";
+    let applicationRecord: any = null;
+    try {
+      applicationRecord = await ApplicationRepository.createApplication({
+        candidateId: candidate.candidateId || candidate.id,
+        jobId: targetJobId,
+        status: payload.status || "Applied",
+        source: payload.source || "Manual HR Add Candidate",
+        atsScore: candidate.aiScore || generateAIMatchScore(payload),
+        appliedRole: candidate.currentRole || payload.currentRole || "Applicant Role",
+        department: payload.department || "Engineering",
+        candidateEmail: candidate.email,
+        candidateName: `${candidate.firstName || ""} ${candidate.lastName || ""}`.trim(),
+      });
+    } catch (appErr) {
+      console.warn("Application creation linking candidate failed:", appErr);
+    }
+
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("applications-updated"));
+      window.dispatchEvent(new CustomEvent("candidates-updated"));
+    }
+
+    return {
+      ...(applicationRecord || {}),
+      candidate,
+      candidateId: candidate.candidateId || candidate.id,
+      jobId: targetJobId,
+      status: payload.status || "Applied",
+    };
   },
 
   async update(id: string, updates: any): Promise<any> {
@@ -205,13 +292,29 @@ export const CandidateRepository = {
       updatedAt: now
     };
 
-    const res = await axios.patch(`/api/candidates/${id}`, payload, { headers: { "X-Skip-Interceptor": "true" } });
-    const updated = res.data || { id, ...updates };
+    try {
+      const res = await axios.put(`${FASTAPI_BASE_URL}/api/candidates/${encodeURIComponent(id)}`, payload, apiConfig);
+      if (res.data) {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("candidates-updated"));
+        }
+        return res.data;
+      }
+    } catch (e) {
+      // Fallback
+    }
+
+    const currentList = await this.getAll();
+    const idx = findCandidateIndex(currentList, id);
+    if (idx !== -1) {
+      currentList[idx] = { ...currentList[idx], ...payload };
+      LocalStorageService.set("candidates", currentList);
+    }
 
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("candidates-updated"));
     }
-    return updated;
+    return { id, ...updates };
   },
 
   async updateStatus(id: string, newStatusRaw: string, currentUserSession?: any): Promise<any> {
@@ -231,32 +334,75 @@ export const CandidateRepository = {
 
     const updatedTimeline = [...timeline, newEvent];
 
-    const res = await axios.patch(`/api/candidates/${id}`, {
+    return this.update(id, {
       status: newStatus,
       timeline: updatedTimeline,
       updatedAt: now
-    }, { headers: { "X-Skip-Interceptor": "true" } });
-
-    const updated = res.data;
-
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("candidates-updated"));
-    }
-    return updated;
+    });
   },
 
   async delete(id: string): Promise<boolean> {
     const rawId = String(id || "").trim();
-    const cleanId = rawId.replace(/^app-/, "").replace(/^cand-/, "").replace(/^tp-/, "");
-
-    await axios.delete(`/api/candidates/${rawId}`, { headers: { "X-Skip-Interceptor": "true" } });
-    if (cleanId && cleanId !== rawId) {
-      await axios.delete(`/api/candidates/${cleanId}`, { headers: { "X-Skip-Interceptor": "true" } }).catch(() => {});
+    if (!rawId) return false;
+    try {
+      await axios.delete(`${FASTAPI_BASE_URL}/api/candidates/${encodeURIComponent(rawId)}`, apiConfig);
+    } catch (e) {
+      console.warn("API Candidate delete error:", e);
     }
+
+    const currentList = await this.getAll();
+    const filtered = currentList.filter(c => c.id !== rawId && c.candidateId !== rawId && c.applicationId !== rawId);
+    LocalStorageService.set("candidates", filtered);
 
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("candidates-updated"));
     }
     return true;
+  },
+
+  async uploadResume(id: string, file: File): Promise<any> {
+    const rawId = String(id || "").trim();
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await axios.post(
+      `${FASTAPI_BASE_URL}/api/candidates/${encodeURIComponent(rawId)}/resume`,
+      formData,
+      {
+        headers: {
+          "X-Skip-Interceptor": "true",
+          "Content-Type": "multipart/form-data",
+        },
+      }
+    );
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("candidates-updated"));
+    }
+    return res.data;
+  },
+
+  getResumeUrl(id: string): string {
+    const rawId = String(id || "").trim();
+    return `${FASTAPI_BASE_URL}/api/candidates/${encodeURIComponent(rawId)}/resume`;
+  },
+
+  async getResumeText(id: string): Promise<{ candidateId: string; fileName: string; text: string }> {
+    const rawId = String(id || "").trim();
+    const res = await axios.get(
+      `${FASTAPI_BASE_URL}/api/candidates/${encodeURIComponent(rawId)}/resume/text`,
+      apiConfig
+    );
+    return res.data;
+  },
+
+  async deleteResume(id: string): Promise<any> {
+    const rawId = String(id || "").trim();
+    const res = await axios.delete(
+      `${FASTAPI_BASE_URL}/api/candidates/${encodeURIComponent(rawId)}/resume`,
+      apiConfig
+    );
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("candidates-updated"));
+    }
+    return res.data;
   }
 };

@@ -22,7 +22,7 @@ export const CandidateWorkflowService = {
       const candidateName = candObj.name || `${candObj.firstName || ""} ${candObj.lastName || ""}`.trim() || "Candidate";
       const candidateEmail = candObj.email || "";
       const jobTitle = candObj.appliedJob || candObj.job?.title || candObj.currentRole || "Software Engineer";
-      const jobId = candObj.jobId || "j1";
+      const jobId = candObj.jobId || "JOB-0001";
 
       // 2. Coordinate with InterviewRepository if moving to Interview stage
       if (newStatus === "Interviewing" || newStatus === "Interview" || newStatus === "Technical Interview") {

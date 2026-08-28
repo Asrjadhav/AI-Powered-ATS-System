@@ -165,6 +165,7 @@ export interface Candidate {
   specialization?: string;
   yearOfPassing?: string;
   totalExperience?: string;
+  totalExperienceMonths?: number;
   keySkills?: string;
   inHandSalary?: string;
   projectsWorkedOn?: string;

@@ -163,7 +163,44 @@ export default function App() {
     };
   }, []);
 
-  const [activeTab, setActiveTab] = useState<string>("dashboard");
+  const [activeTab, setActiveTabState] = useState<string>(() => {
+    try {
+      const hash = window.location.hash.replace("#", "").trim();
+      if (hash) return hash;
+      const saved = sessionStorage.getItem("ats_active_tab");
+      if (saved) return saved;
+    } catch (e) {
+      // Fallback
+    }
+    return "dashboard";
+  });
+
+  const setActiveTab = (tab: string) => {
+    setActiveTabState(tab);
+    try {
+      sessionStorage.setItem("ats_active_tab", tab);
+      if (window.location.hash !== `#${tab}`) {
+        window.history.replaceState(null, "", `#${tab}`);
+      }
+    } catch (e) {
+      // Fallback
+    }
+  };
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace("#", "").trim();
+      if (hash && hash !== activeTab) {
+        setActiveTabState(hash);
+        try {
+          sessionStorage.setItem("ats_active_tab", hash);
+        } catch (e) {}
+      }
+    };
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, [activeTab]);
+
   const [selectedApplication, setSelectedApplication] = useState<Application | null>(null);
 
   // Navigation filters passed from dashboard card clicks

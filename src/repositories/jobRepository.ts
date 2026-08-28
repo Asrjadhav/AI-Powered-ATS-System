@@ -4,27 +4,30 @@
  */
 
 import axios from "axios";
-import { LocalStorageService } from "../services/localStorageService";
-import { generateId } from "./repositoryUtils";
+import { generateId, formatJobId } from "./repositoryUtils";
+
+const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || "http://localhost:8000";
+
+const apiConfig = {
+  headers: {
+    "X-Skip-Interceptor": "true",
+    "Content-Type": "application/json",
+  },
+};
 
 export const JobRepository = {
   async getAll(): Promise<any[]> {
-    const list = LocalStorageService.get<any[]>("jobs", []);
-    const candidates = LocalStorageService.get<any[]>("candidates", []);
-    return list.map(job => {
-      let status = job.status;
-      if (status === "published") status = "active";
-      const count = candidates.filter((c: any) => 
-        c.jobId === job.id || 
-        c.appliedJobId === job.id || 
-        (c.appliedRole && job.title && c.appliedRole.toLowerCase() === job.title.toLowerCase())
-      ).length;
-      return {
+    try {
+      const response = await axios.get(`${FASTAPI_BASE_URL}/api/jobs`, apiConfig);
+      return (response.data || []).map((job: any) => ({
         ...job,
-        status,
-        candidateCount: count,
-      };
-    });
+        id: formatJobId(job.jobId || job.id),
+        status: job.status === "published" ? "active" : job.status,
+      }));
+    } catch (err: any) {
+      console.error("JobRepository.getAll error:", err?.response?.data || err.message);
+      throw new Error(err?.response?.data?.detail || "Failed to retrieve job openings from server.");
+    }
   },
 
   async getActiveCount(): Promise<number> {
@@ -36,66 +39,99 @@ export const JobRepository = {
   },
 
   async getById(id: string): Promise<any | null> {
-    const list = await this.getAll();
-    return list.find(j => j.id === id) || null;
+    try {
+      const targetId = formatJobId(id);
+      const response = await axios.get(`${FASTAPI_BASE_URL}/api/jobs/${encodeURIComponent(targetId)}`, apiConfig);
+      if (response.data) {
+        return {
+          ...response.data,
+          id: formatJobId(response.data.jobId || response.data.id),
+          status: response.data.status === "published" ? "active" : response.data.status,
+        };
+      }
+      return null;
+    } catch (err: any) {
+      if (err?.response?.status === 404) return null;
+      console.error("JobRepository.getById error:", err?.response?.data || err.message);
+      throw new Error(err?.response?.data?.detail || "Failed to retrieve job details.");
+    }
   },
 
   async create(payload: any): Promise<any> {
-    const list = await this.getAll();
-    const now = new Date().toISOString();
-    const currentUser = LocalStorageService.getCurrentUserEmail();
-
-    const newJob = {
-      id: payload.id || generateId("job"),
-      createdAt: payload.createdAt || now,
-      updatedAt: now,
-      createdBy: payload.createdBy || currentUser,
-      status: payload.status || "published",
-      title: payload.title || "Untitled Role",
-      department: payload.department || "Engineering",
-      location: payload.location || "Remote",
-      ...payload,
-    };
-
-    list.unshift(newJob);
-    LocalStorageService.set("jobs", list);
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("jobs-updated"));
+    try {
+      const response = await axios.post(`${FASTAPI_BASE_URL}/api/jobs`, payload, apiConfig);
+      const created = response.data;
+      const formatted = {
+        ...created,
+        id: formatJobId(created.jobId || created.id),
+        status: created.status === "published" ? "active" : created.status,
+      };
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("jobs-updated"));
+      }
+      return formatted;
+    } catch (err: any) {
+      console.error("JobRepository.create error:", err?.response?.data || err.message);
+      throw new Error(err?.response?.data?.detail || "Failed to create job posting.");
     }
-    return newJob;
   },
 
   async update(id: string, updates: any): Promise<any> {
-    const list = await this.getAll();
-    const index = list.findIndex(j => j.id === id);
-    if (index === -1) throw new Error("Job not found.");
-
-    const updatedJob = {
-      ...list[index],
-      ...updates,
-      updatedAt: new Date().toISOString(),
-    };
-
-    list[index] = updatedJob;
-    LocalStorageService.set("jobs", list);
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("jobs-updated"));
+    try {
+      const targetId = formatJobId(id);
+      const response = await axios.put(`${FASTAPI_BASE_URL}/api/jobs/${encodeURIComponent(targetId)}`, updates, apiConfig);
+      const updated = response.data;
+      const formatted = {
+        ...updated,
+        id: formatJobId(updated.jobId || updated.id),
+        status: updated.status === "published" ? "active" : updated.status,
+      };
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("jobs-updated"));
+      }
+      return formatted;
+    } catch (err: any) {
+      console.error("JobRepository.update error:", err?.response?.data || err.message);
+      throw new Error(err?.response?.data?.detail || "Failed to update job details.");
     }
-    return updatedJob;
   },
 
   async updateStatus(id: string, newStatus: string): Promise<any> {
-    return this.update(id, { status: newStatus });
+    try {
+      const targetId = formatJobId(id);
+      const response = await axios.patch(
+        `${FASTAPI_BASE_URL}/api/jobs/${encodeURIComponent(targetId)}/status`,
+        { status: newStatus },
+        apiConfig
+      );
+      const updated = response.data;
+      const formatted = {
+        ...updated,
+        id: formatJobId(updated.jobId || updated.id),
+        status: updated.status === "published" ? "active" : updated.status,
+      };
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("jobs-updated"));
+      }
+      return formatted;
+    } catch (err: any) {
+      console.error("JobRepository.updateStatus error:", err?.response?.data || err.message);
+      throw new Error(err?.response?.data?.detail || "Failed to update job status.");
+    }
   },
 
   async delete(id: string): Promise<boolean> {
-    const list = await this.getAll();
-    const filtered = list.filter(j => j.id !== id);
-    LocalStorageService.set("jobs", filtered);
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("jobs-updated"));
+    try {
+      const targetId = formatJobId(id);
+      await axios.delete(`${FASTAPI_BASE_URL}/api/jobs/${encodeURIComponent(targetId)}`, apiConfig);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("jobs-updated"));
+      }
+      return true;
+    } catch (err: any) {
+      console.error("JobRepository.delete error:", err?.response?.data || err.message);
+      throw new Error(err?.response?.data?.detail || "Failed to delete job posting.");
     }
-    return true;
   },
 
   async importParse(payload: { content?: string; fileData?: string; fileName?: string | null }): Promise<{ success: boolean; data: any[]; warning?: string }> {
@@ -175,24 +211,11 @@ export const JobRepository = {
   },
 
   async importConfirm(jobs: any[]): Promise<any[]> {
-    const list = await this.getAll();
-    const now = new Date().toISOString();
-    const currentUser = LocalStorageService.getCurrentUserEmail();
-
-    const imported = jobs.map(j => ({
-      id: j.id || generateId("job"),
-      createdAt: now,
-      updatedAt: now,
-      createdBy: currentUser,
-      ...j,
-      status: (j.status === "published" ? "active" : j.status) || "active",
-      title: j.title || "Imported Role",
-      department: j.department || "Engineering",
-      location: j.location || "Remote",
-    }));
-
-    const combined = [...imported, ...list];
-    LocalStorageService.set("jobs", combined);
-    return imported;
+    const createdList: any[] = [];
+    for (const job of jobs) {
+      const created = await this.create(job);
+      createdList.push(created);
+    }
+    return createdList;
   }
 };

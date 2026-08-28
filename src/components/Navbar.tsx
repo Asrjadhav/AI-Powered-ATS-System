@@ -71,9 +71,9 @@ export default function Navbar({ activeTab, setActiveTab, notifications, onSimul
       <div className="max-w-full mx-auto px-4 sm:px-8 lg:px-10">
         <div className="flex items-center justify-between h-16">
           {/* Left: Sleek, bold logo for encureIT */}
-          <div className="flex items-center gap-1.5 shrink-0 cursor-pointer" onClick={() => setActiveTab("dashboard")}>
-            <div className="h-8 w-8 rounded-lg bg-indigo-600 flex items-center justify-center shadow-md">
-              <span className="text-white font-black text-base">E</span>
+          <div className="flex items-center gap-2 shrink-0 cursor-pointer" onClick={() => setActiveTab("dashboard")}>
+            <div className="h-8 w-8 rounded-lg bg-white p-1 flex items-center justify-center shadow-md shrink-0 overflow-hidden">
+              <img src="/encureit_icon.png" alt="EncureIT Logo" className="h-full w-full object-contain" />
             </div>
             <div className="flex items-center gap-1">
               <span className="font-display font-extrabold text-base text-white tracking-tight">
@@ -257,7 +257,7 @@ export default function Navbar({ activeTab, setActiveTab, notifications, onSimul
                     className="w-full py-1.5 px-2.5 bg-rose-500/10 hover:bg-rose-600 hover:text-white border border-rose-500/20 text-rose-400 rounded-md text-[10px] font-bold tracking-tight transition-all text-center flex items-center justify-center gap-1.5 cursor-pointer uppercase mt-2"
                   >
                     <LogOut className="h-3.5 w-3.5 shrink-0" />
-                    <span>Disconnect Console</span>
+                    <span>Sign Out</span>
                   </button>
                 </div>
               )}
@@ -346,7 +346,7 @@ export default function Navbar({ activeTab, setActiveTab, notifications, onSimul
               className="w-full mt-3 flex items-center justify-center gap-2 py-2 px-3 bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/20 rounded-lg text-xs font-bold transition-all cursor-pointer uppercase"
             >
               <LogOut className="h-4 w-4 shrink-0" />
-              <span>Disconnect Console</span>
+              <span>Sign Out</span>
             </button>
           </div>
         </div>

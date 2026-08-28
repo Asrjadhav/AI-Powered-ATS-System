@@ -1,3 +1,5 @@
+import axios from "axios";
+
 export interface PersonalInformation {
   firstName: string;
   lastName: string;
@@ -160,12 +162,12 @@ export const mapStructuredToParsedCandidate = (
     firstName: pi.firstName || "",
     lastName: pi.lastName || "",
     email: pi.email || "",
-    phone: pi.mobileNumber || "+91 ",
+    phone: pi.mobileNumber || "",
     role: pro.currentJobTitle || "",
     company: pro.currentCompany || "",
     skills: skillsCsv,
     resumeText: resumeText || `${fileName} parsed text index.`,
-    location: pi.currentLocation || "Pune, India",
+    location: pi.currentLocation || "",
     source: "Uploaded CV",
     experienceYears: expYears,
     educationText: educationString,
@@ -173,16 +175,73 @@ export const mapStructuredToParsedCandidate = (
   };
 };
 
-/**
- * Improve the resume parsing workflow and backend logic.
- * Parses Candidate uploaded Resume (PDF, DOCX, etc.) using placeholder logic,
- * separating the service layer completely so it can later query a FastAPI AI endpoint.
- */
+// Improve the resume parsing workflow and backend logic.
 export const simulateResumeExtraction = async (file: File): Promise<ParsedCandidate> => {
-  // Simulate network/parsing delay (Aura parser indexing phase)
-  await new Promise((resolve) => setTimeout(resolve, 1500));
-
   const filename = file.name.toLowerCase();
+
+  // Try high-accuracy server-side AI resume parsing first
+  try {
+    const base64Data = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64 = result.includes(",") ? result.split(",")[1] : result;
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+    const res = await axios.post("/api/candidates/parse-resume", {
+      fileData: base64Data,
+      fileName: file.name
+    });
+
+    if (res.data?.success && res.data?.parsed) {
+      const p = res.data.parsed;
+      return mapStructuredToParsedCandidate({
+        personalInformation: {
+          firstName: p.firstName || "",
+          lastName: p.lastName || "",
+          fullName: p.fullName || `${p.firstName || ""} ${p.lastName || ""}`.trim(),
+          email: p.email || "",
+          mobileNumber: p.phone || "",
+          currentLocation: p.location || "",
+          linkedIn: "",
+          gitHub: "",
+          portfolio: "",
+        },
+        professionalInformation: {
+          currentJobTitle: p.role || "",
+          currentCompany: p.company || "",
+          previousCompanies: [],
+          totalExperience: p.totalExperience || (typeof p.experienceYears === 'number' ? `${p.experienceYears} Years` : "Fresher"),
+          relevantExperience: p.totalExperience || (typeof p.experienceYears === 'number' ? `${p.experienceYears} Years` : "Fresher"),
+        },
+        education: {
+          degree: p.educationText || "",
+          branch: "",
+          university: "",
+          passingYear: "",
+          cgpa: "",
+        },
+        skills: {
+          programmingLanguages: p.skills ? p.skills.split(", ") : [],
+          frameworks: [],
+          databases: [],
+          cloud: [],
+          tools: [],
+          softSkills: [],
+        },
+        projects: [],
+        certifications: [],
+        languages: [],
+        resumeSummary: p.resumeSummary || "",
+      }, file.name);
+    }
+  } catch (serverErr) {
+    console.warn("Server-side resume parsing failed, using fallback parser:", serverErr);
+  }
 
   // 1. Precise check for predefined test candidates for quick-testing consistency
   if (filename.includes("riya") || filename.includes("sen")) {
@@ -353,56 +412,79 @@ export const simulateResumeExtraction = async (file: File): Promise<ParsedCandid
   const expMatch = text.match(expRegex);
   const totalExp = expMatch ? `${expMatch[1]} years` : "";
 
-  // Heuristic Name from Filename
-  let extractedFirstName = "";
-  let extractedLastName = "";
-  let extractedFullName = "";
+  // Heuristic Name & Role from Filename
+  let extractedFirstName = "Candidate";
+  let extractedLastName = "Applicant";
+  let extractedRole = "";
 
-  // Clean filename to attempt candidate name extraction
-  const cleanName = file.name
+  let cleanName = file.name
     .replace(/\.[^/.]+$/, "") // Remove extension
     .replace(/[-_]/g, " ") // Replace dashes/underscores with spaces
-    .replace(/\b(?:resume|cv|pdf|docx|uploaded|profile|draft)\b/gi, "") // Remove common keywords
+    .replace(/\b(?:resume|cv|pdf|docx|uploaded|profile|draft)\b/gi, "")
     .trim();
 
-  if (cleanName.length > 0) {
-    const parts = cleanName.split(/\s+/);
-    extractedFirstName = parts[0] ? parts[0].charAt(0).toUpperCase() + parts[0].slice(1) : "";
-    extractedLastName = parts.slice(1).join(" ") ? parts.slice(1).join(" ").charAt(0).toUpperCase() + parts.slice(1).join(" ").slice(1) : "";
-    extractedFullName = `${extractedFirstName} ${extractedLastName}`.trim();
+  const roleKeywords = [
+    "it program manager", "program manager", "project manager", "project coordinator", "project analyst",
+    "marketing manager", "data analyst", "senior python engineer", "software engineer", 
+    "devops engineer", "ui ux designer", "cloud architect", "product designer", "data scientist"
+  ];
+  for (const rk of roleKeywords) {
+    if (cleanName.toLowerCase().includes(rk)) {
+      extractedRole = rk.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+      cleanName = cleanName.replace(new RegExp(rk, "gi"), "").trim();
+      break;
+    }
   }
+
+  const parts = cleanName.split(/\s+/).filter(Boolean);
+  if (parts.length > 0) {
+    extractedFirstName = parts[0].charAt(0).toUpperCase() + parts[0].slice(1).toLowerCase();
+    if (parts.length > 1) {
+      extractedLastName = parts.slice(1).map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(" ");
+    } else {
+      extractedLastName = "";
+    }
+  }
+  const extractedFullName = `${extractedFirstName} ${extractedLastName}`.trim();
+
+  // Ensure valid Email
+  let finalEmail = email || "";
+
+  // Ensure valid Phone
+  let finalPhone = phone || "";
 
   // Heuristic Skills Matching
   const knownSkills = [
-    "React", "TypeScript", "Node.js", "AWS", "PostgreSQL", "Python", 
-    "Java", "C++", "Docker", "Kubernetes", "Figma", "Git", "SQL"
+    "Windows Server", "Active Directory", "DNS", "DHCP", "IIS", "SQL Server", "PowerShell",
+    "VMware", "AWS", "GCP", "Azure", "Git", "Java", "Python", "JavaScript", "React", "TypeScript",
+    "Node.js", "PostgreSQL", "Docker", "Kubernetes", "Figma", "SQL", "Linux"
   ];
   const matchedSkills: string[] = [];
   knownSkills.forEach((s) => {
-    if (text.toLowerCase().includes(s.toLowerCase())) {
+    if (text.toLowerCase().includes(s.toLowerCase()) || cleanName.toLowerCase().includes(s.toLowerCase())) {
       matchedSkills.push(s);
     }
   });
 
-  // Construct structured placeholder JSON with empty strings/arrays if not extracted
+  // Construct structured data
   const customStructured: StructuredCandidateData = {
     personalInformation: {
       firstName: extractedFirstName,
       lastName: extractedLastName,
       fullName: extractedFullName,
-      email: email,
-      mobileNumber: phone,
+      email: finalEmail,
+      mobileNumber: finalPhone,
       currentLocation: "",
       linkedIn: "",
       gitHub: "",
       portfolio: "",
     },
     professionalInformation: {
-      currentJobTitle: "",
+      currentJobTitle: extractedRole || "",
       currentCompany: "",
       previousCompanies: [],
-      totalExperience: totalExp,
-      relevantExperience: "",
+      totalExperience: totalExp || "Fresher",
+      relevantExperience: totalExp || "Fresher",
     },
     education: {
       degree: "",
@@ -412,11 +494,11 @@ export const simulateResumeExtraction = async (file: File): Promise<ParsedCandid
       cgpa: "",
     },
     skills: {
-      programmingLanguages: matchedSkills.filter(s => ["Python", "Java", "C++", "Go", "TypeScript"].includes(s)),
+      programmingLanguages: matchedSkills.filter(s => ["Python", "Java", "C++", "Go", "TypeScript", "JavaScript"].includes(s)),
       frameworks: matchedSkills.filter(s => ["React", "Node.js"].includes(s)),
-      databases: matchedSkills.filter(s => ["PostgreSQL", "SQL"].includes(s)),
-      cloud: matchedSkills.filter(s => ["AWS", "GCP"].includes(s)),
-      tools: matchedSkills.filter(s => ["Docker", "Kubernetes", "Figma", "Git"].includes(s)),
+      databases: matchedSkills.filter(s => ["PostgreSQL", "SQL Server", "SQL"].includes(s)),
+      cloud: matchedSkills.filter(s => ["AWS", "GCP", "Azure"].includes(s)),
+      tools: matchedSkills.filter(s => ["Docker", "Kubernetes", "Figma", "Git", "PowerShell", "VMware", "Windows Server", "Active Directory", "DNS", "DHCP", "IIS"].includes(s)),
       softSkills: [],
     },
     projects: [],
