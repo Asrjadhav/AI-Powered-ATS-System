@@ -76,7 +76,7 @@ import { LocalStorageService } from "../services/localStorageService";
 import { CandidateRepository, ApplicationRepository, JobRepository, InterviewRepository, TalentPoolRepository } from "../repositories";
 import { CandidateWorkflowService } from "../services/workflowService";
 
-const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || "http://localhost:8000";
+const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || (import.meta as any).env?.VITE_API_URL || "https://ats-fastapi-backend.onrender.com";
 const apiConfig = {
   headers: {
     "X-Skip-Interceptor": "true",

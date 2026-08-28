@@ -39,7 +39,7 @@ export const SUPPORTED_CANDIDATE_SOURCES = [
   "Indeed"
 ] as const;
 
-const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || "http://localhost:8000";
+const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || (import.meta as any).env?.VITE_API_URL || "https://ats-fastapi-backend.onrender.com";
 
 const apiConfig = {
   headers: {
