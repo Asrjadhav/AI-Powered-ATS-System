@@ -18,6 +18,10 @@ except Exception as _e:
 try:
     with engine.connect() as _conn:
         _conn.execute(text('ALTER TABLE candidates ADD COLUMN IF NOT EXISTS "totalExperienceMonths" INTEGER DEFAULT 0;'))
+        _conn.execute(text('ALTER TABLE users ADD COLUMN IF NOT EXISTS "passwordHash" VARCHAR;'))
+        _conn.execute(text('ALTER TABLE users ADD COLUMN IF NOT EXISTS "phone" VARCHAR;'))
+        _conn.execute(text('ALTER TABLE users ADD COLUMN IF NOT EXISTS "bio" VARCHAR;'))
+        _conn.execute(text('ALTER TABLE users ADD COLUMN IF NOT EXISTS "timezone" VARCHAR;'))
         _conn.commit()
 except Exception:
     pass
@@ -26,8 +30,10 @@ except Exception:
 try:
     from seed_notifications import seed_notifications
     from seed_email_templates import seed_email_templates
+    from seed_users import seed_users
     seed_notifications()
     seed_email_templates()
+    seed_users()
 except Exception as _seed_err:
     print(f"[NOTE] Default data seeding note: {_seed_err}")
 
@@ -37,8 +43,10 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configure CORS for Vite (http://localhost:5173), Express (http://localhost:3000), and local dev
+# Configure CORS for Vite (http://localhost:5173), Express (http://localhost:3000), and production Render domains
 origins = [
+    "https://ai-powered-ats-system-5avq.onrender.com",
+    "https://ats-fastapi-backend.onrender.com",
     "http://localhost:3000",
     "http://localhost:5173",
     "http://127.0.0.1:3000",
@@ -93,6 +101,7 @@ from routers.talent_pool import router as talent_pool_router
 from routers.offers import router as offers_router
 from routers.email_templates import router as email_templates_router
 from routers.notifications import router as notifications_router
+from routers.auth import router as auth_router
 
 app.include_router(jobs_router, prefix="/api", tags=["Jobs"])
 app.include_router(candidates_router, prefix="/api", tags=["Candidates"])
@@ -102,6 +111,7 @@ app.include_router(talent_pool_router, prefix="/api", tags=["Talent Pool"])
 app.include_router(offers_router, prefix="/api", tags=["Offers"])
 app.include_router(email_templates_router, prefix="/api", tags=["Email Templates"])
 app.include_router(notifications_router, prefix="/api", tags=["Notifications"])
+app.include_router(auth_router)
 
 if __name__ == "__main__":
     import uvicorn

@@ -22,6 +22,14 @@ interface LoginViewProps {
   onForgotPassword?: () => void;
 }
 
+const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || (import.meta as any).env?.VITE_API_URL || "https://ats-fastapi-backend.onrender.com";
+const apiConfig = {
+  headers: {
+    "X-Skip-Interceptor": "true",
+    "Content-Type": "application/json",
+  },
+};
+
 export default function LoginView({ onLoginSuccess }: LoginViewProps) {
   const [view, setView] = useState<"login" | "forgot" | "reset">(() => {
     const params = new URLSearchParams(window.location.search);
@@ -72,7 +80,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
 
     try {
       if (view === "login") {
-        const res = await axios.post("/api/auth/login", { email, password });
+        const res = await axios.post(`${FASTAPI_BASE_URL}/api/auth/login`, { email, password }, apiConfig);
         if (res.data.success) {
           if (rememberMe) {
             LocalStorageService.set("remember_credentials", "true");
@@ -90,7 +98,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
           }, 800);
         }
       } else if (view === "forgot") {
-        const res = await axios.post("/api/auth/forgot-password", { email });
+        const res = await axios.post(`${FASTAPI_BASE_URL}/api/auth/forgot-password`, { email }, apiConfig);
         if (res.data.success) {
           setSuccess(res.data.message || "Password recovery instructions dispatched.");
           if (res.data.isSandbox) {
@@ -99,7 +107,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
           }
         }
       } else if (view === "reset") {
-        const res = await axios.post("/api/auth/reset-password", { token: resetToken, password });
+        const res = await axios.post(`${FASTAPI_BASE_URL}/api/auth/reset-password`, { token: resetToken, password }, apiConfig);
         if (res.data.success) {
           setSuccess("Password updated successfully! Transitioning to login...");
           // Clean token from address bar

@@ -8,7 +8,7 @@ import main
 from database import engine, Base
 
 def run_tests():
-    print("\n--- STARTING DATABASE INITIALIZATION & GET ENDPOINTS TEST ---")
+    print("\n--- STARTING DATABASE INITIALIZATION & ENDPOINTS TEST ---")
 
     # 1. Verify Base.metadata.create_all initializes all tables cleanly
     Base.metadata.create_all(bind=engine)
@@ -34,8 +34,27 @@ def run_tests():
         print(f"   [{res.status_code} {res.reason_phrase}] {label} -> GET {path}")
         assert res.status_code == expected_code, f"Expected {expected_code} for {path}, got {res.status_code}. Output: {res.text}"
 
+    print("\n3. Testing POST /api/auth/login Endpoint:")
+    
+    # Test valid login
+    valid_payload = {"email": "aditijadhav2828@gmail.com", "password": "password123"}
+    valid_res = client.post("/api/auth/login", json=valid_payload)
+    print(f"   [{valid_res.status_code} {valid_res.reason_phrase}] Valid Recruiter Login -> POST /api/auth/login")
+    assert valid_res.status_code == 200, f"Expected 200 for valid login, got {valid_res.status_code}: {valid_res.text}"
+    data = valid_res.json()
+    assert data.get("success") is True, f"Expected success=True, got {data}"
+    assert "token" in data, "Token missing in response"
+    assert data["user"]["email"] == "aditijadhav2828@gmail.com", "Email mismatch"
+    print(f"   -> Authenticated User: {data['user']['name']} ({data['user']['role']})")
+
+    # Test invalid login
+    invalid_payload = {"email": "aditijadhav2828@gmail.com", "password": "wrong_password_999"}
+    invalid_res = client.post("/api/auth/login", json=invalid_payload)
+    print(f"   [{invalid_res.status_code} {invalid_res.reason_phrase}] Invalid Login -> POST /api/auth/login")
+    assert invalid_res.status_code == 401, f"Expected 401 for invalid login, got {invalid_res.status_code}"
+
     print("\n=============================================================")
-    print("ALL 8 GET ENDPOINTS + HEALTHZ PASSED CLEANLY (HTTP 200 OK)!")
+    print("ALL 8 GET ENDPOINTS + HEALTHZ + AUTH LOGIN PASSED (100% OK)!")
     print("=============================================================")
 
 if __name__ == "__main__":
