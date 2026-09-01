@@ -74,14 +74,25 @@ export const StatsRepository = {
       }
     });
 
-    const pendingReviews = candidates.filter(c => isPendingEvaluation(c)).length;
-    const aiShortlistedCount = candidates.filter(c => isAIShortlisted(c, matchThreshold)).length;
-    const interviewStageCount = candidates.filter(c => isInterviewStage(c)).length;
-    const offeredCount = candidates.filter(c => isOfferedStage(c)).length;
-    const hiredCount = candidates.filter(c => isHiredStage(c)).length;
-    const rejectedCount = candidates.filter(c => isRejectedStage(c)).length;
-    const appsTodayCount = candidates.filter(c => isTodayCandidate(c)).length;
-    const newApplicationsCount = candidates.filter(c => isNewCandidate(c)).length;
+    const dataset = applications.length > 0 ? applications.map(app => {
+      const matchedCand = candidates.find(c => c.id === app.candidateId || c.candidateId === app.candidateId || (c.email && app.candidateEmail && c.email.toLowerCase() === app.candidateEmail.toLowerCase())) || {};
+      return {
+        ...matchedCand,
+        ...app,
+        status: app.status || matchedCand.status || "New",
+        aiScore: app.atsScore !== undefined && app.atsScore !== null ? app.atsScore : matchedCand.aiScore,
+        aiEvaluation: app.aiEvaluation || matchedCand.aiEvaluation,
+      };
+    }) : candidates;
+
+    const pendingReviews = dataset.filter(c => isPendingEvaluation(c)).length;
+    const aiShortlistedCount = dataset.filter(c => isAIShortlisted(c, matchThreshold)).length;
+    const interviewStageCount = dataset.filter(c => isInterviewStage(c)).length;
+    const offeredCount = dataset.filter(c => isOfferedStage(c)).length;
+    const hiredCount = dataset.filter(c => isHiredStage(c)).length;
+    const rejectedCount = dataset.filter(c => isRejectedStage(c)).length;
+    const appsTodayCount = dataset.filter(c => isTodayCandidate(c)).length;
+    const newApplicationsCount = dataset.filter(c => isNewCandidate(c)).length;
 
     return {
       totalJobs: activeVacancies,

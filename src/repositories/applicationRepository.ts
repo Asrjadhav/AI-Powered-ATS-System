@@ -26,6 +26,7 @@ export interface ApplicationRecord {
   status: string;
   source: string;
   atsScore: number;
+  aiEvaluation?: any;
   createdDate?: string;
   createdAt: string;
   updatedAt: string;
@@ -48,6 +49,7 @@ export const ApplicationRepository = {
           status: item.status || "Applied",
           source: item.source || "Career Website",
           atsScore: item.atsScore ?? item.aiEvaluation?.score ?? 75,
+          aiEvaluation: item.aiEvaluation,
           createdAt: item.createdAt || new Date().toISOString(),
           updatedAt: item.updatedAt || new Date().toISOString(),
           candidateEmail: item.candidateEmail,

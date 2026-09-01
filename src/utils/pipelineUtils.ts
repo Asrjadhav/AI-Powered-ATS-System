@@ -69,8 +69,11 @@ export function isAIShortlisted(cand: any, matchThreshold = DEFAULT_MATCH_THRESH
   if (!cand) return false;
   const norm = normalizeCandidateStatus(cand.status || cand.candidate?.status).toLowerCase();
   
-  // If candidate is already in Interview, Offer, Hired, or Rejected stage, they are no longer in Shortlisted stage
+  // Candidates in New, Applied, Pending Evaluation, Interview, Offered, Hired, or Rejected stage are not AI Shortlisted
   if (
+    norm === "new" ||
+    norm === "applied" ||
+    norm === "pending evaluation" ||
     norm.includes("interview") || 
     norm === "offered" || 
     norm === "hired" || 
@@ -87,6 +90,7 @@ export function isAIShortlisted(cand: any, matchThreshold = DEFAULT_MATCH_THRESH
     typeof cand.aiEvaluation?.score === "number" ||
     typeof cand.aiScore === "number" ||
     typeof cand.aiMatchScore === "number" ||
+    typeof cand.atsScore === "number" ||
     typeof cand.candidate?.aiScore === "number";
 
   const score = getCandidateAIScore(cand);
