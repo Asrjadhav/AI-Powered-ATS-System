@@ -308,6 +308,11 @@ def screen_application_resume(db: Session, application_id: str) -> dict:
 
     # Resolve job from JobModel
     job = job_service.get_job_by_id_or_job_id(db, db_app.jobId) if db_app.jobId else None
+    if db_app.jobId and not job:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Selected job opening '{db_app.jobId}' does not exist in backend database."
+        )
 
     # Construct structured job_description object from JobModel fields
     job_info = {
@@ -502,11 +507,13 @@ Output ONLY valid JSON matching this exact structure:
         combined_resume = (skills_text + " " + full_resume_text).lower()
         cand_role_str = (cand.currentRole or "") if cand else ""
 
-        # Generic Role Words (Never treated as technical skills)
+        # Generic Role & Soft-Skill Words (Never treated as independent technical skills)
         ROLE_WORDS = {
             "developer", "engineer", "analyst", "manager", "designer", "consultant", 
             "specialist", "lead", "senior", "junior", "intern", "architect", "administrator",
-            "director", "head", "officer", "executive", "associate", "trainee", "vp"
+            "director", "head", "officer", "executive", "associate", "trainee", "vp",
+            "backend", "frontend", "fullstack", "full", "stack", "development", "programmer",
+            "programming", "software"
         }
 
         # Strict Stop Words / Header Filter to eliminate non-technical boilerplate pollution
@@ -517,8 +524,30 @@ Output ONLY valid JSON matching this exact structure:
             "musthave", "goodtohave", "responsibilities", "requirements", "preferred", "general", 
             "level", "range", "education", "requirement", "title", "department", "none",
             "location", "position", "company", "years", "year", "strong", "working", "building",
-            "knowledge", "proven", "understanding", "degree", "field", "bachelor", "master", "plus"
+            "knowledge", "proven", "understanding", "degree", "field", "bachelor", "master", "plus",
+            "problem", "solving", "communication", "soft", "languages", "workflows", "workflow",
+            "mechanisms", "mechanism", "authentication", "authorization", "debugging", "duties",
+            "basic", "good", "excellent", "written", "verbal", "analytical", "related", "field"
         })
+
+        # Known technical tokens for prose sentence skill extraction
+        KNOWN_TECH_TOKENS = {
+            "python": "Python", "fastapi": "FastAPI", "django": "Django", "flask": "Flask",
+            "java": "Java", "javascript": "JavaScript", "js": "JavaScript", "typescript": "TypeScript",
+            "ts": "TypeScript", "node": "Node.js", "node.js": "Node.js", "nodejs": "Node.js",
+            "express": "Express.js", "react": "React", "reactjs": "React", "react.js": "React",
+            "html": "HTML", "css": "CSS", "sql": "SQL", "postgresql": "PostgreSQL",
+            "postgres": "PostgreSQL", "psql": "PostgreSQL", "mysql": "MySQL", "mongodb": "MongoDB",
+            "redis": "Redis", "kafka": "Kafka", "elasticsearch": "Elasticsearch", "aws": "AWS",
+            "amazon web services": "AWS", "azure": "Azure", "gcp": "GCP", "docker": "Docker",
+            "kubernetes": "Kubernetes", "k8s": "Kubernetes", "git": "Git", "github": "Git",
+            "rest": "REST APIs", "restful": "REST APIs", "rest api": "REST APIs",
+            "restful api": "REST APIs", "graphql": "GraphQL", "microservices": "Microservices",
+            "ci/cd": "CI/CD", "cicd": "CI/CD", "oop": "OOP", "http": "HTTP", "json": "JSON",
+            "pandas": "Pandas", "numpy": "NumPy", "power bi": "Power BI", "tableau": "Tableau",
+            "excel": "Excel", "eda": "EDA", "statistics": "Statistics",
+            "authentication": "Authentication", "authorization": "Authorization"
+        }
 
         # Technology Alias & Synonym Map
         ALIAS_MAP = {
@@ -542,7 +571,7 @@ Output ONLY valid JSON matching this exact structure:
         }
 
         def is_skill_in_text(skill_term: str, text: str) -> bool:
-            st_clean = skill_term.lower().strip()
+            st_clean = re.sub(r"^[\s•\-:\.,]+|[\s•\-:\.,]+$", "", str(skill_term)).lower().strip()
             if not st_clean:
                 return False
             if st_clean in text:
@@ -555,6 +584,40 @@ Output ONLY valid JSON matching this exact structure:
             if re.search(r"\b" + escaped + r"\b", text):
                 return True
             return False
+
+        def parse_skills_from_raw(raw_items) -> list:
+            items = []
+            if isinstance(raw_items, dict):
+                must_arr = raw_items.get("mustHave") or raw_items.get("requiredSkills") or []
+                if isinstance(must_arr, list):
+                    items.extend([str(s).strip() for s in must_arr if s])
+            elif isinstance(raw_items, list):
+                items.extend([str(s).strip() for s in raw_items if s])
+            elif isinstance(raw_items, str) and raw_items:
+                items.extend([s.strip() for s in re.split(r"[\n,;•\-]+", raw_items) if s.strip()])
+
+            result = []
+            for item in items:
+                clean_item = re.sub(r"^[\s•\-:\.,]+|[\s•\-:\.,]+$", "", item).strip()
+                if not clean_item:
+                    continue
+                
+                # Check if item is short skill name
+                words = clean_item.split()
+                if len(words) <= 3 and clean_item.lower() not in BOILERPLATE_STOP_WORDS:
+                    result.append(clean_item)
+                else:
+                    # Prose sentence: extract known technical tokens ONLY
+                    found = []
+                    item_lower = clean_item.lower()
+                    for tech_key, tech_label in KNOWN_TECH_TOKENS.items():
+                        escaped = re.escape(tech_key)
+                        if re.search(r"\b" + escaped + r"\b", item_lower):
+                            found.append(tech_label)
+                    if found:
+                        result.extend(found)
+
+            return list(dict.fromkeys(result))
 
         # Role / Title Similarity Component (Evaluated separately from technical skills)
         def calculate_role_match(job_title: str, resume_text_lower: str, current_role: str) -> float:
@@ -576,50 +639,8 @@ Output ONLY valid JSON matching this exact structure:
         role_match_score = calculate_role_match(job_info["title"], combined_resume, cand_role_str)
 
         # Extract Required (Must-Have) Skills
-        req_skills_list = []
-        raw_req = job_info.get("requirements")
-        if isinstance(raw_req, dict):
-            must_arr = raw_req.get("mustHave") or raw_req.get("requiredSkills") or []
-            if isinstance(must_arr, list):
-                req_skills_list.extend([str(s).strip() for s in must_arr if s])
-        elif isinstance(raw_req, list):
-            req_skills_list.extend([str(s).strip() for s in raw_req if s])
-        elif isinstance(raw_req, str) and raw_req:
-            req_skills_list.extend([s.strip() for s in re.split(r"[\n,;•\-]+", raw_req) if s.strip()])
-
-        # Extract Preferred (Good-To-Have) Skills
-        pref_skills_list = []
-        raw_pref = job_info.get("preferredSkills")
-        if isinstance(raw_pref, list):
-            pref_skills_list.extend([str(s).strip() for s in raw_pref if s])
-        elif isinstance(raw_pref, str) and raw_pref:
-            pref_skills_list.extend([s.strip() for s in re.split(r"[\n,;•\-]+", raw_pref) if s.strip()])
-
-        # Fallback to description token extraction ONLY if structured requirements are empty (NEVER use title role words as skills)
-        if not req_skills_list:
-            combined_jd_text = f"{job_info['description'] or ''} {resp_formatted or ''}".lower()
-            desc_tokens = set(re.findall(r"\b[a-zA-Z]{3,}\b", combined_jd_text))
-            req_skills_list = [w for w in desc_tokens if w not in BOILERPLATE_STOP_WORDS and len(w) > 3]
-
-        # If still empty, attempt title technology token extraction (excluding role words)
-        if not req_skills_list:
-            title_tokens = set(re.findall(r"\b[a-zA-Z]{3,}\b", job_info["title"].lower()))
-            req_skills_list = [w for w in title_tokens if w not in BOILERPLATE_STOP_WORDS and len(w) > 3]
-
-        # Sanitize and deduplicate extracted skill items
-        clean_req_skills = []
-        for r_item in req_skills_list:
-            r_str = str(r_item).strip()
-            if r_str and r_str.lower() not in BOILERPLATE_STOP_WORDS:
-                clean_req_skills.append(r_str)
-        clean_req_skills = list(dict.fromkeys(clean_req_skills))
-
-        clean_pref_skills = []
-        for p_item in pref_skills_list:
-            p_str = str(p_item).strip()
-            if p_str and p_str.lower() not in BOILERPLATE_STOP_WORDS:
-                clean_pref_skills.append(p_str)
-        clean_pref_skills = list(dict.fromkeys(clean_pref_skills))
+        clean_req_skills = parse_skills_from_raw(job_info.get("requirements"))
+        clean_pref_skills = parse_skills_from_raw(job_info.get("preferredSkills"))
 
         # Separate Matching logic
         matched_req = [s for s in clean_req_skills if is_skill_in_text(s, combined_resume)]
@@ -711,13 +732,49 @@ Output ONLY valid JSON matching this exact structure:
             ]
 
         category_breakdown = {
-            "requiredSkills": {"score": int(round((40.0 * R_req / W_active_sum) * 100)), "matched": matched_req, "missing": missing_req, "ratio": round(R_req, 2)},
-            "experience": {"score": int(round((20.0 * R_exp / W_active_sum) * 100)), "ratio": round(R_exp, 2)},
-            "projects": {"score": int(round((15.0 * R_proj / W_active_sum) * 100)), "ratio": round(R_proj, 2)},
-            "roleMatch": {"score": int(round((10.0 * R_role / W_active_sum) * 100)), "ratio": round(R_role, 2)},
-            "preferredSkills": {"active": W_pref > 0, "score": int(round((W_pref * R_pref / W_active_sum) * 100)) if W_pref > 0 else None, "matched": matched_pref, "missing": missing_pref},
-            "education": {"active": W_edu > 0, "score": int(round((W_edu * R_edu / W_active_sum) * 100)) if W_edu > 0 else None, "requirement": edu_req_str if W_edu > 0 else "None specified"},
+            "requiredSkills": {
+                "score": round(40.0 * R_req, 1),
+                "maxWeight": 40,
+                "matched": matched_req,
+                "missing": missing_req,
+                "total": len(clean_req_skills),
+                "matchedCount": len(matched_req),
+                "ratio": round(R_req, 2)
+            },
+            "experience": {
+                "score": round(20.0 * R_exp, 1),
+                "maxWeight": 20,
+                "ratio": round(R_exp, 2)
+            },
+            "projects": {
+                "score": round(15.0 * R_proj, 1),
+                "maxWeight": 15,
+                "ratio": round(R_proj, 2)
+            },
+            "roleMatch": {
+                "score": round(10.0 * R_role, 1),
+                "maxWeight": 10,
+                "ratio": round(R_role, 2)
+            },
+            "preferredSkills": {
+                "active": W_pref > 0,
+                "score": round(W_pref * R_pref, 1) if W_pref > 0 else None,
+                "maxWeight": 10 if W_pref > 0 else 0,
+                "matched": matched_pref,
+                "missing": missing_pref,
+                "total": len(clean_pref_skills),
+                "matchedCount": len(matched_pref),
+                "ratio": round(R_pref, 2) if W_pref > 0 else None
+            },
+            "education": {
+                "active": W_edu > 0,
+                "score": round(W_edu * R_edu, 1) if W_edu > 0 else None,
+                "maxWeight": 5 if W_edu > 0 else 0,
+                "requirement": edu_req_str if W_edu > 0 else "None specified",
+                "ratio": round(R_edu, 2) if W_edu > 0 else None
+            },
             "activeWeightSum": W_active_sum,
+            "earnedPoints": round(earned_points, 1),
             "finalScore": calc_score
         }
 

@@ -7,7 +7,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import axios from "axios";
 import { useTranslation } from "../utils/i18n";
 import { simulateResumeExtraction } from "../utils/resumeParser";
-import { formatJobId } from "../repositories/repositoryUtils";
+import { formatJobId, cleanJobTitle } from "../repositories/repositoryUtils";
 import { 
   isNewCandidate,
   isPendingEvaluation, 
@@ -3354,9 +3354,9 @@ export default function CandidatesView({
                     onChange={(e) => setSelectedJobId(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
                   >
-                    {Array.isArray(jobs) && jobs.map((job) => (
-                      <option key={job.id} value={job.id}>{job.title} ({formatJobId(job.id)})</option>
-                    ))}
+                          {Array.isArray(jobs) && jobs.map((job) => (
+                            <option key={job.id || job.jobId} value={job.jobId || job.id}>{formatJobId(job.jobId || job.id)} — {cleanJobTitle(job.title)}</option>
+                          ))}
                   </select>
                 </div>
                 {addExperienceLevel === "Experienced" && (
@@ -5457,7 +5457,7 @@ export default function CandidatesView({
                           className="w-full px-3 py-2 rounded-lg border border-indigo-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 text-xs font-semibold bg-white cursor-pointer"
                         >
                           {Array.isArray(jobs) && jobs.map((job) => (
-                            <option key={job.id} value={job.id}>{job.title} ({formatJobId(job.id)})</option>
+                            <option key={job.id || job.jobId} value={job.jobId || job.id}>{formatJobId(job.jobId || job.id)} — {cleanJobTitle(job.title)}</option>
                           ))}
                         </select>
                       </div>

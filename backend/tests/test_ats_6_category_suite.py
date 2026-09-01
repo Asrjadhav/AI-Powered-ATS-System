@@ -164,5 +164,66 @@ class TestATS6CategorySuite(unittest.TestCase):
         self.assertGreaterEqual(app.atsScore, 85, "Aliases should match 100% and score >= 85%")
         self.assertEqual(app.status, "Shortlisted")
 
+    def test_nonexistent_job_id_raises_400_error(self):
+        """Test Case 6: Regression test proving unpersisted/mock Job ID (e.g. JOB-6D4FSGH) is rejected due to foreign key integrity check"""
+        from sqlalchemy.exc import IntegrityError
+        from fastapi import HTTPException
+        self.db.rollback()
+        
+        cand_in = CandidateCreate(
+            firstName="MockJob",
+            lastName="Test",
+            email="mockjob.test@test.com",
+            jobId="JOB-6D4FSGH",
+            resumeText="Python developer"
+        )
+        with self.assertRaises((IntegrityError, HTTPException)) as cm:
+            cand = create_candidate(self.db, cand_in)
+            
+        self.db.rollback()
+        print("\n--- TEST 6: Nonexistent Job ID Regression Test ---")
+        print(f"[PASS] Attempting to create candidate/screen against nonexistent job JOB-6D4FSGH was blocked by foreign key validation.")
+
+    def test_category_breakdown_mathematical_bounds(self):
+        """Test Case 7: Verify all category breakdown bounds and mathematical consistency"""
+        app = self.db.query(ApplicationModel).filter(ApplicationModel.id == "t-app-69").first()
+        if not app:
+            cand = self.db.query(CandidateModel).filter(CandidateModel.firstName.ilike("%Divya%")).first()
+            if cand:
+                app = self.db.query(ApplicationModel).filter(ApplicationModel.candidateId == cand.id).first()
+        
+        screen_application_resume(self.db, app.id)
+        self.db.refresh(app)
+        
+        cb = app.aiEvaluation.get("categoryBreakdown", {})
+        print("\n--- TEST 7: Category Breakdown Mathematical Assertions ---")
+        print("Category Breakdown Object:", cb)
+
+        # Assert no category exceeds max weight
+        self.assertLessEqual(cb["requiredSkills"]["score"], cb["requiredSkills"]["maxWeight"])
+        self.assertLessEqual(cb["experience"]["score"], cb["experience"]["maxWeight"])
+        self.assertLessEqual(cb["projects"]["score"], cb["projects"]["maxWeight"])
+        self.assertLessEqual(cb["roleMatch"]["score"], cb["roleMatch"]["maxWeight"])
+        if cb["preferredSkills"]["active"]:
+            self.assertLessEqual(cb["preferredSkills"]["score"], cb["preferredSkills"]["maxWeight"])
+        if cb["education"]["active"]:
+            self.assertLessEqual(cb["education"]["score"], cb["education"]["maxWeight"])
+
+        # Assert ratios are between 0 and 1
+        self.assertTrue(0.0 <= cb["requiredSkills"]["ratio"] <= 1.0)
+        self.assertTrue(0.0 <= cb["experience"]["ratio"] <= 1.0)
+        self.assertTrue(0.0 <= cb["projects"]["ratio"] <= 1.0)
+        self.assertTrue(0.0 <= cb["roleMatch"]["ratio"] <= 1.0)
+        
+        # Assert final score bounds
+        self.assertTrue(0 <= app.atsScore <= 100)
+
+        # Assert generic words like 'backend', 'development', 'problem', 'solving' are not in required skills
+        invalid_words = ["backend", "development", "problem", "solving", "communication", "experience", "skills"]
+        for matched_item in cb["requiredSkills"]["matched"]:
+            self.assertNotIn(matched_item.lower(), invalid_words)
+
+        print("[PASS] All category breakdown scores are <= maxWeight, ratios in [0, 1], and no generic words present.")
+
 if __name__ == "__main__":
     unittest.main()
