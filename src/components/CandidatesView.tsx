@@ -1130,6 +1130,11 @@ export default function CandidatesView({
       return;
     }
 
+    if (targetStatus === ApplicationStatus.INTERVIEWING) {
+      handleDropAction(null, "interview", appToUpdate);
+      return;
+    }
+
     triggerToast(`Moving ${appToUpdate.candidate?.firstName || "Candidate"} to ${targetStatus}...`);
     await handleUpdateStatus(targetStatus, appToUpdate);
     triggerToast(`✓ Candidate transitioned to ${targetStatus}!`);

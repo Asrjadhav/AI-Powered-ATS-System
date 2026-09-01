@@ -99,8 +99,15 @@ export function isAIShortlisted(cand: any, matchThreshold = DEFAULT_MATCH_THRESH
 
 export function isInterviewStage(cand: any): boolean {
   if (!cand) return false;
-  const norm = normalizeCandidateStatus(cand.status || cand.candidate?.status).toLowerCase();
-  return norm.includes("interview") || norm === "interviewing";
+  const rawSt = String(cand.status || cand.candidate?.status || cand.applicationStatus || "").trim().toLowerCase();
+  const norm = normalizeCandidateStatus(rawSt).toLowerCase();
+  return (
+    norm.includes("interview") || 
+    norm === "interviewing" || 
+    rawSt.includes("interview") || 
+    rawSt === "interviewing" ||
+    Boolean(cand.hasActiveInterview)
+  );
 }
 
 export function isOfferedStage(cand: any): boolean {

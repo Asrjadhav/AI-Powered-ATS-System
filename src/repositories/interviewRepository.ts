@@ -148,6 +148,8 @@ export const InterviewRepository = {
 
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("interviews-updated"));
+        window.dispatchEvent(new CustomEvent("applications-updated"));
+        window.dispatchEvent(new CustomEvent("candidates-updated"));
       }
       return res.data;
     } catch (err: any) {
@@ -161,6 +163,8 @@ export const InterviewRepository = {
       const res = await axios.put(`${FASTAPI_BASE_URL}/api/interviews/${encodeURIComponent(id)}`, updates, apiConfig);
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("interviews-updated"));
+        window.dispatchEvent(new CustomEvent("applications-updated"));
+        window.dispatchEvent(new CustomEvent("candidates-updated"));
       }
       return res.data;
     } catch (err: any) {
@@ -174,6 +178,8 @@ export const InterviewRepository = {
       const res = await axios.patch(`${FASTAPI_BASE_URL}/api/interviews/${encodeURIComponent(id)}/cancel`, {}, apiConfig);
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("interviews-updated"));
+        window.dispatchEvent(new CustomEvent("applications-updated"));
+        window.dispatchEvent(new CustomEvent("candidates-updated"));
       }
       return res.data;
     } catch (err: any) {
@@ -187,6 +193,8 @@ export const InterviewRepository = {
       const res = await axios.post(`${FASTAPI_BASE_URL}/api/interviews/${encodeURIComponent(id)}/feedback`, payload, apiConfig);
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("interviews-updated"));
+        window.dispatchEvent(new CustomEvent("applications-updated"));
+        window.dispatchEvent(new CustomEvent("candidates-updated"));
       }
       return res.data;
     } catch (err: any) {
@@ -200,6 +208,8 @@ export const InterviewRepository = {
       await axios.delete(`${FASTAPI_BASE_URL}/api/interviews/${encodeURIComponent(id)}`, apiConfig);
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("interviews-updated"));
+        window.dispatchEvent(new CustomEvent("applications-updated"));
+        window.dispatchEvent(new CustomEvent("candidates-updated"));
       }
       return true;
     } catch (err: any) {
