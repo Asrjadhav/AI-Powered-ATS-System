@@ -79,7 +79,91 @@ def get_talent_pool_by_id(db: Session, identifier: str) -> Optional[TalentPoolMo
         c_ids = [cand.id, cand.candidateId]
         return db.query(TalentPoolModel).filter(TalentPoolModel.candidateId.in_(c_ids)).first()
 
-    return None
+def auto_add_rejected_candidate_to_talent_pool(
+    db: Session,
+    candidate: CandidateModel,
+    app: Any,
+    score: float,
+    rejection_reason: str
+) -> dict:
+    """
+    Automatically adds or updates a candidate rejected during ATS screening (score < 70%) in the Talent Pool
+    for future job opportunities.
+    Preserves CandidateModel and ApplicationModel (Application status remains 'Rejected').
+    Is 100% idempotent: updates existing TalentPoolModel entry if candidate is already in Talent Pool.
+    """
+    if not candidate or not app:
+        return {}
+
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    c_ids = [candidate.id, candidate.candidateId]
+    existing_tp = db.query(TalentPoolModel).filter(TalentPoolModel.candidateId.in_(c_ids)).first()
+
+    # Resolve target job title cleanly
+    from models.job import JobModel
+    job = None
+    if getattr(app, "jobId", None):
+        job = db.query(JobModel).filter(
+            or_(
+                JobModel.id == app.jobId,
+                JobModel.jobId == app.jobId
+            )
+        ).first()
+    job_title_str = job.title if job else (getattr(app, "appliedRole", None) or "Job Opening")
+
+    rec_history = {
+        "appliedJob": job_title_str,
+        "previousRole": job_title_str,
+        "previousStage": "Rejected",
+        "previousStatus": "Rejected",
+        "previousAtsScore": score,
+        "atsScore": score,
+        "rejectionReason": rejection_reason,
+        "notSelectedReason": rejection_reason,
+        "addedToTalentPoolAt": now,
+        "recruiterNotes": f"Automatically retained in Talent Pool for future opportunities after application for {job_title_str} (ATS Score: {score}% vs 70% Threshold)."
+    }
+
+    if existing_tp:
+        existing_tp.recruitmentHistory = rec_history
+        existing_tp.aiMatchScore = score
+        existing_tp.updatedAt = now
+        existing_tp.status = "Available"
+        db.commit()
+        db.refresh(existing_tp)
+        return format_tp_response(existing_tp, candidate)
+
+    tp_id = f"tp_{str(uuid.uuid4())[:8]}"
+    new_tp = TalentPoolModel(
+        id=tp_id,
+        candidateId=candidate.id,
+        currentRole=candidate.currentRole,
+        currentCompany=candidate.currentCompany,
+        skills=candidate.skills,
+        experienceYears=candidate.experienceYears,
+        location=candidate.location or "Remote",
+        aiMatchScore=score,
+        availability="Immediate",
+        noticePeriod=candidate.noticePeriod or "Immediate",
+        status="Available",
+        department="Engineering",
+        education={
+            "degree": candidate.highestEducation or "Graduation",
+            "specialization": candidate.specialization or "General",
+            "passingYear": candidate.yearOfPassing or "2023"
+        },
+        tags=["Auto Retained", "Future Opportunity", "Rejected Applicant"],
+        aiSummary=f"Profile retained in Talent Pool for future opportunity matching. Previous application for {job_title_str} scored {score}%.",
+        recruitmentHistory=rec_history,
+        recruiterNotes=f"Auto-retained candidate from {job_title_str} application.",
+        createdAt=now,
+        updatedAt=now
+    )
+    db.add(new_tp)
+    db.commit()
+    db.refresh(new_tp)
+
+    return format_tp_response(new_tp, candidate)
 
 def add_candidate_to_talent_pool(db: Session, payload: TalentPoolCreate) -> dict:
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()

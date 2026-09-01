@@ -1630,8 +1630,20 @@ export default function TalentPoolView() {
                       {/* Current Role */}
                       <td className="px-5 py-4">
                         <div>
-                          <p className="text-slate-850 dark:text-slate-200 font-bold">{candidate.currentRole}</p>
-                          <p className="text-[10.5px] text-slate-400 mt-0.5">{candidate.currentCompany}</p>
+                          <p className="text-slate-850 dark:text-slate-200 font-bold">{candidate.currentRole || "Candidate"}</p>
+                          <p className="text-[10.5px] text-slate-400 mt-0.5">{candidate.currentCompany || "Not specified"}</p>
+                          {(candidate.recruitmentHistory?.appliedJob || candidate.recruitmentHistory?.previousRole) && (
+                            <div className="flex flex-wrap items-center gap-1 mt-1">
+                              <span className="text-[9px] font-bold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 truncate max-w-[160px]">
+                                Prev Role: {candidate.recruitmentHistory.previousRole || candidate.recruitmentHistory.appliedJob}
+                              </span>
+                              {(candidate.recruitmentHistory?.previousStatus === "Rejected" || candidate.recruitmentHistory?.previousStage === "Rejected") && (
+                                <span className="text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 px-1.5 py-0.5 rounded border border-rose-200 dark:border-rose-900">
+                                  Rejected ({candidate.recruitmentHistory?.previousAtsScore ?? candidate.recruitmentHistory?.atsScore ?? candidate.aiMatchScore}% Score)
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </td>
 
@@ -1976,19 +1988,24 @@ export default function TalentPoolView() {
                   </h4>
 
                   <div className="space-y-3 text-xs leading-relaxed">
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-3 gap-3 bg-slate-50 dark:bg-slate-950/40 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
                       <div>
-                        <p className="text-[10px] font-bold text-slate-400">APPLIED FOR</p>
+                        <p className="text-[9.5px] font-bold text-slate-400 uppercase">PREVIOUS ROLE</p>
                         <p className="font-bold text-slate-800 dark:text-slate-200 mt-0.5">
-                          {selectedCandidate.recruitmentHistory?.appliedJob || selectedCandidate.appliedJob || "Job Opening"}
-                          {(selectedCandidate.jobId || selectedCandidate.recruitmentHistory?.jobId) && (
-                            <span className="text-[10px] font-mono text-slate-400 font-normal block mt-0.5">Job ID: {formatJobId(selectedCandidate.jobId || selectedCandidate.recruitmentHistory?.jobId)}</span>
-                          )}
+                          {selectedCandidate.recruitmentHistory?.previousRole || selectedCandidate.recruitmentHistory?.appliedJob || selectedCandidate.appliedJob || "Job Opening"}
                         </p>
                       </div>
                       <div>
-                        <p className="text-[10px] font-bold text-slate-400">PREVIOUS STAGE</p>
-                        <p className="font-bold text-slate-800 dark:text-slate-200 mt-0.5">{selectedCandidate.recruitmentHistory?.previousStage || selectedCandidate.status || "Applied"}</p>
+                        <p className="text-[9.5px] font-bold text-slate-400 uppercase">PREVIOUS ATS SCORE</p>
+                        <p className="font-black text-indigo-600 dark:text-indigo-400 font-mono mt-0.5">
+                          {selectedCandidate.recruitmentHistory?.previousAtsScore ?? selectedCandidate.recruitmentHistory?.atsScore ?? selectedCandidate.aiMatchScore ?? "—"}%
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[9.5px] font-bold text-slate-400 uppercase">PREVIOUS STATUS</p>
+                        <span className="inline-block px-2 py-0.5 rounded-full text-[9.5px] font-bold uppercase bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-900 mt-0.5">
+                          {selectedCandidate.recruitmentHistory?.previousStatus || selectedCandidate.recruitmentHistory?.previousStage || "Rejected"}
+                        </span>
                       </div>
                     </div>
 

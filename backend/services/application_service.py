@@ -19,6 +19,7 @@ import services.job_service as job_service
 import config
 import services.notification_service as notification_service
 import services.email_service as email_service
+import services.talent_pool_service as talent_pool_service
 
 def generate_next_application_id(db: Session) -> str:
     """
@@ -548,41 +549,55 @@ Output ONLY valid JSON matching this exact structure:
     db.commit()
     db.refresh(db_app)
 
-    # Perform automated rejection side-effects (notification & email trigger) on first transition to Rejected
-    if new_stage == "Rejected" and prev_status != "rejected":
-        eval_dict = dict(db_app.aiEvaluation or {})
-        if not eval_dict.get("rejectionEmailSent"):
-            cand_name_str = (db_app.candidateName or f"{cand.firstName if cand else ''} {cand.lastName if cand else ''}").strip() or "Candidate"
-            job_title_str = db_app.appliedRole or (job.title if job else "Open Position")
-            cand_email_str = db_app.candidateEmail or (cand.email if cand else "")
-
-            # 1. Create rejection notification for recruiter/HR dashboard
+    # Perform automated rejection side-effects (notification, email trigger, & talent pool retention)
+    if new_stage == "Rejected":
+        # 1. Retain candidate in Talent Pool for future opportunity matching (idempotent)
+        if cand:
             try:
-                notification_service.create_notification_event(
-                    db,
-                    title="Candidate Application Rejected",
-                    message=f"Application for {cand_name_str} ({job_title_str}) was rejected automatically (ATS Score: {calc_score}% vs {threshold}% Threshold).",
-                    candidate_name=cand_name_str,
-                    job_title=job_title_str
+                talent_pool_service.auto_add_rejected_candidate_to_talent_pool(
+                    db=db,
+                    candidate=cand,
+                    app=db_app,
+                    score=calc_score,
+                    rejection_reason=rejection_reason
                 )
-            except Exception as notif_err:
-                print(f"Rejection notification creation note: {notif_err}")
+            except Exception as tp_err:
+                print(f"Auto talent pool retention note: {tp_err}")
 
-            # 2. Trigger automated rejection email (idempotent & non-blocking)
-            try:
-                if cand_email_str:
-                    email_service.send_rejection_email(
-                        db=db,
-                        candidate_email=cand_email_str,
+        if prev_status != "rejected":
+            eval_dict = dict(db_app.aiEvaluation or {})
+            if not eval_dict.get("rejectionEmailSent"):
+                cand_name_str = (db_app.candidateName or f"{cand.firstName if cand else ''} {cand.lastName if cand else ''}").strip() or "Candidate"
+                job_title_str = db_app.appliedRole or (job.title if job else "Open Position")
+                cand_email_str = db_app.candidateEmail or (cand.email if cand else "")
+
+                # 2. Create rejection notification for recruiter/HR dashboard
+                try:
+                    notification_service.create_notification_event(
+                        db,
+                        title="Candidate Application Rejected",
+                        message=f"Application for {cand_name_str} ({job_title_str}) was rejected automatically (ATS Score: {calc_score}% vs {threshold}% Threshold).",
                         candidate_name=cand_name_str,
                         job_title=job_title_str
                     )
-                    eval_dict["rejectionEmailSent"] = True
-                    eval_dict["rejectionEmailSentAt"] = now
-                    db_app.aiEvaluation = eval_dict
-                    db.commit()
-            except Exception as email_err:
-                print(f"Rejection email dispatch note: {email_err}")
+                except Exception as notif_err:
+                    print(f"Rejection notification creation note: {notif_err}")
+
+                # 3. Trigger automated rejection email (idempotent & non-blocking)
+                try:
+                    if cand_email_str:
+                        email_service.send_rejection_email(
+                            db=db,
+                            candidate_email=cand_email_str,
+                            candidate_name=cand_name_str,
+                            job_title=job_title_str
+                        )
+                        eval_dict["rejectionEmailSent"] = True
+                        eval_dict["rejectionEmailSentAt"] = now
+                        db_app.aiEvaluation = eval_dict
+                        db.commit()
+                except Exception as email_err:
+                    print(f"Rejection email dispatch note: {email_err}")
 
     return {
         "success": True,
