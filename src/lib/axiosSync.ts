@@ -21,13 +21,28 @@ import { CandidateWorkflowService } from "../services/workflowService";
  */
 export const registerAxiosSyncInterceptors = () => {
   axios.interceptors.request.use(async (config) => {
-    // 1. Bypass interception if skipping header is present (for future server integration)
-    if (config.headers && config.headers["X-Skip-Interceptor"]) {
-      delete config.headers["X-Skip-Interceptor"];
+    const rawUrl = config.url || "";
+    
+    // Check for X-Skip-Interceptor header in both object keys and AxiosHeaders methods
+    const hasSkipHeader = 
+      Boolean(config.headers?.["X-Skip-Interceptor"]) || 
+      Boolean(config.headers?.["x-skip-interceptor"]) ||
+      Boolean(config.headers?.get && (config.headers.get("X-Skip-Interceptor") || config.headers.get("x-skip-interceptor")));
+
+    // Bypass interception if URL is absolute (points to FastAPI backend) or skip header is present
+    if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://") || hasSkipHeader) {
+      if (config.headers) {
+        if (typeof config.headers.delete === "function") {
+          config.headers.delete("X-Skip-Interceptor");
+          config.headers.delete("x-skip-interceptor");
+        } else {
+          delete config.headers["X-Skip-Interceptor"];
+          delete config.headers["x-skip-interceptor"];
+        }
+      }
       return config;
     }
 
-    const rawUrl = config.url || "";
     const url = rawUrl.split("?")[0];
     const method = (config.method || "").toLowerCase();
 

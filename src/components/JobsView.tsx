@@ -582,8 +582,15 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
         setShowDetailDrawer(false);
       }
     } catch (err: any) {
-      console.error("Error deleting job:", err);
-      triggerToast(`❌ ${err?.message || "Failed to delete the job opening."}`);
+      console.error("[JOB DELETE ERROR DIAGNOSTICS]", {
+        url: err?.config?.url || "DELETE /api/jobs/" + jobId,
+        method: err?.config?.method || "DELETE",
+        status: err?.response?.status || "Network/CORS Error",
+        response: err?.response?.data || null,
+        code: err?.code || "ERR_UNKNOWN",
+        message: err?.message || String(err)
+      });
+      triggerToast(`❌ ${err?.response?.data?.detail || err?.message || "Failed to delete the job opening."}`);
     } finally {
       setJobIdPendingDelete(null);
     }
