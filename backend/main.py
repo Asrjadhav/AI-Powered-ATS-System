@@ -14,17 +14,11 @@ try:
 except Exception as _e:
     print(f"[NOTE] Database table initialization note: {_e}")
 
-# 2. Add missing columns safely if upgrading existing legacy tables
 try:
-    with engine.connect() as _conn:
-        _conn.execute(text('ALTER TABLE candidates ADD COLUMN IF NOT EXISTS "totalExperienceMonths" INTEGER DEFAULT 0;'))
-        _conn.execute(text('ALTER TABLE users ADD COLUMN IF NOT EXISTS "passwordHash" VARCHAR;'))
-        _conn.execute(text('ALTER TABLE users ADD COLUMN IF NOT EXISTS "phone" VARCHAR;'))
-        _conn.execute(text('ALTER TABLE users ADD COLUMN IF NOT EXISTS "bio" VARCHAR;'))
-        _conn.execute(text('ALTER TABLE users ADD COLUMN IF NOT EXISTS "timezone" VARCHAR;'))
-        _conn.commit()
-except Exception:
-    pass
+    from migrate_job_id_nullable import run_migration
+    run_migration()
+except Exception as _mig_err:
+    print(f"[NOTE] Migration note: {_mig_err}")
 
 # 3. Seed default records safely if tables are brand new (idempotent checks)
 try:

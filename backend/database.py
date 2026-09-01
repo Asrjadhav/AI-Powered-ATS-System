@@ -32,3 +32,18 @@ def get_db():
         yield db
     finally:
         db.close()
+
+def init_db_schema_migrations():
+    """
+    Executes ALTER TABLE statements to drop NOT NULL constraints on jobId columns
+    in applications, interviews, and offers tables for PostgreSQL compatibility.
+    """
+    from sqlalchemy import text
+    try:
+        with engine.connect() as conn:
+            conn.execute(text('ALTER TABLE applications ALTER COLUMN "jobId" DROP NOT NULL;'))
+            conn.execute(text('ALTER TABLE interviews ALTER COLUMN "jobId" DROP NOT NULL;'))
+            conn.execute(text('ALTER TABLE offers ALTER COLUMN "jobId" DROP NOT NULL;'))
+            conn.commit()
+    except Exception:
+        pass

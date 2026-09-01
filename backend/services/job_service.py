@@ -85,11 +85,23 @@ def get_jobs(db: Session, status_filter: Optional[str] = None, search: Optional[
 def get_job_by_id_or_job_id(db: Session, identifier: str) -> Optional[JobModel]:
     """
     Looks up a job record by internal primary key 'id' OR human-readable 'jobId'.
+    Handles JOB-0004, job-0004, JOB-4, and UUID formats cleanly.
     """
+    if not identifier:
+        return None
+    raw = str(identifier).strip()
+    import re
+    m = re.match(r'^(?:j|job|job-)?0*([1-9]\d*)$', raw, re.IGNORECASE)
+    normalized_job_id = f"JOB-{int(m.group(1)):04d}" if m else raw
+
     return db.query(JobModel).filter(
         or_(
-            JobModel.id == identifier,
-            JobModel.jobId == identifier
+            JobModel.id == raw,
+            JobModel.jobId == raw,
+            func.lower(JobModel.id) == raw.lower(),
+            func.lower(JobModel.jobId) == raw.lower(),
+            JobModel.id == normalized_job_id,
+            JobModel.jobId == normalized_job_id
         )
     ).first()
 
@@ -118,9 +130,9 @@ def create_job(db: Session, job_in: JobCreate) -> JobResponse:
             job_data = job_in.dict(exclude_unset=True)
             job_data["id"] = internal_id
             job_data["jobId"] = assigned_job_id
+            job_data["status"] = job_in.status or "active"
             job_data["createdAt"] = job_data.get("createdAt") or now
             job_data["updatedAt"] = now
-            job_data["status"] = job_data.get("status") or "published"
             
             db_job = JobModel(**job_data)
             db.add(db_job)
@@ -177,7 +189,7 @@ def update_job_status(db: Session, identifier: str, new_status: str) -> Optional
 def delete_job(db: Session, identifier: str) -> bool:
     """
     Deletes a job row safely without cascade deleting related candidate/application history.
-    Safely disassociates jobId in linked applications, interviews, and offers to avoid foreign key violations.
+    Safely disassociates jobId in linked candidates, applications, interviews, and offers to avoid foreign key violations.
     """
     db_job = get_job_by_id_or_job_id(db, identifier)
     if not db_job:
@@ -185,11 +197,13 @@ def delete_job(db: Session, identifier: str) -> bool:
 
     j_ids = list(set([identifier, db_job.id, db_job.jobId]))
 
+    from models.candidate import CandidateModel
     from models.application import ApplicationModel
     from models.interview import InterviewModel
     from models.offer import OfferModel
 
-    # Safely nullify jobId in linked applications, interviews, and offers
+    # Safely nullify jobId in linked candidates, applications, interviews, and offers to prevent foreign key errors
+    db.query(CandidateModel).filter(CandidateModel.jobId.in_(j_ids)).update({CandidateModel.jobId: None}, synchronize_session=False)
     db.query(ApplicationModel).filter(ApplicationModel.jobId.in_(j_ids)).update({ApplicationModel.jobId: None}, synchronize_session=False)
     db.query(InterviewModel).filter(InterviewModel.jobId.in_(j_ids)).update({InterviewModel.jobId: None}, synchronize_session=False)
     db.query(OfferModel).filter(OfferModel.jobId.in_(j_ids)).update({OfferModel.jobId: None}, synchronize_session=False)

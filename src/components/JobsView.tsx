@@ -583,7 +583,7 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
       }
     } catch (err: any) {
       console.error("Error deleting job:", err);
-      triggerToast("❌ Failed to delete the job opening.");
+      triggerToast(`❌ ${err?.message || "Failed to delete the job opening."}`);
     } finally {
       setJobIdPendingDelete(null);
     }

@@ -130,7 +130,8 @@ export const JobRepository = {
       return true;
     } catch (err: any) {
       console.error("JobRepository.delete error:", err?.response?.data || err.message);
-      throw new Error(err?.response?.data?.detail || "Failed to delete job posting.");
+      const detailMsg = err?.response?.data?.detail || err?.message || "Failed to delete job posting.";
+      throw new Error(detailMsg);
     }
   },
 

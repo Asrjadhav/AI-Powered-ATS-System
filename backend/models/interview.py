@@ -7,7 +7,7 @@ class InterviewModel(Base):
 
     id = Column(String, primary_key=True, index=True)
     candidateId = Column(String, ForeignKey("candidates.id"), nullable=False, index=True)
-    jobId = Column(String, ForeignKey("jobs.id"), nullable=False, index=True)
+    jobId = Column(String, ForeignKey("jobs.id"), nullable=True, index=True)
     applicationId = Column(String, ForeignKey("applications.id"), nullable=True, index=True)
     candidateName = Column(String, nullable=True)
     candidateEmail = Column(String, nullable=True)

@@ -8,7 +8,7 @@ class ApplicationModel(Base):
     id = Column(String, primary_key=True, index=True)
     applicationId = Column(String, unique=True, index=True, nullable=False) # e.g. APP-0001
     candidateId = Column(String, ForeignKey("candidates.id"), nullable=False, index=True)
-    jobId = Column(String, ForeignKey("jobs.id"), nullable=False, index=True)
+    jobId = Column(String, ForeignKey("jobs.id"), nullable=True, index=True)
     status = Column(String, nullable=True, default="Applied", index=True)
     source = Column(String, nullable=True, default="Career Portal")
     atsScore = Column(Integer, nullable=True) # ATS score stored directly on Application record
