@@ -292,6 +292,18 @@ export const CandidateRepository = {
 
     // 2. Create the associated Application record linking Candidate + Job
     const targetJobId = payload.jobId || "JOB-0001";
+    let targetJobTitle = payload.jobTitle || payload.appliedJob || payload.job?.title;
+    if (!targetJobTitle) {
+      try {
+        const { JobRepository } = await import("./jobRepository");
+        const jobs = await JobRepository.getAll();
+        const foundJob = jobs.find((j: any) => j.id === targetJobId || j.jobId === targetJobId);
+        if (foundJob) targetJobTitle = foundJob.title;
+      } catch (err) {
+        console.warn("Could not resolve job title for application creation:", err);
+      }
+    }
+
     let applicationRecord: any = null;
     try {
       applicationRecord = await ApplicationRepository.createApplication({
@@ -300,7 +312,7 @@ export const CandidateRepository = {
         status: payload.status || "Applied",
         source: payload.source || "Job Application Form",
         atsScore: candidate.aiScore || generateAIMatchScore(payload),
-        appliedRole: candidate.currentRole || payload.currentRole || "Applicant Role",
+        appliedRole: targetJobTitle || payload.appliedRole || "Job Position",
         department: payload.department || "Engineering",
         candidateEmail: candidate.email,
         candidateName: `${candidate.firstName || ""} ${candidate.lastName || ""}`.trim(),

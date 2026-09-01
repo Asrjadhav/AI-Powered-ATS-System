@@ -2199,7 +2199,7 @@ export default function CandidatesView({
                       <td className={`${density === "compact" ? "px-4 py-1.5" : "px-6 py-4"} whitespace-nowrap`}>
                         <div>
                           <span className="font-semibold text-slate-800 dark:text-slate-200 text-xs block truncate max-w-[150px]">
-                            {appJob?.title || appCand?.appliedJob || appCand?.jobTitle || appCand?.job?.title || appCand?.currentRole || "Open Position"}
+                            {appJob?.title || app?.appliedRole || appCand?.appliedJob || appCand?.jobTitle || appCand?.job?.title || "Job not assigned"}
                           </span>
                           <div className="flex items-center gap-1.5 mt-0.5">
                             <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase tracking-wider font-bold">{appJob?.department || appCand?.department || "Engineering"}</span>

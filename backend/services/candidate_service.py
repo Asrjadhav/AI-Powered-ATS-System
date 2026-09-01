@@ -144,6 +144,42 @@ def get_candidate_by_email(db: Session, email: str) -> Optional[CandidateModel]:
         func.lower(CandidateModel.email) == norm_email
     ).first()
 
+def enrich_candidate_applied_job(db: Session, c: CandidateModel) -> CandidateModel:
+    if not c:
+        return c
+    from models.application import ApplicationModel
+    from models.job import JobModel
+    app_record = db.query(ApplicationModel).filter(
+        or_(
+            ApplicationModel.candidateId == c.id,
+            ApplicationModel.candidateId == c.candidateId
+        )
+    ).order_by(ApplicationModel.createdAt.desc().nullslast()).first()
+
+    resolved_job = None
+    if app_record and app_record.jobId:
+        resolved_job = db.query(JobModel).filter(
+            or_(
+                JobModel.id == app_record.jobId,
+                JobModel.jobId == app_record.jobId
+            )
+        ).first()
+    elif c.jobId:
+        resolved_job = db.query(JobModel).filter(
+            or_(
+                JobModel.id == c.jobId,
+                JobModel.jobId == c.jobId
+            )
+        ).first()
+
+    if resolved_job and resolved_job.title:
+        c.appliedJob = resolved_job.title
+    elif app_record and app_record.appliedRole:
+        c.appliedJob = app_record.appliedRole
+    else:
+        c.appliedJob = "Job not assigned"
+    return c
+
 def get_candidate_by_id_or_candidate_id(db: Session, identifier: str) -> Optional[CandidateModel]:
     """
     Looks up a candidate record by internal primary key 'id' OR human-readable 'candidateId'.
@@ -162,13 +198,13 @@ def get_candidate_by_id_or_candidate_id(db: Session, identifier: str) -> Optiona
         )
     ).first()
     if cand:
-        return cand
+        return enrich_candidate_applied_job(db, cand)
 
     # 2. Lookup by candidate email
     if "@" in raw_id:
         cand = get_candidate_by_email(db, raw_id)
         if cand:
-            return cand
+            return enrich_candidate_applied_job(db, cand)
 
     # 3. Lookup by Application ID (if an application identifier was passed)
     try:
@@ -187,11 +223,11 @@ def get_candidate_by_id_or_candidate_id(db: Session, identifier: str) -> Optiona
                 )
             ).first()
             if cand:
-                return cand
+                return enrich_candidate_applied_job(db, cand)
             if app_record.candidateEmail:
                 cand = get_candidate_by_email(db, app_record.candidateEmail)
                 if cand:
-                    return cand
+                    return enrich_candidate_applied_job(db, cand)
     except Exception:
         pass
 
@@ -219,6 +255,9 @@ def get_candidates(db: Session, search: Optional[str] = None) -> List[CandidateM
             calc_m = calculate_total_experience_months(text=c.resumeText, total_exp_str=c.totalExperience, exp_years=c.experienceYears)
             if calc_m > 0:
                 c.totalExperienceMonths = calc_m
+
+        enrich_candidate_applied_job(db, c)
+
     return cands
 
 def create_candidate(db: Session, candidate_in: CandidateCreate, target_job_id: Optional[str] = None) -> CandidateModel:
@@ -293,7 +332,7 @@ def create_candidate(db: Session, candidate_in: CandidateCreate, target_job_id: 
                         candidateId=existing_candidate.id,
                         jobId=job.id,
                         status=candidate_in.status or "Applied",
-                        appliedRole=candidate_in.currentRole or job.title or "Applicant"
+                        appliedRole=job.title or candidate_in.currentRole or "Applicant"
                     ))
             except Exception:
                 pass
@@ -343,7 +382,7 @@ def create_candidate(db: Session, candidate_in: CandidateCreate, target_job_id: 
                             candidateId=db_cand.id,
                             jobId=job.id,
                             status=candidate_in.status or "Applied",
-                            appliedRole=candidate_in.currentRole or job.title or "Applicant"
+                            appliedRole=job.title or candidate_in.currentRole or "Applicant"
                         ))
                 except Exception:
                     pass

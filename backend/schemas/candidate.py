@@ -5,6 +5,7 @@ class CandidateBase(BaseModel):
     id: Optional[str] = None
     candidateId: Optional[str] = None # e.g. CAND-0001
     jobId: Optional[str] = None
+    appliedJob: Optional[str] = None # Resolved from target JobModel.title
     firstName: Optional[str] = None
     lastName: Optional[str] = None
     email: Optional[str] = None

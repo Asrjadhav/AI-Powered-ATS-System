@@ -163,7 +163,7 @@ def create_application(db: Session, app_in: ApplicationCreate) -> ApplicationMod
             data["jobId"] = job.id # Store internal job primary key FK
             data["candidateEmail"] = data.get("candidateEmail") or cand.email
             data["candidateName"] = data.get("candidateName") or f"{cand.firstName or ''} {cand.lastName or ''}".strip()
-            data["appliedRole"] = data.get("appliedRole") or job.title
+            data["appliedRole"] = job.title if (job and job.title) else (data.get("appliedRole") or "Applicant")
             data["department"] = data.get("department") or job.department
             data["status"] = data.get("status") or "Applied"
             data["source"] = data.get("source") or "Career Portal"
