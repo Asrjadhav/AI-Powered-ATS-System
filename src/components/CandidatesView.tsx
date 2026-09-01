@@ -4609,8 +4609,8 @@ export default function CandidatesView({
             ? cand.id
             : null);
         const storageKey = cand?.resumeStorageKey || viewingResumeApp.resumeStorageKey;
-        const fileName = cand?.resumeFileName || viewingResumeApp.resumeFileName || "";
-        const hasPhysicalResume = !!(storageKey || fileName);
+        const fileName = cand?.resumeFileName || viewingResumeApp.resumeFileName || cand?.cvFileName || viewingResumeApp.cvFileName || (candId ? `${candId}_resume.pdf` : "uploaded_resume.pdf");
+        const hasPhysicalResume = !!(storageKey || cand?.resumeFileName || viewingResumeApp.resumeFileName || cand?.cvFileName || viewingResumeApp.cvFileName || cand?.cvBase64 || viewingResumeApp.cvBase64 || (cand?.resumeText && cand.resumeText.length > 50));
         const fileExt = fileName ? fileName.toLowerCase().split('.').pop() || "pdf" : "pdf";
         const isPdf = fileExt === "pdf";
         const realResumeUrl = candId && (hasPhysicalResume || candId) ? CandidateRepository.getResumeUrl(candId) : null;

@@ -69,6 +69,23 @@ function findCandidateIndex(candidates: any[], id: string): number {
   });
 }
 
+function base64ToFile(base64Data: string, filename: string): File {
+  try {
+    const arr = base64Data.split(",");
+    const mimeMatch = arr[0].match(/:(.*?);/);
+    const mime = mimeMatch ? mimeMatch[1] : "application/pdf";
+    const bstr = atob(arr.length > 1 ? arr[1] : arr[0]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new File([u8arr], filename, { type: mime });
+  } catch (e) {
+    return new File(["Dummy PDF Content"], filename, { type: "application/pdf" });
+  }
+}
+
 export const CandidateRepository = {
   async getAllCandidates(): Promise<any[]> {
     try {
@@ -193,9 +210,17 @@ export const CandidateRepository = {
     const status = normalizePipelineStatus(payload.status || "Applied");
     const aiMatchScore = generateAIMatchScore(payload);
 
+    let firstName = payload.firstName;
+    let lastName = payload.lastName;
+    if (!firstName && payload.fullName) {
+      const parts = String(payload.fullName).trim().split(/\s+/);
+      firstName = parts[0] || "Applicant";
+      lastName = parts.slice(1).join(" ") || "";
+    }
+
     const newCandidatePayload = {
-      firstName: payload.firstName || "Applicant",
-      lastName: payload.lastName || "Candidate",
+      firstName: firstName || "Applicant",
+      lastName: lastName !== undefined ? lastName : "Candidate",
       email: payload.email || `candidate.${Date.now()}@example.com`,
       phone: payload.phone || "+91 9876543210",
       currentRole: payload.currentRole || "Not specified",
@@ -205,7 +230,7 @@ export const CandidateRepository = {
       resumeText: payload.resumeText || "",
       linkedinUrl: payload.linkedinUrl || "",
       portfolioUrl: payload.portfolioUrl || "",
-      source: payload.source || "Manual HR Add Candidate",
+      source: payload.source || "Job Application Form",
       location: payload.location || "Remote",
       expectedCTC: payload.expectedCTC || 0,
       currentCTC: payload.currentCTC || 0,
@@ -242,6 +267,19 @@ export const CandidateRepository = {
       LocalStorageService.set("candidates", currentList);
     }
 
+    // Automatically upload resume PDF document if cvBase64 is attached to payload
+    if (payload.cvBase64 && savedCandidate && (savedCandidate.id || savedCandidate.candidateId)) {
+      try {
+        const fileObj = base64ToFile(payload.cvBase64, payload.cvFileName || "resume.pdf");
+        const uploadRes = await this.uploadResume(savedCandidate.id || savedCandidate.candidateId, fileObj);
+        if (uploadRes) {
+          savedCandidate = { ...savedCandidate, ...uploadRes };
+        }
+      } catch (uploadErr) {
+        console.warn("Auto resume upload after candidate creation failed:", uploadErr);
+      }
+    }
+
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("candidates-updated"));
     }
@@ -260,7 +298,7 @@ export const CandidateRepository = {
         candidateId: candidate.candidateId || candidate.id,
         jobId: targetJobId,
         status: payload.status || "Applied",
-        source: payload.source || "Manual HR Add Candidate",
+        source: payload.source || "Job Application Form",
         atsScore: candidate.aiScore || generateAIMatchScore(payload),
         appliedRole: candidate.currentRole || payload.currentRole || "Applicant Role",
         department: payload.department || "Engineering",

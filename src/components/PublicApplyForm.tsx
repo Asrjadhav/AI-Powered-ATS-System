@@ -393,8 +393,14 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
     try {
       setSubmitting(true);
       
+      const nameParts = (fullName || "").trim().split(/\s+/);
+      const firstName = nameParts[0] || "Applicant";
+      const lastName = nameParts.slice(1).join(" ") || "";
+
       const payload = {
         jobId: selectedJob.id,
+        firstName,
+        lastName,
         fullName,
         email,
         phone: `${phoneCode} ${phone}`,
@@ -402,6 +408,7 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
         relocateToPune,
         cvBase64,
         cvFileName: cvFile.name,
+        source: "Job Application Form",
         
         experienceLevel,
         noticePeriod: isExperienced ? noticePeriod : "Immediate",
