@@ -75,6 +75,8 @@ class CandidateUpdate(BaseModel):
     customFields: Optional[Any] = None
     totalExperienceMonths: Optional[int] = None
     status: Optional[str] = None
+    jobId: Optional[str] = None
+    selectedJobId: Optional[str] = None
 
 class CandidateResponse(CandidateBase):
     class Config:

@@ -48,6 +48,7 @@ def create_candidate(
     return candidate_service.create_candidate(db, candidate_in=candidate_in, target_job_id=job_id)
 
 @router.put("/candidates/{id}", response_model=CandidateResponse)
+@router.patch("/candidates/{id}", response_model=CandidateResponse)
 def update_candidate(
     id: str,
     updates: CandidateUpdate,

@@ -24,7 +24,9 @@ def run_tests():
     print(f"Centralized ATS Threshold Config: {config.ATS_MATCH_THRESHOLD}%")
 
     try:
-        # Clean previous test records for clean test run
+        # Clean up previous test records (talent pool & applications first)
+        from models.talent_pool import TalentPoolModel
+        db.query(TalentPoolModel).filter(TalentPoolModel.candidateId.like("t-cand-%")).delete(synchronize_session=False)
         db.query(ApplicationModel).filter(ApplicationModel.id.like("t-app-%")).delete(synchronize_session=False)
         db.query(CandidateModel).filter(CandidateModel.id.like("t-cand-%")).delete(synchronize_session=False)
         db.commit()

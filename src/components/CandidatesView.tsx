@@ -45,6 +45,7 @@ import {
   Search,
   Filter,
   ExternalLink,
+  Eye,
   Upload,
   Download,
   Printer,
@@ -183,11 +184,67 @@ export default function CandidatesView({
     loadCandidateApps();
   }, [selectedApp]);
 
-  // Editing Drawer
+  // Editing Modal & Detailed Form State
   const [showEditDrawer, setShowEditDrawer] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [editingCandidate, setEditingCandidate] = useState<any | null>(null);
   const [editFormData, setEditFormData] = useState<any>({});
   const [appIdPendingDelete, setAppIdPendingDelete] = useState<string | null>(null);
+
+  const handleOpenEditModal = (cand: any, app?: any) => {
+    setEditingCandidate(cand);
+    setFirstName(cand?.firstName || "");
+    setLastName(cand?.lastName || "");
+    setEmail(cand?.email || "");
+    setPhone(cand?.phone || "");
+    setCurrentRole(cand?.currentRole || "");
+    setCurrentCompany(cand?.currentCompany || "");
+    setSelectedJobId(app?.jobId || cand?.jobId || (jobs && jobs[0]?.id) || "JOB-0001");
+    setExperienceYears(cand?.experienceYears || 0);
+    setSource(cand?.source || app?.source || "LinkedIn");
+    setCandidateLocation(cand?.location || "Pune, India");
+    setAddCurrentCTC(cand?.currentCTC || cand?.customFields?.currentCTC || 0);
+    setAddExpectedCTC(cand?.expectedCTC || cand?.customFields?.expectedCTC || 0);
+    setAddHRApprovalStatus(cand?.hrApprovalStatus || "pending");
+    setAddHRNotes(cand?.hrNotes || cand?.evaluationNotes || "");
+    setSkillsText(Array.isArray(cand?.skills) ? cand.skills.join(", ") : (cand?.skills || ""));
+    setAddExperienceLevel((cand?.experienceYears && cand.experienceYears > 0) || cand?.currentCompany ? "Experienced" : "Fresher");
+    setShowEditModal(true);
+  };
+
+  const handleSaveEditCandidate = async () => {
+    if (!editingCandidate) return;
+    setUpdatingTracker(true);
+    try {
+      const payload: any = {
+        firstName,
+        lastName,
+        email,
+        phone,
+        currentRole,
+        currentCompany,
+        jobId: selectedJobId,
+        experienceYears: Number(experienceYears) || 0,
+        source,
+        location: candidateLocation,
+        currentCTC: Number(addCurrentCTC) || 0,
+        expectedCTC: Number(addExpectedCTC) || 0,
+        hrApprovalStatus: addHRApprovalStatus,
+        hrNotes: addHRNotes,
+        skills: skillsText ? skillsText.split(",").map((s: string) => s.trim()).filter(Boolean) : (editingCandidate.skills || [])
+      };
+      await axios.patch(`/api/candidates/${editingCandidate.id}`, payload);
+      await fetchApplications();
+      window.dispatchEvent(new Event("trigger-notification-sync"));
+      setShowEditModal(false);
+      triggerToast("✅ Candidate details updated successfully!");
+    } catch (err: any) {
+      console.error("Failed to update candidate:", err);
+      triggerToast("❌ Failed to update candidate details: " + (err?.response?.data?.detail || err.message));
+    } finally {
+      setUpdatingTracker(false);
+    }
+  };
 
   // Responsive Preferences
   const [density, setDensity] = useState(() => localStorage.getItem("setting_layout_density") || "comfortable");
@@ -1922,31 +1979,6 @@ export default function CandidatesView({
               </div>
             </div>
 
-            {/* Filter Approval Status */}
-            <div className="flex flex-col gap-1 text-left">
-              <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider font-mono flex items-center gap-1">
-                <ClipboardCheck className="h-3 w-3 text-indigo-500" />
-                <span>HR Approval Status</span>
-              </label>
-              <div className="relative">
-                <select
-                  value={filterApprovalStatus}
-                  onChange={(e) => {
-                    setFilterApprovalStatus(e.target.value);
-                    triggerToast(`Filtering HR approval status!`);
-                  }}
-                  className="w-full bg-white dark:bg-slate-950 border border-slate-250 dark:border-slate-800 focus:border-indigo-500 rounded-lg px-3 py-2.5 text-xs focus:outline-hidden font-bold cursor-pointer text-slate-700 dark:text-slate-300 transition-all appearance-none pr-8"
-                >
-                  <option value="all">All HR Statuses</option>
-                  <option value="approved">Approved</option>
-                  <option value="pending">Pending</option>
-                  <option value="rejected">Rejected</option>
-                </select>
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-                  <Sliders className="h-3.5 w-3.5" />
-                </div>
-              </div>
-            </div>
           </div>
 
           {/* Active filters badges and clear all */}
@@ -2306,11 +2338,7 @@ export default function CandidatesView({
                       {/* Actions Column */}
                       <td className={`${density === "compact" ? "px-4 py-1.5" : "px-6 py-4"} text-right flex items-center justify-end gap-2`}>
                         <button
-                          onClick={() => {
-                            setEditingCandidate(app.candidate);
-                            setEditFormData(app.candidate);
-                            setShowEditDrawer(true);
-                          }}
+                          onClick={() => handleOpenEditModal(app.candidate, app)}
                           className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all cursor-pointer"
                         >
                           Edit
@@ -2604,9 +2632,7 @@ export default function CandidatesView({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setEditingCandidate(app.candidate);
-                                setEditFormData(app.candidate);
-                                setShowEditDrawer(true);
+                                handleOpenEditModal(app.candidate, app);
                               }}
                               className="px-2 py-1 text-[10px] font-extrabold bg-slate-50 hover:bg-slate-100 dark:bg-slate-850 dark:hover:bg-slate-800 rounded text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-all cursor-pointer"
                             >
@@ -3200,54 +3226,286 @@ export default function CandidatesView({
         </div>
       )}
 
-      {/* Edit Drawer */}
-      {showEditDrawer && (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => setShowEditDrawer(false)} />
-          <div className="relative w-full max-w-2xl bg-white dark:bg-slate-950 h-full shadow-2xl p-6 overflow-y-auto">
-             <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-bold text-slate-900 dark:text-white">Edit Candidate</h2>
-                <button onClick={() => setShowEditDrawer(false)}><X className="h-6 w-6 text-slate-500" /></button>
-             </div>
-             <div className="space-y-6">
-                <section>
-                  <h3 className="font-bold text-slate-900 dark:text-white mb-3">Personal Information</h3>
-                  <div className="space-y-3">
-                    <label className="block text-xs font-semibold text-slate-500">Full Name (Read-only)</label>
-                    <input disabled value={`${editFormData?.firstName || ""} ${editFormData?.lastName || ""}`} className="w-full bg-slate-100 dark:bg-slate-900 px-3 py-2 rounded-lg text-sm text-slate-600" />
-                    
-                    <label className="block text-xs font-semibold text-slate-500">Email (Read-only)</label>
-                    <input disabled value={editFormData?.email || ""} className="w-full bg-slate-100 dark:bg-slate-900 px-3 py-2 rounded-lg text-sm text-slate-600" />
-                    
-                    <label className="block text-xs font-semibold text-slate-500">Phone Number</label>
-                    <input value={editFormData?.phone || ""} onChange={(e) => setEditFormData({...editFormData, phone: e.target.value})} className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 px-3 py-2 rounded-lg text-sm" />
-                  </div>
-                </section>
-                <section>
-                  <h3 className="font-bold text-slate-900 dark:text-white mb-3">Internal Recruitment Information</h3>
-                  <div className="space-y-3">
-                     <label className="block text-xs font-semibold text-slate-500">Candidate Stage</label>
-                     <select value={editFormData?.status || "NEW"} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 px-3 py-2 rounded-lg text-sm">
-                        <option value="NEW">New</option>
-                        <option value="SCREENING">Screening</option>
-                        <option value="INTERVIEW">Interview</option>
-                        <option value="OFFERED">Offered</option>
-                        <option value="REJECTED">Rejected</option>
-                     </select>
-                  </div>
-                </section>
-                <div className="pt-6 border-t border-slate-200 dark:border-slate-800">
-                  <button 
-                    onClick={() => {
-                        handleUpdateCandidateFields(editingCandidate.id, editFormData);
-                        setShowEditDrawer(false);
-                    }}
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 rounded-lg"
+      {/* Edit Candidate Modal (Complete Manual Form, No CV Upload) */}
+      {showEditModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/60 backdrop-blur-xs flex justify-center items-center p-4">
+          <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-xl shadow-2xl flex flex-col max-h-[90vh] animate-scale-in">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-150 dark:border-slate-800 flex justify-between items-center bg-slate-900 text-white rounded-t-xl">
+              <div>
+                <h3 className="font-display font-bold text-base flex items-center gap-2">
+                  <Sliders className="h-5 w-5 text-indigo-400" />
+                  <span>Edit Candidate Profile</span>
+                </h3>
+                <p className="text-slate-400 text-xs mt-0.5">Update profile information, target job pipeline, and recruitment tracking details.</p>
+              </div>
+              <button 
+                onClick={() => setShowEditModal(false)}
+                className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Modal Body: Complete Manual Candidate Details Form */}
+            <div className="p-6 overflow-y-auto space-y-5 text-left">
+              {/* 1. Experience Level Selector */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Candidate Experience Level</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setAddExperienceLevel("Fresher")}
+                    className={`py-2 px-4 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
+                      addExperienceLevel === "Fresher"
+                        ? "border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300"
+                        : "border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400"
+                    }`}
                   >
-                    Save Changes
+                    Fresher / College Graduate
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAddExperienceLevel("Experienced")}
+                    className={`py-2 px-4 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
+                      addExperienceLevel === "Experienced"
+                        ? "border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300"
+                        : "border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400"
+                    }`}
+                  >
+                    Experienced Professional
                   </button>
                 </div>
-             </div>
+              </div>
+
+              {/* 2. Personal Information Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">First Name</label>
+                  <input
+                    type="text"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Last Name</label>
+                  <input
+                    type="text"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Email Address</label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Mobile Number</label>
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
+                  />
+                </div>
+              </div>
+
+              {/* 3. Professional Experience (Only if Experienced) */}
+              {addExperienceLevel === "Experienced" && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Current Role</label>
+                    <input
+                      type="text"
+                      value={currentRole}
+                      onChange={(e) => setCurrentRole(e.target.value)}
+                      className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Current Company</label>
+                    <input
+                      type="text"
+                      value={currentCompany}
+                      onChange={(e) => setCurrentCompany(e.target.value)}
+                      className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* 4. Target Pipeline / Experience / Source / Location Grid */}
+              <div className={`grid grid-cols-1 ${addExperienceLevel === "Experienced" ? "md:grid-cols-4" : "md:grid-cols-3"} gap-4`}>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Target Job Pipeline</label>
+                  <select
+                    value={selectedJobId}
+                    onChange={(e) => setSelectedJobId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
+                  >
+                    {Array.isArray(jobs) && jobs.map((job) => (
+                      <option key={job.id} value={job.id}>{job.title} ({formatJobId(job.id)})</option>
+                    ))}
+                  </select>
+                </div>
+                {addExperienceLevel === "Experienced" && (
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Years of Experience</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="50"
+                      value={experienceYears}
+                      onChange={(e) => setExperienceYears(Number(e.target.value))}
+                      className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
+                    />
+                  </div>
+                )}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Application Source</label>
+                  <select
+                    value={source}
+                    onChange={(e) => setSource(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
+                  >
+                    <option value="LinkedIn">LinkedIn</option>
+                    <option value="Naukri">Naukri</option>
+                    <option value="Career Website">Career Website</option>
+                    <option value="Referral">Referral</option>
+                    <option value="External Link">External Link</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Location</label>
+                  <select
+                    value={candidateLocation || "Pune, India"}
+                    onChange={(e) => setCandidateLocation(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
+                  >
+                    <option value="Pune, India">Pune, India</option>
+                    <option value="Remote">Remote</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* 5. HR Tracker Parameters (CTC, Notes, Approval) */}
+              <div className="bg-slate-50 dark:bg-slate-950/40 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 space-y-4">
+                <div className="flex items-center gap-1.5 pb-2 border-b border-slate-200 dark:border-slate-800">
+                  <Sliders className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                  <h4 className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">HR Tracker Parameters</h4>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Current CTC (LPA)</label>
+                    <input
+                      type="number"
+                      placeholder="e.g. 12"
+                      value={addCurrentCTC || ""}
+                      onChange={(e) => setAddCurrentCTC(Number(e.target.value))}
+                      className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Expected CTC (LPA)</label>
+                    <input
+                      type="number"
+                      placeholder="e.g. 15"
+                      value={addExpectedCTC || ""}
+                      onChange={(e) => setAddExpectedCTC(Number(e.target.value))}
+                      className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">HR Approval Status</label>
+                    <select
+                      value={addHRApprovalStatus}
+                      onChange={(e) => setAddHRApprovalStatus(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium"
+                    >
+                      <option value="pending">Pending Verification</option>
+                      <option value="approved">Approved</option>
+                      <option value="rejected">Rejected / Hold</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">HR Evaluation Notes</label>
+                  <textarea
+                    rows={2}
+                    placeholder="Recruitment review or verification remarks..."
+                    value={addHRNotes}
+                    onChange={(e) => setAddHRNotes(e.target.value)}
+                    className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium resize-none"
+                  />
+                </div>
+              </div>
+
+              {/* 6. Key Skills */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Key Technical Skills (Comma-separated)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. React, Node.js, Python, PostgreSQL"
+                  value={skillsText}
+                  onChange={(e) => setSkillsText(e.target.value)}
+                  className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium"
+                />
+              </div>
+
+              {/* 7. Resume CV Info / View CV Link (No upload/dropzone in Edit mode) */}
+              <div className="p-3.5 bg-slate-100/70 dark:bg-slate-950/60 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                  <div>
+                    <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      {editingCandidate?.resumeFileName || "Candidate Resume Document"}
+                    </p>
+                    <p className="text-[10px] text-slate-400">Attached physical resume document is preserved.</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setViewingResumeApp({ candidate: editingCandidate, candidateId: editingCandidate?.id || editingCandidate?.candidateId })}
+                  className="px-3 py-1.5 text-xs font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-indigo-600 dark:text-indigo-400 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg transition-all cursor-pointer flex items-center gap-1"
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                  <span>View CV</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-150 dark:border-slate-800 flex justify-end gap-3 bg-slate-50 dark:bg-slate-950 rounded-b-xl">
+              <button
+                type="button"
+                onClick={() => setShowEditModal(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEditCandidate}
+                disabled={updatingTracker}
+                className="px-5 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-indigo-600/20 disabled:opacity-50"
+              >
+                {updatingTracker ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                <span>Save Changes</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

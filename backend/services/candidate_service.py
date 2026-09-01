@@ -421,9 +421,29 @@ def update_candidate(db: Session, identifier: str, updates: CandidateUpdate) -> 
     update_data.pop("createdAt", None)
     update_data["updatedAt"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
+    target_job_id = update_data.pop("jobId", None) or update_data.pop("selectedJobId", None)
+
     for key, val in update_data.items():
         setattr(db_cand, key, val)
 
+    if target_job_id:
+        from models.job import JobModel
+        from models.application import ApplicationModel
+        job = db.query(JobModel).filter(
+            or_(
+                JobModel.id == target_job_id,
+                JobModel.jobId == target_job_id,
+                func.lower(JobModel.title) == str(target_job_id).lower()
+            )
+        ).first()
+        if job:
+            db_cand.jobId = job.id
+            db_app = db.query(ApplicationModel).filter(ApplicationModel.candidateId == db_cand.id).first()
+            if db_app:
+                db_app.jobId = job.id
+                db_app.appliedRole = job.title
+
+    enrich_candidate_applied_job(db, db_cand)
     db.commit()
     db.refresh(db_cand)
     return db_cand
@@ -629,6 +649,11 @@ def upload_candidate_resume(
     extracted_text = extract_text_from_file_bytes(file_bytes, original_filename)
 
     # 3. Update candidate database record
+    import base64
+    custom = dict(cand.customFields or {})
+    custom["cvBase64"] = base64.b64encode(file_bytes).decode("utf-8")
+    cand.customFields = custom
+
     cand.resumeFileName = file_storage_service.sanitize_filename(original_filename)
     cand.resumeStorageKey = new_storage_key
     cand.resumeUploadedAt = now

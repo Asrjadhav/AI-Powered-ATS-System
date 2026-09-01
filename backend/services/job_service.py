@@ -177,11 +177,23 @@ def update_job_status(db: Session, identifier: str, new_status: str) -> Optional
 def delete_job(db: Session, identifier: str) -> bool:
     """
     Deletes a job row safely without cascade deleting related candidate/application history.
+    Safely disassociates jobId in linked applications, interviews, and offers to avoid foreign key violations.
     """
     db_job = get_job_by_id_or_job_id(db, identifier)
     if not db_job:
         return False
-        
+
+    j_ids = list(set([identifier, db_job.id, db_job.jobId]))
+
+    from models.application import ApplicationModel
+    from models.interview import InterviewModel
+    from models.offer import OfferModel
+
+    # Safely nullify jobId in linked applications, interviews, and offers
+    db.query(ApplicationModel).filter(ApplicationModel.jobId.in_(j_ids)).update({ApplicationModel.jobId: None}, synchronize_session=False)
+    db.query(InterviewModel).filter(InterviewModel.jobId.in_(j_ids)).update({InterviewModel.jobId: None}, synchronize_session=False)
+    db.query(OfferModel).filter(OfferModel.jobId.in_(j_ids)).update({OfferModel.jobId: None}, synchronize_session=False)
+
     db.delete(db_job)
     db.commit()
     return True

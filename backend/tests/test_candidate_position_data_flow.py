@@ -19,7 +19,9 @@ def run_tests():
     print("=============================================================\n")
 
     try:
-        # Clean up existing test data (applications first to prevent foreign key error)
+        # Clean up existing test data (talent pool & applications first)
+        from models.talent_pool import TalentPoolModel
+        db.query(TalentPoolModel).filter(TalentPoolModel.candidateId.like("test-pos-%")).delete(synchronize_session=False)
         db.query(ApplicationModel).filter(ApplicationModel.candidateId.like("test-pos-%")).delete(synchronize_session=False)
         db.query(ApplicationModel).filter(ApplicationModel.id.like("test-pos-%")).delete(synchronize_session=False)
         db.query(CandidateModel).filter(CandidateModel.id.like("test-pos-%")).delete(synchronize_session=False)
