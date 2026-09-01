@@ -438,31 +438,229 @@ Output ONLY valid JSON matching this exact structure:
         except Exception as e:
             print(f"Gemini API invocation error during screening: {e}")
 
+    # Helper evaluation routines for experience, projects, and education
+    def evaluate_experience_ratio(job_info_dict: dict, resume_str: str) -> float:
+        exp_req = str(job_info_dict.get("experienceLevel") or job_info_dict.get("experienceRange") or "").lower()
+        res_lower = resume_str.lower()
+        
+        is_fresher_job = any(k in exp_req for k in ["0-1", "0 - 1", "fresher", "entry", "intern", "junior", "not specified"])
+        
+        # Search for years of experience mentioned in resume
+        exp_years_match = re.findall(r"(\d+(?:\.\d+)?)\s*\+?\s*(?:years?|yrs?)", res_lower)
+        found_years = [float(y) for y in exp_years_match] if exp_years_match else []
+        max_exp = max(found_years) if found_years else 0.0
+
+        if is_fresher_job:
+            if max_exp >= 1.0 or "experience" in res_lower or "built" in res_lower:
+                return 0.95
+            return 0.85
+
+        if "senior" in job_info_dict["title"].lower() or "lead" in job_info_dict["title"].lower():
+            if max_exp >= 4.0:
+                return 1.0
+            elif max_exp >= 2.0:
+                return 0.70
+            elif max_exp > 0:
+                return 0.40
+            return 0.20
+
+        if max_exp >= 2.0:
+            return 1.0
+        elif max_exp >= 1.0:
+            return 0.85
+        elif "developer" in res_lower or "engineer" in res_lower or "intern" in res_lower:
+            return 0.60
+        return 0.20
+
+    def evaluate_projects_ratio(job_info_dict: dict, resume_str: str) -> float:
+        res_lower = resume_str.lower()
+        has_project_section = any(k in res_lower for k in ["project", "portfolio", "github", "built", "developed", "architected", "implemented", "api"])
+        
+        if not has_project_section:
+            return 0.30
+
+        # Check technical term overlap in project context
+        tech_terms = ["python", "fastapi", "django", "postgres", "postgresql", "rest", "api", "docker", "react", "sql", "aws", "node"]
+        matched_terms = [t for t in tech_terms if t in res_lower]
+        
+        if len(matched_terms) >= 3:
+            return 0.95
+        elif len(matched_terms) >= 1:
+            return 0.80
+        return 0.50
+
+    def evaluate_education_ratio(edu_req_str: str, resume_str: str) -> float:
+        res_lower = resume_str.lower()
+        edu_keywords = ["bachelor", "b.tech", "btech", "b.s", "bs", "master", "m.tech", "mtech", "degree", "computer science", "engineering", "diploma"]
+        if any(k in res_lower for k in edu_keywords):
+            return 1.0
+        return 0.50
+
     if not evaluation or not isinstance(evaluation, dict) or "score" not in evaluation:
-        # JD-Aware Fallback Evaluation (No generic software-engineering fallbacks)
+        # Structured, Alias-Aware ATS Fallback Evaluation Engine
         jd_title_lower = job_info["title"].lower()
         combined_resume = (skills_text + " " + full_resume_text).lower()
-        combined_jd = f"{job_info['title']} {job_info['description'] or ''} {resp_formatted or ''} {req_formatted or ''} {pref_formatted or ''}".lower()
+        cand_role_str = (cand.currentRole or "") if cand else ""
 
-        # Extract core keywords from JD
-        jd_keywords = set(re.findall(r"\b[a-zA-Z]{3,}\b", combined_jd))
-        stop_words = {"the", "and", "for", "with", "this", "that", "from", "have", "are", "will", "your", "must", "work", "team", "role", "job", "candidate", "about", "looking", "ability", "experience", "skills"}
-        target_keywords = [w for w in jd_keywords if w not in stop_words and len(w) > 3]
+        # Generic Role Words (Never treated as technical skills)
+        ROLE_WORDS = {
+            "developer", "engineer", "analyst", "manager", "designer", "consultant", 
+            "specialist", "lead", "senior", "junior", "intern", "architect", "administrator",
+            "director", "head", "officer", "executive", "associate", "trainee", "vp"
+        }
 
-        matching_skills = [w.capitalize() for w in target_keywords if w in combined_resume]
-        missing_skills = [w.capitalize() for w in target_keywords if w not in combined_resume][:3]
+        # Strict Stop Words / Header Filter to eliminate non-technical boilerplate pollution
+        BOILERPLATE_STOP_WORDS = ROLE_WORDS.union({
+            "the", "and", "for", "with", "this", "that", "from", "have", "are", "will", "your", 
+            "must", "work", "team", "role", "job", "candidate", "about", "looking", "ability", 
+            "experience", "skills", "specified", "description", "detailed", "provided", 
+            "musthave", "goodtohave", "responsibilities", "requirements", "preferred", "general", 
+            "level", "range", "education", "requirement", "title", "department", "none",
+            "location", "position", "company", "years", "year", "strong", "working", "building",
+            "knowledge", "proven", "understanding", "degree", "field", "bachelor", "master", "plus"
+        })
 
-        # Calculate evidence-based match score
-        if target_keywords:
-            overlap = len(matching_skills) / max(1, len(target_keywords))
-            calc_score = int(35 + (overlap * 55))
+        # Technology Alias & Synonym Map
+        ALIAS_MAP = {
+            "postgres": ["postgres", "postgresql", "psql"],
+            "postgresql": ["postgres", "postgresql", "psql"],
+            "js": ["js", "javascript", "ecmascript"],
+            "javascript": ["js", "javascript", "ecmascript"],
+            "aws": ["aws", "amazon web services", "amazon web service"],
+            "amazon web services": ["aws", "amazon web services"],
+            "rest": ["rest", "restful", "rest api", "restful api", "restful apis", "rest apis"],
+            "restful": ["rest", "restful", "rest api", "restful api", "restful apis", "rest apis"],
+            "rest api": ["rest", "restful", "rest api", "restful api", "restful apis", "rest apis"],
+            "restful api": ["rest", "restful", "rest api", "restful api", "restful apis", "rest apis"],
+            "node": ["node", "node.js", "nodejs"],
+            "node.js": ["node", "node.js", "nodejs"],
+            "nodejs": ["node", "node.js", "nodejs"],
+            "react": ["react", "react.js", "reactjs"],
+            "reactjs": ["react", "react.js", "reactjs"],
+            "py": ["python", "py"],
+            "python": ["python", "py"]
+        }
+
+        def is_skill_in_text(skill_term: str, text: str) -> bool:
+            st_clean = skill_term.lower().strip()
+            if not st_clean:
+                return False
+            if st_clean in text:
+                return True
+            aliases = ALIAS_MAP.get(st_clean, [])
+            for alias in aliases:
+                if alias in text:
+                    return True
+            escaped = re.escape(st_clean)
+            if re.search(r"\b" + escaped + r"\b", text):
+                return True
+            return False
+
+        # Role / Title Similarity Component (Evaluated separately from technical skills)
+        def calculate_role_match(job_title: str, resume_text_lower: str, current_role: str) -> float:
+            jt_clean = job_title.lower().strip()
+            cr_clean = (current_role + " " + resume_text_lower).lower()
+            if jt_clean in cr_clean:
+                return 1.0
+            jt_tech_tokens = [t for t in re.findall(r"\b[a-zA-Z]{3,}\b", jt_clean) if t not in BOILERPLATE_STOP_WORDS]
+            has_tech = any(t in cr_clean for t in jt_tech_tokens) if jt_tech_tokens else True
+            has_role = any(r in cr_clean for r in ROLE_WORDS)
+            if has_tech and has_role:
+                return 0.90
+            elif has_tech:
+                return 0.75
+            elif has_role:
+                return 0.50
+            return 0.30
+
+        role_match_score = calculate_role_match(job_info["title"], combined_resume, cand_role_str)
+
+        # Extract Required (Must-Have) Skills
+        req_skills_list = []
+        raw_req = job_info.get("requirements")
+        if isinstance(raw_req, dict):
+            must_arr = raw_req.get("mustHave") or raw_req.get("requiredSkills") or []
+            if isinstance(must_arr, list):
+                req_skills_list.extend([str(s).strip() for s in must_arr if s])
+        elif isinstance(raw_req, list):
+            req_skills_list.extend([str(s).strip() for s in raw_req if s])
+        elif isinstance(raw_req, str) and raw_req:
+            req_skills_list.extend([s.strip() for s in re.split(r"[\n,;•\-]+", raw_req) if s.strip()])
+
+        # Extract Preferred (Good-To-Have) Skills
+        pref_skills_list = []
+        raw_pref = job_info.get("preferredSkills")
+        if isinstance(raw_pref, list):
+            pref_skills_list.extend([str(s).strip() for s in raw_pref if s])
+        elif isinstance(raw_pref, str) and raw_pref:
+            pref_skills_list.extend([s.strip() for s in re.split(r"[\n,;•\-]+", raw_pref) if s.strip()])
+
+        # Fallback to description token extraction ONLY if structured requirements are empty (NEVER use title role words as skills)
+        if not req_skills_list:
+            combined_jd_text = f"{job_info['description'] or ''} {resp_formatted or ''}".lower()
+            desc_tokens = set(re.findall(r"\b[a-zA-Z]{3,}\b", combined_jd_text))
+            req_skills_list = [w for w in desc_tokens if w not in BOILERPLATE_STOP_WORDS and len(w) > 3]
+
+        # If still empty, attempt title technology token extraction (excluding role words)
+        if not req_skills_list:
+            title_tokens = set(re.findall(r"\b[a-zA-Z]{3,}\b", job_info["title"].lower()))
+            req_skills_list = [w for w in title_tokens if w not in BOILERPLATE_STOP_WORDS and len(w) > 3]
+
+        # Sanitize and deduplicate extracted skill items
+        clean_req_skills = []
+        for r_item in req_skills_list:
+            r_str = str(r_item).strip()
+            if r_str and r_str.lower() not in BOILERPLATE_STOP_WORDS:
+                clean_req_skills.append(r_str)
+        clean_req_skills = list(dict.fromkeys(clean_req_skills))
+
+        clean_pref_skills = []
+        for p_item in pref_skills_list:
+            p_str = str(p_item).strip()
+            if p_str and p_str.lower() not in BOILERPLATE_STOP_WORDS:
+                clean_pref_skills.append(p_str)
+        clean_pref_skills = list(dict.fromkeys(clean_pref_skills))
+
+        # Separate Matching logic
+        matched_req = [s for s in clean_req_skills if is_skill_in_text(s, combined_resume)]
+        missing_req = [s for s in clean_req_skills if not is_skill_in_text(s, combined_resume)]
+
+        matched_pref = [s for s in clean_pref_skills if is_skill_in_text(s, combined_resume)]
+        missing_pref = [s for s in clean_pref_skills if not is_skill_in_text(s, combined_resume)]
+
+        # === 6-CATEGORY DETERMINISTIC SCORING ENGINE WITH DYNAMIC NORMALIZATION ===
+        R_req = len(matched_req) / max(1, len(clean_req_skills)) if clean_req_skills else 1.0
+        R_exp = evaluate_experience_ratio(job_info, full_resume_text)
+        R_proj = evaluate_projects_ratio(job_info, full_resume_text)
+        R_role = role_match_score
+
+        if clean_pref_skills:
+            R_pref = len(matched_pref) / len(clean_pref_skills)
+            W_pref = 10.0
         else:
-            calc_score = 75
+            R_pref = 0.0
+            W_pref = 0.0  # Deactivated if absent from JD
+
+        edu_req_str = str(job_info.get("education") or "").strip()
+        if edu_req_str and edu_req_str.lower() not in ["not specified", "none", "n/a"]:
+            R_edu = evaluate_education_ratio(edu_req_str, full_resume_text)
+            W_edu = 5.0
+        else:
+            R_edu = 0.0
+            W_edu = 0.0  # Deactivated if absent from JD
+
+        W_active_sum = 40.0 + 20.0 + 15.0 + 10.0 + W_pref + W_edu
+        earned_points = (40.0 * R_req) + (20.0 * R_exp) + (15.0 * R_proj) + (10.0 * R_role) + (W_pref * R_pref) + (W_edu * R_edu)
+
+        calc_score = int(round((earned_points / max(1.0, W_active_sum)) * 100.0))
 
         if len(combined_resume.strip()) < 30:
             calc_score = min(calc_score, 40)
         else:
             calc_score = min(95, max(30, calc_score))
+
+        matching_skills = matched_req + matched_pref
+        missing_skills = missing_req + missing_pref
 
         # Role-specific interview questions based on Job Title & JD content
         if "data analyst" in jd_title_lower or "analytics" in jd_title_lower or "data" in jd_title_lower:
@@ -512,13 +710,25 @@ Output ONLY valid JSON matching this exact structure:
                 "What tools and methodologies do you rely on to maintain quality and accuracy in your deliverables?"
             ]
 
+        category_breakdown = {
+            "requiredSkills": {"score": int(round((40.0 * R_req / W_active_sum) * 100)), "matched": matched_req, "missing": missing_req, "ratio": round(R_req, 2)},
+            "experience": {"score": int(round((20.0 * R_exp / W_active_sum) * 100)), "ratio": round(R_exp, 2)},
+            "projects": {"score": int(round((15.0 * R_proj / W_active_sum) * 100)), "ratio": round(R_proj, 2)},
+            "roleMatch": {"score": int(round((10.0 * R_role / W_active_sum) * 100)), "ratio": round(R_role, 2)},
+            "preferredSkills": {"active": W_pref > 0, "score": int(round((W_pref * R_pref / W_active_sum) * 100)) if W_pref > 0 else None, "matched": matched_pref, "missing": missing_pref},
+            "education": {"active": W_edu > 0, "score": int(round((W_edu * R_edu / W_active_sum) * 100)) if W_edu > 0 else None, "requirement": edu_req_str if W_edu > 0 else "None specified"},
+            "activeWeightSum": W_active_sum,
+            "finalScore": calc_score
+        }
+
         evaluation = {
             "score": calc_score,
-            "summary": f"{cand_name} has been evaluated against the {job_info['title']} Job Description. The profile displays a {calc_score}% ATS keyword and requirement alignment.",
+            "categoryBreakdown": category_breakdown,
+            "summary": f"{cand_name} has been evaluated against the {job_info['title']} Job Description. The profile displays a {calc_score}% ATS alignment across technical skills, experience, projects, and role fit.",
             "strengths": strengths_list,
             "gaps": gaps_list,
             "interviewQuestions": questions_list,
-            "fitReasoning": f"Score of {calc_score}% calculated by evaluating candidate resume evidence against JD requirements for {job_info['title']}. Candidate matched key domain requirements with identified areas for technical verification."
+            "fitReasoning": f"Score of {calc_score}% calculated by evaluating candidate resume evidence against JD requirements for {job_info['title']} using a 6-category weighted evidence engine (Active Weight Base: {int(W_active_sum)}pts)."
         }
 
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
