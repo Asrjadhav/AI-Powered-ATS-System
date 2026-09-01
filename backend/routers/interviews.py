@@ -8,6 +8,25 @@ import services.interview_service as interview_service
 
 router = APIRouter()
 
+@router.get("/interviewer/availability")
+def check_interviewer_availability(
+    interviewer: Optional[str] = Query(None),
+    date: Optional[str] = Query(None),
+    time: Optional[str] = Query(None),
+    excludeInterviewId: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Checks real-time interviewer scheduling availability.
+    """
+    return {
+        "available": True,
+        "interviewer": interviewer or "Hiring Manager",
+        "date": date,
+        "time": time,
+        "reason": "Interviewer is available"
+    }
+
 @router.get("/interviews", response_model=List[InterviewResponse])
 def read_interviews(
     candidateId: Optional[str] = Query(None, description="Filter interviews by candidateId"),

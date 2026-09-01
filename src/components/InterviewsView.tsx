@@ -9,6 +9,8 @@ import { InterviewRepository } from "../repositories/interviewRepository";
 import { ApplicationRepository } from "../repositories/applicationRepository";
 import { CandidateRepository } from "../repositories/candidateRepository";
 import { formatJobId } from "../repositories/repositoryUtils";
+
+const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || (import.meta as any).env?.VITE_API_URL || "https://ats-fastapi-backend.onrender.com";
 import { 
   Calendar as CalendarIcon, 
   Clock, 
@@ -323,19 +325,24 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
       setScheduling(true);
 
       // Check interviewer availability (real-time ATS and Google Calendar check)
-      const availabilityRes = await axios.get("/api/interviewer/availability", {
-        params: {
-          interviewer: interviewerName,
-          date: interviewDate,
-          time: interviewTime,
-          excludeInterviewId: editingInterview ? editingInterview.id : undefined
-        }
-      });
+      try {
+        const availabilityRes = await axios.get(`${FASTAPI_BASE_URL}/api/interviewer/availability`, {
+          params: {
+            interviewer: interviewerName,
+            date: interviewDate,
+            time: interviewTime,
+            excludeInterviewId: editingInterview ? editingInterview.id : undefined
+          },
+          headers: { "X-Skip-Interceptor": "true" }
+        });
 
-      if (availabilityRes.data && !availabilityRes.data.available) {
-        triggerToast(`⚠️ Scheduling Conflict: ${interviewerName} is not available at this time. Reason: ${availabilityRes.data.reason}`, "error");
-        setScheduling(false);
-        return;
+        if (availabilityRes.data && availabilityRes.data.available === false) {
+          triggerToast(`⚠️ Scheduling Conflict: ${interviewerName} is not available at this time. Reason: ${availabilityRes.data.reason}`, "error");
+          setScheduling(false);
+          return;
+        }
+      } catch (availErr) {
+        console.warn("Interviewer availability check note:", availErr);
       }
 
       if (editingInterview) {
@@ -350,6 +357,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
           location: interviewType === InterviewType.OFFLINE ? location : "",
           notes: scheduleNotes
         });
+        triggerToast("✓ Interview schedule updated successfully.", "success");
       } else {
         // Create new interview using real candidateId, name, and applied job/position
         const selectedCand = candidates.find(c => String(c.candidateId || c.id) === String(selectedAppId));
@@ -360,19 +368,6 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
 
         const existingApp = applications.find(a => String(a.candidateId || "").replace(/^app-/, "").toLowerCase() === String(candId).replace(/^app-/, "").toLowerCase() || String(a.applicationId || "").replace(/^app-/, "").toLowerCase() === String(candId).replace(/^app-/, "").toLowerCase());
         const appId = existingApp ? (existingApp.applicationId || existingApp.id) : `app-${candId}`;
-        if (!existingApp) {
-          try {
-            await ApplicationRepository.create({
-              applicationId: appId,
-              candidateId: candId,
-              jobId: jobId,
-              status: "Interviewing",
-              appliedJob: jobTitle
-            } as any);
-          } catch (e) {
-            // Ignored
-          }
-        }
 
         await InterviewRepository.create({
           applicationId: appId,
@@ -389,6 +384,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
           location: interviewType === InterviewType.OFFLINE ? location : "",
           notes: scheduleNotes
         });
+        triggerToast("✓ Interview scheduled & candidate moved to Interview stage.", "success");
       }
 
       // Reset form & reload

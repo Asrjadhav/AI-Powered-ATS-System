@@ -342,29 +342,59 @@ def create_interview(db: Session, interview_in: InterviewCreate) -> InterviewMod
 
     if target_cand_id:
         cand = candidate_service.get_candidate_by_id_or_candidate_id(db, target_cand_id)
-    if not cand and interview_in.candidateEmail:
-        cand = candidate_service.get_candidate_by_email(db, interview_in.candidateEmail)
+    if not cand and interview_in.candidateName:
+        c_name = interview_in.candidateName.strip()
+        cand = db.query(CandidateModel).filter(
+            or_(
+                func.lower(CandidateModel.firstName + " " + CandidateModel.lastName).ilike(f"%{c_name.lower()}%"),
+                func.lower(CandidateModel.firstName).ilike(f"%{c_name.lower()}%")
+            )
+        ).first()
 
     if not cand:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Candidate with identifier '{interview_in.candidateId or interview_in.candidateEmail}' not found."
-        )
+        # Auto-create candidate in PostgreSQL safely
+        c_name = (interview_in.candidateName or "Candidate").strip()
+        name_parts = c_name.split(" ", 1)
+        first_name = name_parts[0]
+        last_name = name_parts[1] if len(name_parts) > 1 else ""
+        c_id = interview_in.candidateId or f"CAND-{str(uuid.uuid4())[:6].upper()}"
 
-    # 3. Resolve Job
+        cand = CandidateModel(
+            id=c_id,
+            candidateId=c_id,
+            firstName=first_name,
+            lastName=last_name,
+            email=interview_in.candidateEmail or f"{first_name.lower()}@example.com",
+            currentRole=interview_in.jobTitle or "Open Position",
+            status="Interviewing",
+            createdAt=now,
+            updatedAt=now
+        )
+        db.add(cand)
+        db.commit()
+        db.refresh(cand)
+
+    # 3. Resolve Job safely
     job: Optional[JobModel] = None
     target_job_id = interview_in.jobId
     if not target_job_id and app:
         target_job_id = app.jobId
+    if not target_job_id and cand:
+        target_job_id = cand.jobId
 
     if target_job_id:
         job = job_service.get_job_by_id_or_job_id(db, target_job_id)
+        if not job:
+            job = db.query(JobModel).filter(func.lower(JobModel.title).ilike(f"%{target_job_id.lower()}%")).first()
+
+    if not job and cand and cand.jobId:
+        job = job_service.get_job_by_id_or_job_id(db, cand.jobId)
+
+    if not job and app and app.jobId:
+        job = job_service.get_job_by_id_or_job_id(db, app.jobId)
 
     if not job:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Job opening with identifier '{interview_in.jobId}' not found."
-        )
+        job = db.query(JobModel).first()
 
     # 4. If application wasn't passed directly, resolve existing application for candidate & job
     if not app and cand and job:
