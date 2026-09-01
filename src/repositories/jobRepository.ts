@@ -4,7 +4,7 @@
  */
 
 import axios from "axios";
-import { generateId, formatJobId } from "./repositoryUtils";
+import { generateId, formatJobId, cleanJobTitle } from "./repositoryUtils";
 
 const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || (import.meta as any).env?.VITE_API_URL || "https://ats-fastapi-backend.onrender.com";
 
@@ -145,6 +145,7 @@ export const JobRepository = {
           id: generateId("job"),
           status: "published",
           ...job,
+          title: cleanJobTitle(job.title),
         }));
         return { success: true, data: aiParsedWithIds };
       }
@@ -154,6 +155,37 @@ export const JobRepository = {
 
     const rawText = payload.content || "";
     const lines = rawText.split("\n").map(l => l.trim()).filter(Boolean);
+
+    // Extract Title cleanly from text
+    let titleCandidate = "";
+    const titleMatch = rawText.match(/(?:job|role|title|position)\s*:\s*([^\n\r]+)/i);
+    if (titleMatch && titleMatch[1]) {
+      titleCandidate = titleMatch[1].trim();
+    } else if (lines.length > 0) {
+      titleCandidate = lines[0];
+    }
+    const cleanTitle = cleanJobTitle(titleCandidate) || (payload.fileName ? payload.fileName.replace(/\.[^/.]+$/, "") : "Python Backend Developer");
+
+    // Extract Department cleanly
+    let deptCandidate = "Software Engineering";
+    const deptMatch = rawText.match(/(?:team|department|dept|unit|division)\s*:\s*([^\n\r]+)/i);
+    if (deptMatch && deptMatch[1]) {
+      deptCandidate = deptMatch[1].trim();
+    }
+
+    // Extract Location cleanly
+    let locCandidate = "Not specified";
+    const locMatch = rawText.match(/(?:location|city|place|offices|site|based in|stationed in)\s*:\s*([^\n\r]+)/i);
+    if (locMatch && locMatch[1]) {
+      locCandidate = locMatch[1].trim();
+    }
+
+    // Extract Experience Range cleanly
+    let expCandidate = "0–2 years";
+    const expMatch = rawText.match(/(?:experience|exp|years of experience)\s*:\s*([^\n\r]+)/i);
+    if (expMatch && expMatch[1]) {
+      expCandidate = expMatch[1].trim();
+    }
     
     let currentSection: "about" | "responsibilities" | "requirements" | "preferred" | "benefits" = "about";
     const aboutLines: string[] = [];
@@ -176,7 +208,7 @@ export const JobRepository = {
         currentSection = "about";
       } else {
         const cleanLine = line.replace(/^[\s\-*•\d.]+/, "").trim();
-        if (cleanLine) {
+        if (cleanLine && !/^(?:Job|Team|Location|Experience)\s*:/i.test(cleanLine)) {
           if (currentSection === "about") aboutLines.push(cleanLine);
           else if (currentSection === "responsibilities") respLines.push(cleanLine);
           else if (currentSection === "requirements") reqLines.push(cleanLine);
@@ -188,18 +220,19 @@ export const JobRepository = {
 
     const parsedJob = {
       id: generateId("job"),
-      title: payload.fileName ? payload.fileName.replace(/\.[^/.]+$/, "") : (aboutLines[0] || "Parsed Job Position"),
-      department: "Engineering",
-      location: "Remote / Hybrid",
+      title: cleanTitle,
+      department: deptCandidate,
+      location: locCandidate,
       type: "Full-time",
-      workMode: "Remote",
-      experienceLevel: "Mid-Senior Level",
+      workMode: /remote/i.test(locCandidate) ? "Remote" : (/hybrid/i.test(locCandidate) ? "Hybrid" : "On-site"),
+      experienceRange: expCandidate,
+      experienceLevel: expCandidate,
       salaryRange: "Competitive",
       status: "published",
-      description: aboutLines.join(" ") || rawText || "Parsed job specifications from content.",
-      responsibilities: respLines.length > 0 ? respLines : ["Drive technical deliverables and collaborate with core product team."],
+      description: aboutLines.join(" ") || rawText || `Job posting for ${cleanTitle}.`,
+      responsibilities: respLines.length > 0 ? respLines : [`Develop and maintain ${cleanTitle} core deliverables.`],
       requirements: {
-        mustHave: reqLines.length > 0 ? reqLines : ["Relevant industry experience and domain expertise."],
+        mustHave: reqLines.length > 0 ? reqLines : [`Relevant professional experience in ${cleanTitle}.`],
         goodToHave: prefLines,
         softSkills: [],
         languages: []

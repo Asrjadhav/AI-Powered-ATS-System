@@ -2005,13 +2005,13 @@ CRITICAL PARSING & MAPPING DIRECTIVES:
 
 2. ACCURATE CONTENT EXTRACTION & NO LOSS OF DETAIL:
    - Extract the exact, complete text from the input. Retain all bullet points, requirements, and responsibilities.
-   - 'title': Exact Job Title / Role Designation
-   - 'department': Department or Business Unit (e.g. Engineering, Sales, Product, Marketing, HR, Finance)
-   - 'location': Primary Location or City/Country (e.g. 'San Francisco, CA', 'Pune', 'Remote')
+   - 'title': Exact Job Title / Role Designation (Do NOT include label prefixes like 'Job:', 'Job Title:', or 'Role:')
+   - 'department': Department or Business Unit (e.g. 'Software Engineering', 'Product', 'Marketing', 'Sales')
+   - 'location': Primary Location or City/Country (e.g. 'Pune, India', 'Bengaluru, Karnataka', 'Remote'). Extract the exact location specified in input.
    - 'workMode': 'Remote', 'Hybrid', or 'On-site'
    - 'type': 'Full-time', 'Part-time', 'Contract', or 'Internship'
-   - 'experienceRange': Required years of experience (e.g. '3-5 years', '5+ yrs')
-   - 'salaryRange': Salary range or compensation details (e.g. '$120,000 - $150,000 / yr' or 'Competitive')
+   - 'experienceRange': Required years of experience (e.g. '0–2 years', '3-5 years')
+   - 'salaryRange': Salary range or compensation details (e.g. 'Competitive')
    - 'openings': Total vacancies as an integer (default 1)
    - 'deadline': Application deadline date if mentioned
    - 'targetJoiningDate': Expected joining date if mentioned
@@ -2077,13 +2077,12 @@ ${extractedText}`;
         }
       } catch (parseErr) {
         console.error("Failed to parse Gemini response JSON cleanly, constructing fallback job posting:", parseErr);
-        const fallbackTitle = (extractedText && extractedText.split('\n')[0]) 
-          ? extractedText.split('\n')[0].substring(0, 60).replace(/[^\w\s-]/g, '') 
-          : "Extracted Job Position";
+        const firstLine = (extractedText && extractedText.split('\n')[0]) ? extractedText.split('\n')[0].trim() : "";
+        const fallbackTitle = firstLine.replace(/^(?:job\s*title|job\s*opening|job\s*position|job|role\s*title|role|position|vacancy)\s*:\s*/i, "").trim() || "Extracted Job Position";
         parsedJobs = [{
-          title: fallbackTitle.trim() || "Extracted Position",
+          title: fallbackTitle,
           department: "Engineering",
-          location: "Remote",
+          location: "Not specified",
           type: "Full-time",
           workMode: "Remote",
           description: extractedText ? extractedText.substring(0, 1500) : "Job description details extracted from input document.",
@@ -2127,8 +2126,39 @@ ${extractedText}`;
           return fallbackIfEmpty;
         };
 
-        const jobTitle = j.title || "Position";
-        const dept = j.department || "Engineering";
+        // Clean Job Title: strip label prefixes like "Job:", "Job Title:", "Role:", "Position:"
+        const rawTitle = String(j.title || "Position").trim();
+        const jobTitle = rawTitle.replace(/^(?:job\s*title|job\s*opening|job\s*position|job|role\s*title|role|position|vacancy)\s*:\s*/i, "").trim() || "Position";
+
+        // Extract Department from source text if missing or generic
+        let dept = String(j.department || "").trim();
+        if (!dept || dept.toLowerCase() === "general") {
+          const deptMatch = extractedText.match(/(?:team|department|dept|unit|division)\s*:\s*([^\n\r]+)/i);
+          if (deptMatch && deptMatch[1]) {
+            dept = deptMatch[1].trim().replace(/^[-•*]\s*/, "");
+          }
+        }
+        if (!dept) dept = "Software Engineering";
+
+        // Extract Location from source text if missing or generic
+        let loc = String(j.location || "").trim();
+        if (!loc || loc.toLowerCase() === "remote / hybrid") {
+          const locMatch = extractedText.match(/(?:location|city|place|offices|site|based in|stationed in)\s*:\s*([^\n\r]+)/i);
+          if (locMatch && locMatch[1]) {
+            loc = locMatch[1].trim().replace(/^[-•*]\s*/, "");
+          }
+        }
+        if (!loc) loc = "Not specified";
+
+        // Extract Experience Range from source text if missing
+        let expRange = String(j.experienceRange || j.experienceLevel || "").trim();
+        if (!expRange) {
+          const expMatch = extractedText.match(/(?:experience|exp|years of experience)\s*:\s*([^\n\r]+)/i);
+          if (expMatch && expMatch[1]) {
+            expRange = expMatch[1].trim().replace(/^[-•*]\s*/, "");
+          }
+        }
+        if (!expRange) expRange = "0-2 years";
 
         // Sanitize Description safely
         let rawDesc = String(j.description || "").trim();
@@ -2161,7 +2191,7 @@ ${extractedText}`;
         return {
           title: jobTitle,
           department: dept,
-          location: j.location || "Remote",
+          location: loc,
           type,
           workMode,
           status: "active",
@@ -2178,7 +2208,7 @@ ${extractedText}`;
           benefits,
           requiredSkills: mustHave,
           responsibilities,
-          experienceRange: j.experienceRange || "0-2 years",
+          experienceRange: expRange,
           salaryRange: j.salaryRange || "Competitive",
           openings: j.openings ? Number(j.openings) : 1,
           deadline: j.deadline || new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString().split('T')[0],

@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { JobRepository, PreferenceRepository } from "../repositories";
-import { formatJobId } from "../repositories/repositoryUtils";
+import { formatJobId, cleanJobTitle } from "../repositories/repositoryUtils";
 import { 
   Briefcase, 
   MapPin, 
@@ -151,6 +151,8 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
   const [parseStep, setParseStep] = useState(0);
   const [parsedPreviewJobs, setParsedPreviewJobs] = useState<any[]>([]);
   const [parsedWarning, setParsedWarning] = useState<string | null>(null);
+  const [editingImportJobIdx, setEditingImportJobIdx] = useState<number | null>(null);
+  const [editingImportJobData, setEditingImportJobData] = useState<any | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Lazy initialize publishing and collaboration state for selected job
@@ -658,7 +660,13 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
     if (parsedPreviewJobs.length === 0) return;
     
     try {
-      await JobRepository.importConfirm(parsedPreviewJobs);
+      const sanitizedJobs = parsedPreviewJobs.map(j => ({
+        ...j,
+        title: cleanJobTitle(j.title),
+        location: j.location || "Not specified",
+        department: j.department || "Software Engineering"
+      }));
+      await JobRepository.importConfirm(sanitizedJobs);
       await fetchJobs();
       window.dispatchEvent(new Event("trigger-notification-sync"));
       window.dispatchEvent(new Event("jobs-updated"));
@@ -667,7 +675,7 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
       setImportText("");
       setImportFile(null);
       setImportFileBase64("");
-      triggerToast(`📋 Successfully imported and saved ${parsedPreviewJobs.length} Job Openings!`);
+      triggerToast(`📋 Successfully imported and saved ${sanitizedJobs.length} Job Openings!`);
     } catch (err: any) {
       console.error("Failed to confirm import:", err);
       triggerToast(err.response?.data?.error || "Failed to save the imported job openings.");
@@ -2331,14 +2339,36 @@ Role details: We require a Node.js veteran...
                               </div>
                             </td>
                             <td className="py-3 px-4 text-right">
-                              <button
-                                onClick={() => {
-                                  setParsedPreviewJobs(prev => prev.filter((_, i) => i !== idx));
-                                }}
-                                className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingImportJobIdx(idx);
+                                    setEditingImportJobData({
+                                      ...pJob,
+                                      requiredSkills: Array.isArray(pJob.requiredSkills) ? pJob.requiredSkills.join("\n") : (Array.isArray(pJob.requirements?.mustHave) ? pJob.requirements.mustHave.join("\n") : (pJob.requiredSkills || "")),
+                                      preferredSkills: Array.isArray(pJob.preferredSkills) ? pJob.preferredSkills.join("\n") : (Array.isArray(pJob.requirements?.goodToHave) ? pJob.requirements.goodToHave.join("\n") : (pJob.preferredSkills || "")),
+                                      responsibilities: Array.isArray(pJob.responsibilities) ? pJob.responsibilities.join("\n") : (pJob.responsibilities || ""),
+                                      benefits: Array.isArray(pJob.benefits) ? pJob.benefits.join("\n") : (pJob.benefits || "")
+                                    });
+                                  }}
+                                  className="p-1 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded transition-colors cursor-pointer flex items-center gap-1 font-bold text-[11px] px-2.5 py-1 border border-indigo-200"
+                                  title="Edit Extracted Job Details"
+                                >
+                                  <Edit className="h-3.5 w-3.5" />
+                                  <span>Edit</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setParsedPreviewJobs(prev => prev.filter((_, i) => i !== idx));
+                                  }}
+                                  className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer"
+                                  title="Discard Role"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -2397,6 +2427,259 @@ Role details: We require a Node.js veteran...
                 </div>
               )}
 
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Extracted AI Job Modal */}
+      {editingImportJobIdx !== null && editingImportJobData !== null && (
+        <div className="fixed inset-0 z-[110] bg-slate-950/70 backdrop-blur-xs flex justify-center items-center p-4 overflow-y-auto">
+          <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl flex flex-col max-h-[90vh] border border-slate-200 dark:border-slate-800 animate-scale-in">
+            {/* Header */}
+            <div className="p-5 border-b border-slate-150 dark:border-slate-800 flex justify-between items-center bg-slate-900 text-white rounded-t-2xl">
+              <div>
+                <h3 className="font-display font-bold text-base flex items-center gap-2">
+                  <Edit className="h-5 w-5 text-indigo-400" />
+                  <span>Edit Extracted Job Opening</span>
+                </h3>
+                <p className="text-slate-400 text-xs mt-0.5">Modify extracted AI details before confirming import into database.</p>
+              </div>
+              <button 
+                onClick={() => {
+                  setEditingImportJobIdx(null);
+                  setEditingImportJobData(null);
+                }}
+                className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 overflow-y-auto space-y-4 text-left">
+              {/* Job Title & Department */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Job Title / Role</label>
+                  <input
+                    type="text"
+                    value={editingImportJobData.title || ""}
+                    onChange={(e) => setEditingImportJobData({ ...editingImportJobData, title: e.target.value })}
+                    className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Department / Team</label>
+                  <input
+                    type="text"
+                    value={editingImportJobData.department || ""}
+                    onChange={(e) => setEditingImportJobData({ ...editingImportJobData, department: e.target.value })}
+                    className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
+                  />
+                </div>
+              </div>
+
+              {/* Location & Work Mode */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Location</label>
+                  <input
+                    type="text"
+                    value={editingImportJobData.location || ""}
+                    onChange={(e) => setEditingImportJobData({ ...editingImportJobData, location: e.target.value })}
+                    placeholder="e.g. Pune, India"
+                    className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Job Type</label>
+                  <select
+                    value={editingImportJobData.type || "Full-time"}
+                    onChange={(e) => setEditingImportJobData({ ...editingImportJobData, type: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
+                  >
+                    <option value="Full-time">Full-time</option>
+                    <option value="Part-time">Part-time</option>
+                    <option value="Contract">Contract</option>
+                    <option value="Internship">Internship</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Work Mode</label>
+                  <select
+                    value={editingImportJobData.workMode || "On-site"}
+                    onChange={(e) => setEditingImportJobData({ ...editingImportJobData, workMode: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
+                  >
+                    <option value="On-site">On-site</option>
+                    <option value="Hybrid">Hybrid</option>
+                    <option value="Remote">Remote</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Experience Range & Salary & Openings */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Experience Range</label>
+                  <input
+                    type="text"
+                    value={editingImportJobData.experienceRange || ""}
+                    onChange={(e) => setEditingImportJobData({ ...editingImportJobData, experienceRange: e.target.value })}
+                    placeholder="e.g. 0–2 years"
+                    className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Salary Range</label>
+                  <input
+                    type="text"
+                    value={editingImportJobData.salaryRange || ""}
+                    onChange={(e) => setEditingImportJobData({ ...editingImportJobData, salaryRange: e.target.value })}
+                    placeholder="e.g. Competitive"
+                    className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Number of Openings</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={editingImportJobData.openings || 1}
+                    onChange={(e) => setEditingImportJobData({ ...editingImportJobData, openings: Number(e.target.value) || 1 })}
+                    className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium"
+                  />
+                </div>
+              </div>
+
+              {/* Deadlines & Joining */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Application Deadline</label>
+                  <input
+                    type="date"
+                    value={editingImportJobData.deadline || ""}
+                    onChange={(e) => setEditingImportJobData({ ...editingImportJobData, deadline: e.target.value })}
+                    className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Target Joining / Notice Period</label>
+                  <input
+                    type="date"
+                    value={editingImportJobData.targetJoiningDate || ""}
+                    onChange={(e) => setEditingImportJobData({ ...editingImportJobData, targetJoiningDate: e.target.value })}
+                    className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium"
+                  />
+                </div>
+              </div>
+
+              {/* Key Responsibilities */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Responsibilities (Line separated)</label>
+                <textarea
+                  rows={3}
+                  value={editingImportJobData.responsibilities || ""}
+                  onChange={(e) => setEditingImportJobData({ ...editingImportJobData, responsibilities: e.target.value })}
+                  className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium resize-none"
+                />
+              </div>
+
+              {/* Required & Preferred Skills */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Required Skills (Must Have)</label>
+                  <textarea
+                    rows={3}
+                    value={editingImportJobData.requiredSkills || ""}
+                    onChange={(e) => setEditingImportJobData({ ...editingImportJobData, requiredSkills: e.target.value })}
+                    className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium resize-none"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Preferred Skills (Good To Have)</label>
+                  <textarea
+                    rows={3}
+                    value={editingImportJobData.preferredSkills || ""}
+                    onChange={(e) => setEditingImportJobData({ ...editingImportJobData, preferredSkills: e.target.value })}
+                    className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium resize-none"
+                  />
+                </div>
+              </div>
+
+              {/* Benefits */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Benefits & Perks (Line separated)</label>
+                <textarea
+                  rows={2}
+                  value={editingImportJobData.benefits || ""}
+                  onChange={(e) => setEditingImportJobData({ ...editingImportJobData, benefits: e.target.value })}
+                  className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium resize-none"
+                />
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-150 dark:border-slate-800 flex justify-end gap-3 bg-slate-50 dark:bg-slate-950 rounded-b-2xl">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingImportJobIdx(null);
+                  setEditingImportJobData(null);
+                }}
+                className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (editingImportJobIdx === null || !editingImportJobData) return;
+                  const updatedJobs = [...parsedPreviewJobs];
+                  const cleanTitle = cleanJobTitle(editingImportJobData.title);
+                  
+                  const reqMust = typeof editingImportJobData.requiredSkills === "string"
+                    ? editingImportJobData.requiredSkills.split("\n").map((s: string) => s.trim()).filter(Boolean)
+                    : (editingImportJobData.requiredSkills || []);
+                  const reqGood = typeof editingImportJobData.preferredSkills === "string"
+                    ? editingImportJobData.preferredSkills.split("\n").map((s: string) => s.trim()).filter(Boolean)
+                    : (editingImportJobData.preferredSkills || []);
+                  const respList = typeof editingImportJobData.responsibilities === "string"
+                    ? editingImportJobData.responsibilities.split("\n").map((s: string) => s.trim()).filter(Boolean)
+                    : (editingImportJobData.responsibilities || []);
+                  const benList = typeof editingImportJobData.benefits === "string"
+                    ? editingImportJobData.benefits.split("\n").map((s: string) => s.trim()).filter(Boolean)
+                    : (editingImportJobData.benefits || []);
+
+                  const updatedRole = {
+                    ...editingImportJobData,
+                    title: cleanTitle,
+                    department: editingImportJobData.department || "Software Engineering",
+                    location: editingImportJobData.location || "Not specified",
+                    experienceRange: editingImportJobData.experienceRange || "0–2 years",
+                    requiredSkills: reqMust,
+                    preferredSkills: reqGood,
+                    responsibilities: respList,
+                    benefits: benList,
+                    requirements: {
+                      mustHave: reqMust,
+                      goodToHave: reqGood,
+                      softSkills: editingImportJobData.requirements?.softSkills || [],
+                      languages: editingImportJobData.requirements?.languages || []
+                    }
+                  };
+                  updatedJobs[editingImportJobIdx] = updatedRole;
+                  setParsedPreviewJobs(updatedJobs);
+                  setEditingImportJobIdx(null);
+                  setEditingImportJobData(null);
+                  triggerToast(`Updated job role details for "${cleanTitle}".`);
+                }}
+                className="px-5 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-indigo-600/20"
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                <span>Save Changes</span>
+              </button>
             </div>
           </div>
         </div>

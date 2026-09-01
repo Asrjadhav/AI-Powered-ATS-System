@@ -17,6 +17,14 @@ export const generateId = (prefix: string): string => {
   return `${prefix}-${Math.random().toString(36).substring(2, 9)}`;
 };
 
+export function cleanJobTitle(title?: string | null): string {
+  if (!title) return "Position";
+  let str = String(title).trim();
+  // Strip prefixes like "Job:", "Job Title:", "Role:", "Position:", "Job Opening:", "Vacancy:" at beginning of title
+  str = str.replace(/^(?:job\s*title|job\s*opening|job\s*position|job|role\s*title|role|position|vacancy)\s*:\s*/i, "").trim();
+  return str || "Position";
+}
+
 export function formatJobId(id?: string | null): string {
   if (!id) return "";
   const str = String(id).trim();

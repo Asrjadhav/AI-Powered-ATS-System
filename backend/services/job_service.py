@@ -10,6 +10,13 @@ from models.job import JobModel
 from models.candidate import CandidateModel
 from schemas.job import JobCreate, JobUpdate, JobResponse
 
+def clean_job_title(title: Optional[str]) -> str:
+    if not title:
+        return "Position"
+    raw = str(title).strip()
+    cleaned = re.sub(r'^(?:job\s*title|job\s*opening|job\s*position|job|role\s*title|role|position|vacancy)\s*:\s*', '', raw, flags=re.IGNORECASE).strip()
+    return cleaned or "Position"
+
 def generate_next_job_id(db: Session) -> str:
     """
     Scans existing jobId strings in format JOB-XXXX, extracts integer suffixes,
@@ -130,6 +137,7 @@ def create_job(db: Session, job_in: JobCreate) -> JobResponse:
             job_data = job_in.dict(exclude_unset=True)
             job_data["id"] = internal_id
             job_data["jobId"] = assigned_job_id
+            job_data["title"] = clean_job_title(job_data.get("title"))
             job_data["status"] = job_in.status or "active"
             job_data["createdAt"] = job_data.get("createdAt") or now
             job_data["updatedAt"] = now
@@ -162,6 +170,9 @@ def update_job(db: Session, identifier: str, updates: JobUpdate) -> Optional[Job
     update_data.pop("jobId", None)
     update_data.pop("createdAt", None)
     
+    if "title" in update_data:
+        update_data["title"] = clean_job_title(update_data["title"])
+
     update_data["updatedAt"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     
     for key, val in update_data.items():
