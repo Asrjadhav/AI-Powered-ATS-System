@@ -94,8 +94,32 @@ Marketing professional with 4+ years of experience in digital campaigns, perform
     assert p3.get("company") == "BrightWave Digital Solutions", f"Expected BrightWave Digital Solutions, got '{p3.get('company')}'"
     assert p3.get("experienceYears") > 0, f"Expected experienceYears > 0 derived dynamically from employment dates, got {p3.get('experienceYears')}"
 
+    nikhil_resume_text = """
+NIKHIL PATIL
+Backend Python Engineer
+Email: nikhil.patil.dev@gmail.com
+Phone: +91 98765 43210
+Location: Pune, India
+
+WORK EXPERIENCE
+Backend Python Engineer | TechSphere Solutions, Pune
+Jan 2022 – Present
+- Built high-throughput Python FastAPI microservices and PostgreSQL databases.
+- Integrated Redis cache and Docker container deployment pipelines.
+"""
+
+    p4 = candidate_service.parse_resume_document(raw_content=nikhil_resume_text, filename="04 Backend Python Engineer Nikhil Patil.pdf").get("parsed", {})
+    print("\n4. PARSED NIKHIL RESUME DATA (WITH FILENAME 04 Backend Python Engineer Nikhil Patil.pdf):\n", json.dumps(p4, indent=2))
+
+    assert p4.get("firstName") == "Nikhil", f"Expected Nikhil, got '{p4.get('firstName')}'"
+    assert p4.get("lastName") == "Patil", f"Expected Patil, got '{p4.get('lastName')}'"
+    assert p4.get("email") == "nikhil.patil.dev@gmail.com", f"Expected nikhil.patil.dev@gmail.com, got '{p4.get('email')}'"
+    assert "98765 43210" in p4.get("phone", ""), f"Expected +91 98765 43210, got '{p4.get('phone')}'"
+    assert p4.get("role") == "Backend Python Engineer", f"Expected Backend Python Engineer, got '{p4.get('role')}'"
+    assert "0000000000" not in p4.get("phone", ""), "FAILED: Got dummy phone 0000000000!"
+
     print("\n=============================================================")
-    print("RESUME PARSER EXTRACTION TEST (ADITI, RAHUL & ROHAN) PASSED 100%!")
+    print("RESUME PARSER EXTRACTION TEST (ADITI, RAHUL, ROHAN & NIKHIL) PASSED 100%!")
     print("=============================================================")
 
 if __name__ == "__main__":

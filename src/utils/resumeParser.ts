@@ -1,5 +1,13 @@
 import axios from "axios";
 
+const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || (import.meta as any).env?.VITE_API_URL || "https://ats-fastapi-backend.onrender.com";
+const apiConfig = {
+  headers: {
+    "X-Skip-Interceptor": "true",
+    "Content-Type": "application/json",
+  },
+};
+
 export interface PersonalInformation {
   firstName: string;
   lastName: string;
@@ -192,10 +200,10 @@ export const simulateResumeExtraction = async (file: File): Promise<ParsedCandid
       reader.readAsDataURL(file);
     });
 
-    const res = await axios.post("/api/candidates/parse-resume", {
+    const res = await axios.post(`${FASTAPI_BASE_URL}/api/candidates/parse-resume`, {
       fileData: base64Data,
       fileName: file.name
-    });
+    }, apiConfig);
 
     if (res.data?.success && res.data?.parsed) {
       const p = res.data.parsed;
@@ -413,20 +421,22 @@ export const simulateResumeExtraction = async (file: File): Promise<ParsedCandid
   const totalExp = expMatch ? `${expMatch[1]} years` : "";
 
   // Heuristic Name & Role from Filename
-  let extractedFirstName = "Candidate";
-  let extractedLastName = "Applicant";
+  let extractedFirstName = "";
+  let extractedLastName = "";
   let extractedRole = "";
 
   let cleanName = file.name
     .replace(/\.[^/.]+$/, "") // Remove extension
     .replace(/[-_]/g, " ") // Replace dashes/underscores with spaces
-    .replace(/\b(?:resume|cv|pdf|docx|uploaded|profile|draft)\b/gi, "")
+    .replace(/^\d+[\s_\.\-]+/g, "") // Strip leading numeric prefixes (e.g. 04_, 01., 04 )
+    .replace(/\b(?:resume|cv|pdf|docx|uploaded|profile|draft|final)\b/gi, "")
     .trim();
 
   const roleKeywords = [
+    "backend python engineer", "backend engineer", "frontend developer", "fullstack developer",
+    "software engineer", "data engineer", "data scientist", "devops engineer", "cloud architect",
     "it program manager", "program manager", "project manager", "project coordinator", "project analyst",
-    "marketing manager", "data analyst", "senior python engineer", "software engineer", 
-    "devops engineer", "ui ux designer", "cloud architect", "product designer", "data scientist"
+    "marketing manager", "data analyst", "senior python engineer", "ui ux designer", "product designer"
   ];
   for (const rk of roleKeywords) {
     if (cleanName.toLowerCase().includes(rk)) {
@@ -436,13 +446,17 @@ export const simulateResumeExtraction = async (file: File): Promise<ParsedCandid
     }
   }
 
-  const parts = cleanName.split(/\s+/).filter(Boolean);
+  const noiseKeywords = new Set([
+    "backend", "frontend", "fullstack", "python", "java", "engineer", "developer", "software",
+    "data", "manager", "scientist", "devops", "ui", "ux", "designer", "lead", "senior",
+    "junior", "trainee", "architect", "analyst", "consultant", "specialist", "profile", "updated", "final"
+  ]);
+
+  const parts = cleanName.split(/\s+/).filter(p => p && p.length > 1 && !noiseKeywords.has(p.toLowerCase()));
   if (parts.length > 0) {
     extractedFirstName = parts[0].charAt(0).toUpperCase() + parts[0].slice(1).toLowerCase();
     if (parts.length > 1) {
       extractedLastName = parts.slice(1).map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(" ");
-    } else {
-      extractedLastName = "";
     }
   }
   const extractedFullName = `${extractedFirstName} ${extractedLastName}`.trim();

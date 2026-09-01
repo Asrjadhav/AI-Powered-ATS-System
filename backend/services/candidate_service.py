@@ -778,33 +778,55 @@ def parse_resume_document(file_bytes: Optional[bytes] = None, filename: Optional
     # 5. Name Extraction (Body Text priority #1, Filename clean fallback #2)
     first_name = ""
     last_name = ""
+    extracted_role_from_header = ""
     
+    noise_words = {
+        "resume", "cv", "pdf", "docx", "doc", "marketing", "manager", "engineer",
+        "developer", "fresher", "senior", "junior", "lead", "architect", "analyst",
+        "executive", "trainee", "specialist", "consultant", "profile", "updated", "final",
+        "backend", "frontend", "fullstack", "python", "java", "software", "data", "scientist",
+        "devops", "ui", "ux", "designer", "cloud", "it", "program", "project", "coordinator"
+    }
+
     # Priority 1: Check document body header lines
     ignore_name_keywords = ["resume", "curriculum", "address", "phone", "email", "@", "role:", "location:", "objective", "summary", "experience", "education"]
     header_lines = [l for l in text_lines[:8] if not any(k in l.lower() for k in ignore_name_keywords)]
     if header_lines:
-        clean_line = re.sub(r"^(?:Name|Candidate Name|Full Name)[:\s]*", "", header_lines[0], flags=re.IGNORECASE)
-        clean_line = re.sub(r"\(\d+\)", "", clean_line)
-        clean_line = re.sub(r"[^A-Za-z\s]", "", clean_line).strip()
-        tokens = [t for t in clean_line.split() if len(t) > 1]
-        if tokens:
-            first_name = tokens[0].capitalize()
-            if len(tokens) > 1:
-                last_name = " ".join([t.capitalize() for t in tokens[1:]])
+        for h_line in header_lines[:3]:
+            clean_line = re.sub(r"^(?:Name|Candidate Name|Full Name)[:\s]*", "", h_line, flags=re.IGNORECASE)
+            clean_line = re.sub(r"\(\d+\)", "", clean_line)
+            # Strip leading numbers/prefixes like 04_, 01., 04
+            clean_line = re.sub(r"^\d+[\s_\.\-]+", "", clean_line)
+            
+            # Check if header line contains pipe or dash delimiter e.g. "Nikhil Patil | Backend Python Engineer"
+            if "|" in clean_line or "–" in clean_line or " - " in clean_line:
+                h_parts = [p.strip() for p in re.split(r"[\u2013\u2014\|]", clean_line) if p.strip()]
+                for hp in h_parts:
+                    hp_clean = re.sub(r"[^A-Za-z\s]", " ", hp).strip()
+                    tokens = [t for t in hp_clean.split() if len(t) > 1 and t.lower() not in noise_words]
+                    if tokens and not first_name:
+                        first_name = tokens[0].capitalize()
+                        if len(tokens) > 1:
+                            last_name = " ".join([t.capitalize() for t in tokens[1:]])
+                    elif any(w.lower() in noise_words for w in hp.split()) and not extracted_role_from_header:
+                        extracted_role_from_header = hp.strip()
+            else:
+                clean_line_alpha = re.sub(r"[^A-Za-z\s]", " ", clean_line).strip()
+                tokens = [t for t in clean_line_alpha.split() if len(t) > 1 and t.lower() not in noise_words]
+                if tokens:
+                    first_name = tokens[0].capitalize()
+                    if len(tokens) > 1:
+                        last_name = " ".join([t.capitalize() for t in tokens[1:]])
+                    break
 
-    # Priority 2: Clean Filename Fallback (stripping numeric prefixes e.g. '01_' and job title noise words)
+    # Priority 2: Clean Filename Fallback (stripping numeric prefixes e.g. '04_' and job title noise words)
     if not first_name and filename:
         clean_f = re.sub(r"\.[^/.]+$", "", filename)
         clean_f = re.sub(r"\(\d+\)", "", clean_f)
-        # Strip leading numbers/prefixes like 01_, 1., 01-
+        # Strip leading numbers/prefixes like 04_, 1., 04-
         clean_f = re.sub(r"^\d+[\s_\.\-]+", "", clean_f)
         clean_f = re.sub(r"[^A-Za-z\s]", " ", clean_f).strip()
         
-        noise_words = {
-            "resume", "cv", "pdf", "docx", "doc", "marketing", "manager", "engineer",
-            "developer", "fresher", "senior", "junior", "lead", "architect", "analyst",
-            "executive", "trainee", "specialist", "consultant", "profile", "updated", "final"
-        }
         f_tokens = [t for t in clean_f.split() if len(t) > 1 and t.lower() not in noise_words]
         if f_tokens:
             first_name = f_tokens[0].capitalize()
@@ -812,7 +834,7 @@ def parse_resume_document(file_bytes: Optional[bytes] = None, filename: Optional
                 last_name = " ".join([t.capitalize() for t in f_tokens[1:]])
 
     # 6. Role & Company Extraction
-    role = ""
+    role = extracted_role_from_header
     company = ""
     
     # Check top header for explicit Role: label

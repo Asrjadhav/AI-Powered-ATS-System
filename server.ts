@@ -2467,22 +2467,51 @@ ${extractedText.substring(0, 10000)}
       // 5. Name Extraction from top header or clean filename
       let firstName = "";
       let lastName = "";
+      let headerRole = "";
       const ignoreNameKeywords = ["resume", "curriculum", "address", "phone", "email", "@", "role:", "location:", "objective", "summary", "experience", "education"];
+      const noiseWords = new Set([
+        "resume", "cv", "pdf", "docx", "doc", "marketing", "manager", "engineer",
+        "developer", "fresher", "senior", "junior", "lead", "architect", "analyst",
+        "executive", "trainee", "specialist", "consultant", "profile", "updated", "final",
+        "backend", "frontend", "fullstack", "python", "java", "software", "data", "scientist",
+        "devops", "ui", "ux", "designer", "cloud", "it", "program", "project", "coordinator"
+      ]);
+
       const headerCandidateLines = textLines.slice(0, 8).filter(l => 
         !ignoreNameKeywords.some(k => l.toLowerCase().includes(k))
       );
 
       if (headerCandidateLines.length > 0) {
-        const rawNameLine = headerCandidateLines[0]
-          .replace(/^(?:Name|Candidate Name|Full Name)[:\s]*/i, "")
-          .replace(/\(\d+\)/g, "")
-          .replace(/[^A-Za-z\s]/g, "")
-          .trim();
-        const tokens = rawNameLine.split(/\s+/).filter(t => t.length > 1);
-        if (tokens.length >= 1) {
-          firstName = tokens[0].charAt(0).toUpperCase() + tokens[0].slice(1).toLowerCase();
-          if (tokens.length > 1) {
-            lastName = tokens.slice(1).map(t => t.charAt(0).toUpperCase() + t.slice(1).toLowerCase()).join(" ");
+        for (const hLine of headerCandidateLines.slice(0, 3)) {
+          let cleanLine = hLine
+            .replace(/^(?:Name|Candidate Name|Full Name)[:\s]*/i, "")
+            .replace(/\(\d+\)/g, "")
+            .replace(/^\d+[\s_\.\-]+/, "");
+
+          if (cleanLine.includes("|") || cleanLine.includes("–") || cleanLine.includes(" - ")) {
+            const parts = cleanLine.split(/[\u2013\u2014\|]/).map(p => p.trim()).filter(Boolean);
+            for (const p of parts) {
+              const pClean = p.replace(/[^A-Za-z\s]/g, " ").trim();
+              const tokens = pClean.split(/\s+/).filter(t => t.length > 1 && !noiseWords.has(t.toLowerCase()));
+              if (tokens.length >= 1 && !firstName) {
+                firstName = tokens[0].charAt(0).toUpperCase() + tokens[0].slice(1).toLowerCase();
+                if (tokens.length > 1) {
+                  lastName = tokens.slice(1).map(t => t.charAt(0).toUpperCase() + t.slice(1).toLowerCase()).join(" ");
+                }
+              } else if (p.split(/\s+/).some(w => noiseWords.has(w.toLowerCase())) && !headerRole) {
+                headerRole = p.trim();
+              }
+            }
+          } else {
+            const cleanAlpha = cleanLine.replace(/[^A-Za-z\s]/g, " ").trim();
+            const tokens = cleanAlpha.split(/\s+/).filter(t => t.length > 1 && !noiseWords.has(t.toLowerCase()));
+            if (tokens.length >= 1) {
+              firstName = tokens[0].charAt(0).toUpperCase() + tokens[0].slice(1).toLowerCase();
+              if (tokens.length > 1) {
+                lastName = tokens.slice(1).map(t => t.charAt(0).toUpperCase() + t.slice(1).toLowerCase()).join(" ");
+              }
+              break;
+            }
           }
         }
       }
@@ -2491,11 +2520,6 @@ ${extractedText.substring(0, 10000)}
         let cleanFile = fileName.replace(/\.[^/.]+$/, "").replace(/\(\d+\)/g, "");
         cleanFile = cleanFile.replace(/^\d+[\s_\.\-]+/, "");
         cleanFile = cleanFile.replace(/[^A-Za-z\s]/g, " ").trim();
-        const noiseWords = new Set([
-          "resume", "cv", "pdf", "docx", "doc", "marketing", "manager", "engineer",
-          "developer", "fresher", "senior", "junior", "lead", "architect", "analyst",
-          "executive", "trainee", "specialist", "consultant", "profile", "updated", "final"
-        ]);
         const fTokens = cleanFile.split(/\s+/).filter(t => t.length > 1 && !noiseWords.has(t.toLowerCase()));
         if (fTokens.length >= 1) {
           firstName = fTokens[0].charAt(0).toUpperCase() + fTokens[0].slice(1).toLowerCase();
