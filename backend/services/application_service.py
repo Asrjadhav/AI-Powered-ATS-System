@@ -171,6 +171,13 @@ def create_application(db: Session, app_in: ApplicationCreate) -> ApplicationMod
             db.commit()
             db.refresh(db_app)
 
+            # Auto-run AI screening upon application creation for instant accurate ATS score
+            try:
+                screen_application_resume(db, application_id=db_app.id)
+                db.refresh(db_app)
+            except Exception as screen_err:
+                print(f"Auto AI screening upon application creation encountered warning: {screen_err}")
+
             return db_app
         except IntegrityError as err:
             db.rollback()

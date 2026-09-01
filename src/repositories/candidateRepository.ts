@@ -308,6 +308,29 @@ export const CandidateRepository = {
     } catch (appErr) {
       console.warn("Application creation linking candidate failed:", appErr);
     }
+    // 3. Automatically trigger AI screening upon application creation for accurate instant ATS match score
+    const targetAppId = applicationRecord?.id || applicationRecord?.applicationId;
+    if (targetAppId) {
+      try {
+        const screenRes = await axios.post(`${FASTAPI_BASE_URL}/api/screen-resume`, { applicationId: targetAppId }, apiConfig);
+        if (screenRes.data && screenRes.data.evaluation) {
+          const evalResult = screenRes.data.evaluation;
+          applicationRecord = {
+            ...applicationRecord,
+            aiEvaluation: evalResult,
+            atsScore: evalResult.score,
+            status: evalResult.score >= 50 ? "Shortlisted" : "Screening"
+          };
+          if (candidate) {
+            candidate.aiScore = evalResult.score;
+            candidate.aiEvaluation = evalResult;
+            candidate.status = evalResult.score >= 50 ? "Shortlisted" : "Screening";
+          }
+        }
+      } catch (screenErr) {
+        console.warn("Auto AI screening upon application creation encountered warning:", screenErr);
+      }
+    }
 
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("applications-updated"));
@@ -319,7 +342,9 @@ export const CandidateRepository = {
       candidate,
       candidateId: candidate.candidateId || candidate.id,
       jobId: targetJobId,
-      status: payload.status || "Applied",
+      status: applicationRecord?.status || payload.status || "Applied",
+      aiEvaluation: applicationRecord?.aiEvaluation || candidate?.aiEvaluation,
+      atsScore: applicationRecord?.atsScore || candidate?.aiScore
     };
   },
 

@@ -1153,13 +1153,16 @@ export default function CandidatesView({
       setApplications(prev => prev.map(app => {
         if (app.id === appToScreen.id || app.applicationId === appToScreen.applicationId) {
           const currentTimeline = Array.isArray(app.timeline) ? app.timeline : [];
+          const nextStatus = matchScore >= 50 ? ApplicationStatus.SHORTLISTED : ApplicationStatus.SCREENING;
           return { 
             ...app, 
             aiEvaluation: evalResult, 
-            status: ApplicationStatus.SCREENING,
+            atsScore: matchScore,
+            aiScore: matchScore,
+            status: nextStatus,
             timeline: [...currentTimeline, {
               id: `evt-${Date.now()}`,
-              status: "Screening",
+              status: nextStatus,
               title: "AI Analysis Processed",
               description: `Automated match calculated. Score: ${matchScore}%`,
               timestamp: new Date().toISOString()
@@ -1173,10 +1176,13 @@ export default function CandidatesView({
       if (selectedApp?.id === appToScreen.id || selectedApp?.applicationId === appToScreen.applicationId) {
         setSelectedApp((prev: any) => {
           const currentTimeline = Array.isArray(prev?.timeline) ? prev.timeline : [];
+          const nextStatus = matchScore >= 50 ? ApplicationStatus.SHORTLISTED : ApplicationStatus.SCREENING;
           return {
             ...prev,
             aiEvaluation: evalResult,
-            status: ApplicationStatus.SCREENING,
+            atsScore: matchScore,
+            aiScore: matchScore,
+            status: nextStatus,
             timeline: [...currentTimeline, {
               id: `evt-${Date.now()}`,
               status: "Screening",
@@ -2061,7 +2067,7 @@ export default function CandidatesView({
                   const isSelected = selectedApp?.id === app.id;
                   const appCand = app.candidate;
                   const appJob = app.job;
-                  const score = app.aiEvaluation?.score ?? app.atsScore ?? app.aiScore ?? app.candidate?.aiScore ?? 85;
+                  const score = app.aiEvaluation?.score ?? app.atsScore ?? app.aiScore ?? app.candidate?.aiScore;
                   const isRowScreening = screening && selectedApp?.id === app.id;
 
                   // Budget check: Job max budget vs candidate expected CTC
