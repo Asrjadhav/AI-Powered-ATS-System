@@ -48,6 +48,14 @@ DEFAULT_TEMPLATES = [
         "subject": "Welcome to {{company_name}}! Day 1 Joining Instructions for {{job_title}}",
         "body": "Dear {{candidate_name}},\n\nWe are thrilled to welcome you to {{company_name}}! Your joining date is confirmed for {{joining_date}}.\n\nWorkplace Details:\n- Location: {{office_location}}\n- Reporting Time: 09:30 AM IST\n\nInstructions:\nPlease carry your original photo ID and education certificates for HR onboarding verification.\n\nBest regards,\n{{recruiter_name}}\n{{company_name}} Onboarding Team",
         "variables": ["candidate_name", "company_name", "job_title", "joining_date", "office_location", "recruiter_name"]
+    },
+    {
+        "id": "temp-006",
+        "name": "Candidate Application Rejection",
+        "category": "Application Rejection",
+        "subject": "Update on your application for {{job_title}} at {{company_name}}",
+        "body": "Dear {{candidate_name}},\n\nThank you for applying for the {{job_title}} position at {{company_name}}.\n\nAfter reviewing your application against the requirements of the role, we will not be moving forward with your application at this time.\n\nWe appreciate your interest in {{company_name}} and wish you success in your job search.\n\nBest regards,\n{{recruiter_name}}\n{{company_name}} Talent Acquisition Team",
+        "variables": ["candidate_name", "job_title", "company_name", "recruiter_name"]
     }
 ]
 

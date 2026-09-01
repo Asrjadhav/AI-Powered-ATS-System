@@ -16,6 +16,10 @@ from schemas.application import ApplicationCreate, ApplicationUpdate
 import services.candidate_service as candidate_service
 import services.job_service as job_service
 
+import config
+import services.notification_service as notification_service
+import services.email_service as email_service
+
 def generate_next_application_id(db: Session) -> str:
     """
     Scans existing applicationId strings in format APP-XXXX, extracts integer suffixes,
@@ -437,7 +441,7 @@ Output ONLY valid JSON matching this exact structure:
         # JD-Aware Fallback Evaluation (No generic software-engineering fallbacks)
         jd_title_lower = job_info["title"].lower()
         combined_resume = (skills_text + " " + full_resume_text).lower()
-        combined_jd = (job_info["title"] + " " + job_info["description"] + " " + resp_formatted + " " + req_formatted + " " + pref_formatted).lower()
+        combined_jd = f"{job_info['title']} {job_info['description'] or ''} {resp_formatted or ''} {req_formatted or ''} {pref_formatted or ''}".lower()
 
         # Extract core keywords from JD
         jd_keywords = set(re.findall(r"\b[a-zA-Z]{3,}\b", combined_jd))
@@ -517,16 +521,23 @@ Output ONLY valid JSON matching this exact structure:
         }
 
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    db_app.aiEvaluation = evaluation
     calc_score = int(evaluation.get("score", 0))
-    db_app.atsScore = calc_score
-    
-    # Progress recruitment stage from Applied according to AI screening decision
-    if calc_score >= 50:
-        new_stage = "Shortlisted"
-    else:
-        new_stage = "Screening"
+    threshold = config.ATS_MATCH_THRESHOLD
+    prev_status = str(db_app.status or "").lower()
 
+    existing_eval = dict(db_app.aiEvaluation or {})
+    merged_eval = {**existing_eval, **evaluation}
+    
+    if calc_score >= threshold:
+        new_stage = "Shortlisted"
+        rejection_reason = None
+    else:
+        new_stage = "Rejected"
+        rejection_reason = f"Candidate did not meet the minimum ATS match threshold of {threshold}%."
+        merged_eval["rejectionReason"] = rejection_reason
+
+    db_app.aiEvaluation = merged_eval
+    db_app.atsScore = calc_score
     db_app.status = new_stage
     db_app.updatedAt = now
 
@@ -537,7 +548,43 @@ Output ONLY valid JSON matching this exact structure:
     db.commit()
     db.refresh(db_app)
 
+    # Perform automated rejection side-effects (notification & email trigger) on first transition to Rejected
+    if new_stage == "Rejected" and prev_status != "rejected":
+        eval_dict = dict(db_app.aiEvaluation or {})
+        if not eval_dict.get("rejectionEmailSent"):
+            cand_name_str = (db_app.candidateName or f"{cand.firstName if cand else ''} {cand.lastName if cand else ''}").strip() or "Candidate"
+            job_title_str = db_app.appliedRole or (job.title if job else "Open Position")
+            cand_email_str = db_app.candidateEmail or (cand.email if cand else "")
+
+            # 1. Create rejection notification for recruiter/HR dashboard
+            try:
+                notification_service.create_notification_event(
+                    db,
+                    title="Candidate Application Rejected",
+                    message=f"Application for {cand_name_str} ({job_title_str}) was rejected automatically (ATS Score: {calc_score}% vs {threshold}% Threshold).",
+                    candidate_name=cand_name_str,
+                    job_title=job_title_str
+                )
+            except Exception as notif_err:
+                print(f"Rejection notification creation note: {notif_err}")
+
+            # 2. Trigger automated rejection email (idempotent & non-blocking)
+            try:
+                if cand_email_str:
+                    email_service.send_rejection_email(
+                        db=db,
+                        candidate_email=cand_email_str,
+                        candidate_name=cand_name_str,
+                        job_title=job_title_str
+                    )
+                    eval_dict["rejectionEmailSent"] = True
+                    eval_dict["rejectionEmailSentAt"] = now
+                    db_app.aiEvaluation = eval_dict
+                    db.commit()
+            except Exception as email_err:
+                print(f"Rejection email dispatch note: {email_err}")
+
     return {
         "success": True,
-        "evaluation": evaluation
+        "evaluation": db_app.aiEvaluation
     }

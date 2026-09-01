@@ -2053,7 +2053,6 @@ export default function CandidatesView({
                 <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Source</th>
                 <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Current CTC</th>
                 <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Expected CTC</th>
-                <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">HR Approval</th>
                 <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Resume</th>
                 <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">ATS Score</th>
                 <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Pipeline Stage</th>
@@ -2063,7 +2062,7 @@ export default function CandidatesView({
             <tbody className="divide-y divide-slate-150 dark:divide-slate-800">
               {filteredApplications.length === 0 ? (
                 <tr>
-                  <td colSpan={15} className="p-8 text-center text-slate-400 dark:text-slate-500 font-semibold font-sans">
+                  <td colSpan={14} className="p-8 text-center text-slate-400 dark:text-slate-500 font-semibold font-sans">
                     No candidates found matching the criteria.
                   </td>
                 </tr>
@@ -2199,9 +2198,11 @@ export default function CandidatesView({
                       {/* Position Column */}
                       <td className={`${density === "compact" ? "px-4 py-1.5" : "px-6 py-4"} whitespace-nowrap`}>
                         <div>
-                          <span className="font-semibold text-slate-800 dark:text-slate-200 text-xs block truncate max-w-[150px]">{appJob?.title || "Position open"}</span>
+                          <span className="font-semibold text-slate-800 dark:text-slate-200 text-xs block truncate max-w-[150px]">
+                            {appJob?.title || appCand?.appliedJob || appCand?.jobTitle || appCand?.job?.title || appCand?.currentRole || "Open Position"}
+                          </span>
                           <div className="flex items-center gap-1.5 mt-0.5">
-                            <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase tracking-wider font-bold">{appJob?.department}</span>
+                            <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase tracking-wider font-bold">{appJob?.department || appCand?.department || "Engineering"}</span>
                             {(appJob?.id || appCand?.jobId) && (
                               <span className="text-[9px] font-mono text-slate-400 dark:text-slate-500 font-semibold">({formatJobId(appJob?.id || appCand?.jobId)})</span>
                             )}
@@ -2241,22 +2242,6 @@ export default function CandidatesView({
                             </span>
                           )}
                         </div>
-                      </td>
-
-                      {/* HR Approval Status Column */}
-                      <td className={`${density === "compact" ? "px-4 py-1.5" : "px-6 py-4"} whitespace-nowrap`}>
-                        <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider ${
-                          appCand?.hrApprovalStatus === "approved" ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/30" :
-                          appCand?.hrApprovalStatus === "rejected" ? "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 border-rose-200 dark:border-rose-900/30" :
-                          "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-900/30"
-                        }`}>
-                          <span className={`h-1 w-1 rounded-full ${
-                            appCand?.hrApprovalStatus === "approved" ? "bg-emerald-500" :
-                            appCand?.hrApprovalStatus === "rejected" ? "bg-rose-500" :
-                            "bg-amber-500 animate-pulse"
-                          }`} />
-                          <span>{appCand?.hrApprovalStatus || "pending"}</span>
-                        </span>
                       </td>
 
                       {/* Resume Column */}

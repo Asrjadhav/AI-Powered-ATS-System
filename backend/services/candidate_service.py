@@ -637,6 +637,37 @@ def get_candidate_resume_file(db: Session, identifier: str):
                 db.commit()
                 db.refresh(cand)
 
+    # Persistent Ephemeral Fallback: Auto-reconstruct physical file if disk wiped on Render restart
+    if not file_path and cand and (cand.resumeText or (isinstance(cand.customFields, dict) and cand.customFields.get("cvBase64"))):
+        try:
+            cand_name = f"{cand.firstName or ''} {cand.lastName or ''}".strip() or "Candidate"
+            doc_filename = cand.resumeFileName or f"{cand_name.replace(' ', '_')}_Resume.pdf"
+            cv_b64 = cand.customFields.get("cvBase64") if isinstance(cand.customFields, dict) else None
+
+            if cv_b64:
+                import base64
+                if "," in str(cv_b64):
+                    cv_b64 = str(cv_b64).split(",", 1)[1]
+                file_bytes = base64.b64decode(cv_b64)
+            else:
+                text_content = cand.resumeText or f"Resume Document for {cand_name}"
+                header = f"CANDIDATE CURRICULUM VITAE / RESUME\nName: {cand_name}\nEmail: {cand.email or 'N/A'}\nRole: {cand.currentRole or 'N/A'}\n"
+                full_doc_str = f"{header}\n{'='*50}\n\n{text_content}"
+                file_bytes = full_doc_str.encode("utf-8")
+                if not doc_filename.endswith(".txt") and not doc_filename.endswith(".pdf"):
+                    doc_filename = f"{os.path.splitext(doc_filename)[0]}.txt"
+
+            new_key = file_storage_service.save_resume(cand_ref, file_bytes, doc_filename)
+            file_path = file_storage_service.get_resume_path(new_key)
+            if file_path:
+                cand.resumeStorageKey = new_key
+                cand.resumeFileName = doc_filename
+                cand.resumeUploadedAt = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                db.commit()
+                db.refresh(cand)
+        except Exception as synth_err:
+            print(f"Auto-reconstruct resume file note for {cand_ref}: {synth_err}")
+
     if not file_path:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

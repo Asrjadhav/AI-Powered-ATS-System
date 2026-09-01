@@ -3,7 +3,7 @@
  * DashboardView, and CandidatesView to ensure 100% calculation synchronization.
  */
 
-export const DEFAULT_MATCH_THRESHOLD = 80;
+export const DEFAULT_MATCH_THRESHOLD = 70;
 
 export function getCandidateDate(cand: any): string {
   if (!cand) return "";
