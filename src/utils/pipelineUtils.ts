@@ -50,7 +50,7 @@ export function getCandidateAIScore(cand: any): number {
   if (typeof cand.aiScore === "number") return cand.aiScore;
   if (typeof cand.aiMatchScore === "number") return cand.aiMatchScore;
   if (typeof cand.candidate?.aiScore === "number") return cand.candidate.aiScore;
-  return 80;
+  return 0;
 }
 
 export function isNewCandidate(cand: any): boolean {
@@ -79,8 +79,18 @@ export function isAIShortlisted(cand: any, matchThreshold = DEFAULT_MATCH_THRESH
     return false;
   }
   
+  if (norm === "shortlisted" || norm === "ai shortlisted") {
+    return true;
+  }
+
+  const hasEvaluatedScore = 
+    typeof cand.aiEvaluation?.score === "number" ||
+    typeof cand.aiScore === "number" ||
+    typeof cand.aiMatchScore === "number" ||
+    typeof cand.candidate?.aiScore === "number";
+
   const score = getCandidateAIScore(cand);
-  return norm === "shortlisted" || norm === "ai shortlisted" || score >= matchThreshold;
+  return hasEvaluatedScore && score >= matchThreshold;
 }
 
 export function isInterviewStage(cand: any): boolean {
