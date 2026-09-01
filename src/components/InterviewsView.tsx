@@ -472,14 +472,15 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
     }
   };
 
-  const handleDeleteInterview = async (interviewId: string, skipConfirm = false) => {
+  const handleDeleteInterview = async (itemOrId: any, skipConfirm = false) => {
     if (!skipConfirm) {
       if (!window.confirm("Are you sure you want to delete this interview record permanently?")) {
         return;
       }
     }
     try {
-      await InterviewRepository.delete(interviewId);
+      const primaryId = typeof itemOrId === "string" ? itemOrId : (itemOrId?.id || itemOrId?.candidateId || itemOrId?.applicationId);
+      await InterviewRepository.delete(primaryId);
       triggerToast("Interview record deleted successfully.", "success");
       await fetchInterviewsAndApps();
       window.dispatchEvent(new Event("trigger-notification-sync"));
@@ -488,6 +489,23 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
       window.dispatchEvent(new Event("candidates-updated"));
     } catch (err: any) {
       console.error("Error deleting interview:", err);
+      if (typeof itemOrId === "object" && itemOrId !== null) {
+        try {
+          const fallbackId = itemOrId.candidateId || itemOrId.applicationId || itemOrId.candidateEmail || itemOrId.candidateName;
+          if (fallbackId) {
+            await InterviewRepository.delete(fallbackId);
+            triggerToast("Interview record deleted successfully.", "success");
+            await fetchInterviewsAndApps();
+            window.dispatchEvent(new Event("trigger-notification-sync"));
+            window.dispatchEvent(new Event("applications-updated"));
+            window.dispatchEvent(new Event("interviews-updated"));
+            window.dispatchEvent(new Event("candidates-updated"));
+            return;
+          }
+        } catch (fbErr) {
+          console.error("Fallback delete interview failed:", fbErr);
+        }
+      }
       triggerToast("Failed to delete interview record.", "error");
     }
   };
@@ -1208,7 +1226,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleDeleteInterview(item.id);
+                                handleDeleteInterview(item);
                               }}
                               className="px-3 py-1.5 border border-rose-200 hover:bg-rose-50 text-rose-600 font-semibold text-xs rounded-md transition-all cursor-pointer flex items-center gap-1.5"
                               title="Permanently remove interview session from database"
@@ -2433,7 +2451,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                   onClick={async () => {
                     if (window.confirm("Are you sure you want to delete this interview record permanently?")) {
                       setShowFeedbackDetailModal(false);
-                      await handleDeleteInterview(selectedInterview.id, true);
+                      await handleDeleteInterview(selectedInterview, true);
                     }
                   }}
                   className="px-4 py-2 border border-rose-200 hover:bg-rose-50 text-rose-600 font-semibold text-xs rounded-lg transition-all cursor-pointer shadow-xs flex items-center gap-1.5"
