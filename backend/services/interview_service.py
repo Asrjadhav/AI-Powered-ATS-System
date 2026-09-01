@@ -3,7 +3,7 @@ import uuid
 import datetime
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_
+from sqlalchemy import or_, and_, func
 from fastapi import HTTPException, status
 
 from models.interview import InterviewModel
