@@ -85,7 +85,7 @@ export default function ChangePasswordView({ onSuccess }: Props) {
         </div>
         <button
           type="submit"
-          className="w-full py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold rounded-xl"
+          className="w-full py-3 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl shadow-xs transition-all cursor-pointer"
         >
           Change Password
         </button>

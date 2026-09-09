@@ -282,7 +282,7 @@ export default function NotificationsView({ notifications, setNotifications }: N
       case "ai_screening_completed":
         return { icon: Sparkles, bg: "bg-violet-50 border-violet-100 text-violet-600 dark:bg-violet-950/40 dark:border-violet-900/40 dark:text-violet-400" };
       case "job_published":
-        return { icon: Briefcase, bg: "bg-purple-50 border-purple-100 text-purple-600 dark:bg-purple-950/40 dark:border-purple-900/40 dark:text-purple-400" };
+        return { icon: Briefcase, bg: "bg-brand-50 border-brand-100 text-brand-600 dark:bg-brand-950/40 dark:border-brand-900/40 dark:text-brand-400" };
       case "new_referral":
         return { icon: UserCheck, bg: "bg-teal-50 border-teal-100 text-teal-600 dark:bg-teal-950/40 dark:border-teal-900/40 dark:text-teal-400" };
       case "system":
@@ -306,14 +306,7 @@ export default function NotificationsView({ notifications, setNotifications }: N
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
   return (
-    <div className="p-4 sm:p-8 max-w-2xl mx-auto text-slate-800 dark:text-slate-100 transition-all">
-      
-      {/* Breadcrumb Section */}
-      <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 dark:text-slate-500 mb-4 uppercase tracking-wider text-left">
-        <span>System</span>
-        <ChevronRight className="h-3 w-3" />
-        <span className="text-slate-600 dark:text-slate-300 font-extrabold">Notifications</span>
-      </div>
+    <div className="w-full px-4 sm:px-6 lg:px-8 pt-7 sm:pt-8 pb-8 space-y-5 sm:space-y-6 text-slate-800 dark:text-slate-100 transition-all">
 
       {/* Container Card */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-lg overflow-hidden">

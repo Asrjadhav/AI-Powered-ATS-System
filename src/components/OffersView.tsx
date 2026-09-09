@@ -1062,34 +1062,27 @@ encureIT Systems Pvt Ltd`;
   };
 
   return (
-    <div className={`${density === "compact" ? "p-4 space-y-4" : "p-8 space-y-8"} max-w-7xl mx-auto text-slate-800 dark:text-slate-100 transition-all text-left`}>
+    <div className="w-full px-4 sm:px-6 lg:px-8 pt-7 sm:pt-8 pb-8 space-y-5 sm:space-y-6 text-slate-800 dark:text-slate-100 transition-all text-left">
       
       {/* Toast Notification banner */}
       {toastMessage && (
-        <div className="fixed top-20 right-6 z-50 bg-indigo-950 border border-indigo-800/80 text-white rounded-xl shadow-2xl px-5 py-3.5 flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-200">
-          <Bell className="h-4.5 w-4.5 text-indigo-400 animate-bounce" />
+        <div className="fixed top-20 right-6 z-50 bg-slate-900 border border-slate-800 text-white rounded-xl shadow-2xl px-5 py-3.5 flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-200">
+          <Bell className="h-4.5 w-4.5 text-brand-600 animate-bounce" />
           <p className="text-xs font-bold leading-none">{toastMessage}</p>
         </div>
       )}
 
-      {/* Header Container grouping Breadcrumbs and Page Header */}
-      <div className="space-y-1.5 text-left">
-        <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-left">
-          <span>Recruitment</span>
-          <ChevronRight className="h-3 w-3" />
-          <span className="text-slate-600 dark:text-slate-300 font-extrabold">Offers</span>
+      {/* Header Container */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+        <div>
+          <h2 className="font-display font-black text-2xl sm:text-3xl text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
+            <Award className="h-7 w-7 text-brand-600" />
+            <span>Offers</span>
+          </h2>
+          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5 font-medium text-left">
+            Manage candidate offers and offer status.
+          </p>
         </div>
-
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-5">
-          <div>
-            <h2 className="font-display font-black text-2xl sm:text-3xl text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
-              <Award className="h-7 w-7 text-indigo-600" />
-              <span>Offer Administration Console</span>
-            </h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 text-left">
-              Enterprise offer-to-joining pipeline: Verbal Salary Discussion, Candidate Decision, Documentation Audit, AI Contracts, & Onboarding.
-            </p>
-          </div>
           
           <div className="flex items-center gap-2 shrink-0">
             <button 
@@ -1126,7 +1119,6 @@ encureIT Systems Pvt Ltd`;
             </button>
           </div>
         </div>
-      </div>
 
       {/* TOP SUMMARY CARDS (6 Metrics) */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -1136,7 +1128,7 @@ encureIT Systems Pvt Ltd`;
           { title: "Accepted Offers", value: metrics.accepted, status: "Accepted", change: "+15.3%", up: true, icon: CheckCircle2, color: "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30" },
           { title: "Joined Employees", value: metrics.joined, status: "Joined", change: "+20.1%", up: true, icon: BadgeCheck, color: "text-blue-600 bg-blue-50 dark:bg-blue-950/30" },
           { title: "Rejected Offers", value: metrics.rejected, status: "Rejected", change: "-4.1%", up: false, icon: XCircle, color: "text-rose-600 bg-rose-50 dark:bg-rose-950/30" },
-          { title: "Acceptance Rate", value: `${metrics.acceptanceRate}%`, status: "Rate", change: "+3.6%", up: true, icon: UserCheck, color: "text-purple-600 bg-purple-50 dark:bg-purple-950/30" }
+          { title: "Acceptance Rate", value: `${metrics.acceptanceRate}%`, status: "Rate", change: "+3.6%", up: true, icon: UserCheck, color: "text-brand-600 bg-brand-50 dark:bg-brand-950/30" }
         ].map((card, idx) => {
           const Icon = card.icon;
           const isSelected = card.status === "Rate" ? false : filterStatus === card.status;
@@ -1350,25 +1342,46 @@ encureIT Systems Pvt Ltd`;
         <div className="lg:col-span-3 space-y-4">
           
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xs overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
+            <div className="w-full overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse min-w-[850px]">
                 <thead>
                   <tr className="bg-slate-50 dark:bg-slate-950 border-b border-slate-150 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider font-mono text-[10px] select-none">
-                    <th className="py-3.5 px-4">Offer ID</th>
-                    <th className="py-3.5 px-4">Candidate Name</th>
-                    <th className="py-3.5 px-4">Job / Dept</th>
-                    <th className="py-3.5 px-4">Workflow Stage</th>
-                    <th className="py-3.5 px-4 text-center">Docs</th>
-                    <th className="py-3.5 px-4">Offered Salary</th>
-                    <th className="py-3.5 px-4">Status</th>
-                    <th className="py-3.5 px-4 text-center">Stage Actions</th>
+                    <th className="py-3.5 px-4 min-w-[90px]">Offer ID</th>
+                    <th className="py-3.5 px-4 min-w-[160px]">Candidate Name</th>
+                    <th className="py-3.5 px-4 min-w-[160px]">Job / Dept</th>
+                    <th className="py-3.5 px-4 min-w-[140px]">Workflow Stage</th>
+                    <th className="py-3.5 px-4 text-center min-w-[90px]">Docs</th>
+                    <th className="py-3.5 px-4 min-w-[120px]">Offered Salary</th>
+                    <th className="py-3.5 px-4 min-w-[100px]">Status</th>
+                    <th className="py-3.5 px-4 text-center min-w-[140px]">Stage Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-850">
                   {filteredOffers.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="py-12 text-center text-slate-400">
-                        No matches found for your current filter settings.
+                      <td colSpan={8} className="py-16 text-center">
+                        <div className="flex flex-col items-center justify-center max-w-sm mx-auto space-y-3">
+                          <div className="h-12 w-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400">
+                            <FileText className="h-6 w-6 stroke-[1.5]" />
+                          </div>
+                          <h4 className="font-bold text-sm text-slate-700 dark:text-slate-200">No matching offer records</h4>
+                          <p className="text-xs text-slate-400 dark:text-slate-500 leading-relaxed">
+                            No offer documents found for your active filter settings. Try adjusting your position, department, or status filters.
+                          </p>
+                          <button
+                            onClick={() => {
+                              setSearch("");
+                              setFilterJob("");
+                              setFilterDept("");
+                              setFilterRecruiter("");
+                              setFilterStatus("");
+                              setActiveStageFilter("all");
+                            }}
+                            className="mt-1 px-3.5 py-1.5 text-xs font-bold text-brand-600 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-lg transition-colors cursor-pointer"
+                          >
+                            Reset Filters
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ) : (
@@ -1386,7 +1399,7 @@ encureIT Systems Pvt Ltd`;
                       } else if (offer.status === "Expired") {
                         badgeStyle = "bg-slate-200 text-slate-700 dark:bg-slate-850 dark:text-slate-400 border border-slate-700/10";
                       } else if (offer.status === "Withdrawn") {
-                        badgeStyle = "bg-purple-100 text-purple-800 dark:bg-purple-950/40 dark:text-purple-400 border border-purple-500/10";
+                        badgeStyle = "bg-brand-100 text-brand-800 dark:bg-brand-950/40 dark:text-brand-300 border border-brand-500/10";
                       }
 
                       const docs = offer.documents || DEFAULT_13_DOCUMENTS;
@@ -2486,7 +2499,7 @@ encureIT Systems Pvt Ltd`;
           <div className="relative w-full max-w-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden z-10">
             <div className="p-4 border-b border-slate-150 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex justify-between items-center">
               <div className="flex items-center gap-2">
-                <ListChecks className="h-5 w-5 text-purple-600" />
+                <ListChecks className="h-5 w-5 text-brand-600" />
                 <h3 className="font-bold text-sm text-slate-900 dark:text-white">Stage 9: Joining Process & Onboarding (10 Tasks)</h3>
               </div>
               <button onClick={() => setIsOnboardingModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-600">

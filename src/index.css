@@ -7,9 +7,43 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Space Grotesk", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* EncureIT Centralized Brand Design Tokens derived from Company Logo (#1F3B75) */
+  --color-brand-50: #f0f4fa;
+  --color-brand-100: #dce5f5;
+  --color-brand-200: #bdceeb;
+  --color-brand-300: #93afdd;
+  --color-brand-400: #557dbf;
+  --color-brand-500: #2e549b;
+  --color-brand-600: #1f3b75; /* Logo Primary Brand Blue */
+  --color-brand-700: #192f5e;
+  --color-brand-800: #132347;
+  --color-brand-900: #0d172e;
+  --color-brand-950: #070c18;
+
+  /* Remap indigo palette to EncureIT logo primary blue palette */
+  --color-indigo-50: #f0f4fa;
+  --color-indigo-100: #dce5f5;
+  --color-indigo-200: #bdceeb;
+  --color-indigo-300: #93afdd;
+  --color-indigo-400: #557dbf;
+  --color-indigo-500: #2e549b;
+  --color-indigo-600: #1f3b75;
+  --color-indigo-700: #192f5e;
+  --color-indigo-800: #132347;
+  --color-indigo-900: #0d172e;
+  --color-indigo-950: #070c18;
 }
 
-/* Custom scrollbar styling for a premium look */
+:root {
+  --brand-primary: #1f3b75;
+  --brand-primary-hover: #192f5e;
+  --brand-primary-light: #f0f4fa;
+  --brand-primary-border: #dce5f5;
+  --brand-primary-ring: rgba(31, 59, 117, 0.2);
+}
+
+/* Custom scrollbar styling for a clean enterprise look */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -20,10 +54,65 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(156, 163, 175, 0.3);
+  background: rgba(148, 163, 184, 0.3);
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(156, 163, 175, 0.5);
+  background: rgba(148, 163, 184, 0.5);
+}
+
+html, body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* Global Page Container Token */
+.ats-page-container {
+  @apply w-full px-4 sm:px-6 lg:px-8 space-y-5 text-slate-800 dark:text-slate-100 transition-all select-none;
+}
+
+/* Base Form Input & Button Tokens */
+.ats-input {
+  @apply bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-600/20 focus:border-brand-600 transition-all shadow-xs placeholder-slate-400;
+}
+
+.ats-btn-primary {
+  @apply inline-flex items-center justify-center gap-2 bg-brand-600 hover:bg-brand-700 active:bg-brand-800 text-white font-bold text-xs px-3.5 py-2 h-9 rounded-lg transition-all shadow-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.ats-btn-secondary {
+  @apply inline-flex items-center justify-center gap-2 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 font-bold text-xs px-3.5 py-2 h-9 rounded-lg transition-all shadow-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.ats-btn-danger {
+  @apply inline-flex items-center justify-center gap-2 bg-rose-50 dark:bg-rose-950/30 hover:bg-rose-100 dark:hover:bg-rose-900/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/40 font-bold text-xs px-3.5 py-2 h-9 rounded-lg transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.ats-btn-ghost {
+  @apply inline-flex items-center justify-center gap-1.5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 font-bold text-xs px-3 py-1.5 h-8 rounded-lg transition-all cursor-pointer;
+}
+
+.ats-card {
+  @apply bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs;
+}
+
+.ats-table-header {
+  @apply text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider bg-slate-50/70 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 py-2.5 px-3.5;
+}
+
+.ats-badge-brand {
+  @apply inline-flex items-center gap-1 font-bold text-[10px] px-2 py-0.5 rounded-md bg-brand-50 text-brand-600 dark:bg-brand-950/50 dark:text-brand-400 border border-brand-200 dark:border-brand-900/40;
+}
+
+.ats-badge-success {
+  @apply inline-flex items-center gap-1 font-bold text-[10px] px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/40;
+}
+
+.ats-badge-warning {
+  @apply inline-flex items-center gap-1 font-bold text-[10px] px-2 py-0.5 rounded-md bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400 border border-amber-200 dark:border-amber-900/40;
+}
+
+.ats-badge-danger {
+  @apply inline-flex items-center gap-1 font-bold text-[10px] px-2 py-0.5 rounded-md bg-rose-50 text-rose-600 dark:bg-rose-950/50 dark:text-rose-400 border border-rose-200 dark:border-rose-900/40;
 }

@@ -609,7 +609,7 @@ export default function EmailTemplatesView() {
   };
 
   return (
-    <div className={`${density === "compact" ? "p-4 space-y-4" : "p-8 space-y-8"} max-w-7xl mx-auto text-slate-800 dark:text-slate-100 pb-12 transition-all text-left`} id="email-templates-container">
+    <div className="w-full px-4 sm:px-6 lg:px-8 pt-7 sm:pt-8 pb-12 space-y-5 sm:space-y-6 text-slate-800 dark:text-slate-100 transition-all text-left" id="email-templates-container">
       {/* Toast Notification */}
       <AnimatePresence>
         {successToast && (
@@ -625,26 +625,17 @@ export default function EmailTemplatesView() {
         )}
       </AnimatePresence>
 
-      {/* Header Container grouping Breadcrumbs and Page Header to control exact spacing */}
-      <div className="space-y-1.5 text-left">
-        {/* Breadcrumbs */}
-        <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-left">
-          <span>Recruitment</span>
-          <ChevronRight className="h-3 w-3" />
-          <span className="text-slate-600 dark:text-slate-300 font-extrabold">Email Templates</span>
+      {/* Header Container */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+        <div>
+          <h2 className="font-display font-black text-2xl sm:text-3xl text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
+            <Mail className="h-7 w-7 text-brand-600" />
+            <span>Email Templates</span>
+          </h2>
+          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5 font-medium text-left">
+            Manage automated email response templates and triggers.
+          </p>
         </div>
-
-        {/* View Header */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-5">
-          <div>
-            <h2 className="font-display font-black text-2xl sm:text-3xl text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
-              <Mail className="h-7 w-7 text-indigo-600" />
-              <span>Email Templates Library</span>
-            </h2>
-            <p className="text-slate-500 dark:text-slate-400 text-sm mt-1 text-left">
-              Create, edit, preview, and automate your communication with candidates using customized, Gemini-enhanced templates.
-            </p>
-          </div>
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => setShowAiModal(true)}
@@ -662,7 +653,6 @@ export default function EmailTemplatesView() {
             </button>
           </div>
         </div>
-      </div>
 
       {/* SUMMARY CARDS METRICS SECTION */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 animate-in fade-in duration-300" id="metrics-summary">

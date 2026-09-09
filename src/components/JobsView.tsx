@@ -724,14 +724,7 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
   };
 
   return (
-    <div className={`${density === "compact" ? "p-4 space-y-4" : "p-6 sm:p-8 space-y-6"} max-w-full mx-auto relative text-slate-800 dark:text-slate-100 transition-all`}>
-      
-      {/* Breadcrumb Section */}
-      <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 dark:text-slate-500 mb-2 uppercase tracking-wider text-left">
-        <span>Recruitment</span>
-        <ChevronRight className="h-3 w-3" />
-        <span className="text-slate-600 dark:text-slate-300 font-extrabold">Job Openings</span>
-      </div>
+    <div className="w-full px-4 sm:px-6 lg:px-8 pt-7 sm:pt-8 pb-8 space-y-5 sm:space-y-6 relative text-slate-800 dark:text-slate-100 transition-all">
 
       {/* Top Header Panel */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-5">
@@ -987,18 +980,18 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
               </button>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
+            <div className="w-full overflow-x-auto">
+              <table className="w-full text-left border-collapse min-w-[880px]">
                 <thead>
                   <tr className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                    <th className="py-4 px-6">Job Openings & Dept</th>
-                    <th className="py-4 px-6">Job ID</th>
-                    <th className="py-4 px-6">Location</th>
-                    <th className="py-4 px-6">Type</th>
-                    <th className="py-4 px-6">Pipeline Status</th>
-                    <th className="py-4 px-6 text-center">Applied</th>
-                    <th className="py-4 px-6">Created On</th>
-                    <th className="py-4 px-6 text-right">Actions</th>
+                    <th className="py-3.5 px-5 min-w-[220px]">Job Title & Dept</th>
+                    <th className="py-3.5 px-5 min-w-[100px]">Job ID</th>
+                    <th className="py-3.5 px-5 min-w-[120px]">Location</th>
+                    <th className="py-3.5 px-5 min-w-[100px]">Type</th>
+                    <th className="py-3.5 px-5 min-w-[130px]">Pipeline Status</th>
+                    <th className="py-3.5 px-5 text-center min-w-[90px]">Applied</th>
+                    <th className="py-3.5 px-5 min-w-[110px]">Created On</th>
+                    <th className="py-3.5 px-5 text-right min-w-[110px]">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-850 text-sm">
@@ -1296,7 +1289,7 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
                   <div className="space-y-1 sm:border-l border-slate-200/80 sm:pl-3">
                     <span className="text-slate-400 font-bold block uppercase tracking-wider text-[9px]">Employment Type</span>
                     <span className="font-semibold text-slate-800 flex items-center gap-1.5">
-                      <Briefcase className="h-3.5 w-3.5 text-purple-500 shrink-0" />
+                      <Briefcase className="h-3.5 w-3.5 text-brand-600 shrink-0" />
                       <span>{selectedJob.type || "Full-time"}</span>
                     </span>
                   </div>
@@ -2325,7 +2318,7 @@ Role details: We require a Node.js veteran...
                                   <span className="bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded font-bold font-mono border border-amber-100">
                                     {(pJob.preferredSkills?.length || pJob.requirements?.goodToHave?.length || 0)} Pref.
                                   </span>
-                                  <span className="bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded font-bold font-mono border border-purple-100">
+                                  <span className="bg-brand-50 text-brand-700 px-1.5 py-0.5 rounded font-bold font-mono border border-brand-200">
                                     {(pJob.benefits?.length || 0)} Benefits
                                   </span>
                                 </div>

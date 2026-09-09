@@ -865,14 +865,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
   };
 
   return (
-    <div className={`${density === "compact" ? "p-4 space-y-4" : "p-8 space-y-8"} max-w-7xl mx-auto text-slate-800 dark:text-slate-100 transition-all`}>
-      
-      {/* Breadcrumb Section */}
-      <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 dark:text-slate-500 mb-2 uppercase tracking-wider text-left">
-        <span>Recruitment</span>
-        <ChevronRight className="h-3 w-3" />
-        <span className="text-slate-600 dark:text-slate-300 font-extrabold">Interviews</span>
-      </div>
+    <div className="w-full px-4 sm:px-6 lg:px-8 pt-7 sm:pt-8 pb-8 space-y-5 sm:space-y-6 text-slate-800 dark:text-slate-100 transition-all">
 
       {/* Header Panel */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-5">

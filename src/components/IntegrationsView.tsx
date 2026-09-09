@@ -11,6 +11,7 @@ import {
   RefreshCw, 
   CheckCircle, 
   XCircle, 
+  AlertCircle,
   AlertTriangle, 
   HelpCircle, 
   Briefcase, 
@@ -352,20 +353,13 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
   }
 
   return (
-    <div className="p-6 sm:p-8 space-y-8 max-w-[1600px] mx-auto animate-in fade-in duration-300">
+    <div className="w-full px-4 sm:px-6 lg:px-8 pt-7 sm:pt-8 pb-8 space-y-5 sm:space-y-6 animate-in fade-in duration-300">
       
-      {/* Breadcrumb Section */}
-      <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 dark:text-slate-500 mb-2 uppercase tracking-wider text-left">
-        <span>Administration</span>
-        <ChevronRight className="h-3 w-3" />
-        <span className="text-slate-600 dark:text-slate-300 font-extrabold">Integrations</span>
-      </div>
-
       {/* Toast Notification Banner */}
       {toast && (
         <div className={`fixed bottom-6 right-6 z-50 p-4 rounded-xl shadow-2xl flex items-center gap-3 border transition-all transform translate-y-0 scale-100 ${
           toast.type === "success" 
-            ? "bg-slate-900 border-indigo-500/30 text-white" 
+            ? "bg-slate-900 border-emerald-500/30 text-white" 
             : toast.type === "error" 
               ? "bg-rose-950 border-rose-900/50 text-rose-100" 
               : "bg-slate-950 border-slate-800 text-slate-200"
@@ -373,23 +367,23 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
           {toast.type === "success" ? (
             <CheckCircle className="h-5 w-5 text-emerald-400 shrink-0" />
           ) : toast.type === "error" ? (
-            <XCircle className="h-5 w-5 text-rose-400 shrink-0" />
+            <AlertCircle className="h-5 w-5 text-rose-400 shrink-0" />
           ) : (
-            <Info className="h-5 w-5 text-indigo-400 shrink-0" />
+            <RefreshCw className="h-5 w-5 text-brand-600 animate-spin shrink-0" />
           )}
           <span className="text-xs font-semibold">{toast.message}</span>
         </div>
       )}
 
       {/* Header Panel */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-5">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
         <div>
           <h2 className="font-display font-black text-2xl sm:text-3xl text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
-            <Link className="h-7 w-7 text-indigo-600 shrink-0" />
-            <span>Integrations Hub</span>
+            <Link className="h-7 w-7 text-brand-600 shrink-0" />
+            <span>Integration Hub</span>
           </h2>
-          <p className="text-slate-500 dark:text-slate-400 text-sm mt-1 max-w-3xl">
-            Configure, monitor, and synchronize your central Applicant Tracking System with external job boards, company career channels, video engines, calendars, secure back-office verification systems, and state-of-the-art AI parsing modules.
+          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium mt-0.5 max-w-3xl">
+            Manage ATS integrations, webhooks, and job board connections.
           </p>
         </div>
 
@@ -430,7 +424,7 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
                       job.id === "linkedin" ? "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300" :
                       job.id === "indeed" ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300" :
                       job.id === "naukri" ? "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300" :
-                      job.id === "foundit" ? "bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300" :
+                      job.id === "foundit" ? "bg-brand-50 text-brand-700 dark:bg-brand-950 dark:text-brand-300" :
                       job.id === "glassdoor" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" :
                       "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
                     }`}>

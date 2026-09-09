@@ -312,14 +312,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
   });
 
   return (
-    <div className="p-6 sm:p-8 space-y-8 max-w-[1600px] mx-auto animate-in fade-in duration-300">
-      
-      {/* Breadcrumb Section */}
-      <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 dark:text-slate-500 mb-2 uppercase tracking-wider text-left">
-        <span>Administration</span>
-        <ChevronRight className="h-3 w-3" />
-        <span className="text-slate-600 dark:text-slate-300 font-extrabold">System Administrator</span>
-      </div>
+    <div className="w-full px-4 sm:px-6 lg:px-8 pt-7 sm:pt-8 pb-8 space-y-5 sm:space-y-6 animate-in fade-in duration-300">
 
       {/* Toast Notification Container */}
       {toast && (
@@ -398,13 +391,13 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
         <div id="kpi-system-admins" className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-xl p-4 shadow-xs">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">System Administrators</span>
           <div className="flex items-baseline gap-2 mt-1">
-            <span className="text-2xl font-black text-purple-600 dark:text-purple-400">
+            <span className="text-2xl font-black text-brand-600 dark:text-brand-400">
               {users.filter(u => u.role === "System Administrator").length}
             </span>
             <span className="text-[11px] font-bold text-slate-400">Primary</span>
           </div>
           <div className="h-1 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden mt-3">
-            <div className="h-full bg-purple-500 rounded-full" style={{ width: "100%" }} />
+            <div className="h-full bg-brand-600 rounded-full" style={{ width: "100%" }} />
           </div>
         </div>
 
@@ -824,7 +817,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
                     {/* Role & Designation Badge Column */}
                     <td className="px-6 py-4">
                       <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide ${
-                        user.role === "System Administrator" ? "bg-purple-50 text-purple-700 dark:bg-purple-950/30 dark:text-purple-300" :
+                        user.role === "System Administrator" ? "bg-brand-50 text-brand-700 dark:bg-brand-950/30 dark:text-brand-300" :
                         user.role === "Hiring Manager" ? "bg-sky-50 text-sky-700 dark:bg-sky-950/30 dark:text-sky-300" :
                         user.role === "Technical Interviewer" ? "bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300" :
                         user.role === "HR Executive" ? "bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300" :

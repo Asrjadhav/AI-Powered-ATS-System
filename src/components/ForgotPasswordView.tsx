@@ -48,7 +48,7 @@ export default function ForgotPasswordView({ onBack }: Props) {
           </div>
           <button
             type="submit"
-            className="w-full py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold rounded-xl flex items-center justify-center gap-2"
+            className="w-full py-3 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
           >
             Send Reset Link <ArrowRight className="h-4 w-4" />
           </button>

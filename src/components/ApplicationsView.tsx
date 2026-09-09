@@ -138,7 +138,7 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
     if (s.includes("new")) return "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200 dark:border-blue-800";
     if (s.includes("screen")) return "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200 dark:border-amber-800";
     if (s.includes("shortlist")) return "bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800";
-    if (s.includes("interview")) return "bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300 border border-purple-200 dark:border-purple-800";
+    if (s.includes("interview")) return "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200 dark:border-blue-800";
     if (s.includes("offer")) return "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800";
     if (s.includes("hire")) return "bg-green-100 text-green-800 dark:bg-green-950/60 dark:text-green-300 border border-green-300 dark:border-green-700";
     if (s.includes("reject")) return "bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300 border border-rose-200 dark:border-rose-800";
@@ -146,7 +146,7 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
   };
 
   return (
-    <div className="p-6 md:p-8 space-y-8 max-w-7xl mx-auto">
+    <div className="w-full px-4 sm:px-6 lg:px-8 pt-7 sm:pt-8 pb-8 space-y-5 sm:space-y-6">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -171,7 +171,7 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
           { label: "Total Applications", count: "1,284", icon: FileText, color: "text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50" },
           { label: "New Applications", count: "142", icon: Clock, color: "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/50" },
           { label: "Pending Screening", count: "88", icon: Filter, color: "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50" },
-          { label: "AI Shortlisted", count: "320", icon: Sparkles, color: "text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/50" },
+          { label: "AI Shortlisted", count: "320", icon: Sparkles, color: "text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-950/50" },
           { label: "Interviewing", count: "156", icon: Calendar, color: "text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-950/50" },
           { label: "Offered", count: "45", icon: Award, color: "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50" },
           { label: "Rejected", count: "412", icon: XCircle, color: "text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50" },
@@ -393,7 +393,7 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
                     </td>
                     <td className="py-3.5 px-4 text-slate-600 dark:text-slate-300">
                       {app.interviewStatus === "Scheduled" ? (
-                        <span className="inline-flex items-center gap-1 text-purple-600 dark:text-purple-400 font-medium">
+                        <span className="inline-flex items-center gap-1 text-brand-600 dark:text-brand-400 font-medium">
                           <Calendar className="w-3.5 h-3.5" /> Scheduled
                         </span>
                       ) : app.interviewStatus === "Completed" ? (

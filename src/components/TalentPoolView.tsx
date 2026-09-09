@@ -931,7 +931,7 @@ export default function TalentPoolView() {
   const averageMatchScore = Math.round(candidates.reduce((acc, curr) => acc + curr.aiMatchScore, 0) / candidates.length) || 0;
 
   return (
-    <div id="talent-pool-page" className="p-6 space-y-6 bg-slate-50 dark:bg-slate-950 min-h-screen text-slate-800 dark:text-slate-100 transition-colors">
+    <div id="talent-pool-page" className="w-full px-4 sm:px-6 lg:px-8 pt-7 sm:pt-8 pb-8 space-y-5 sm:space-y-6 text-slate-800 dark:text-slate-100 transition-colors">
       
       {/* Alert Toast Notification */}
       <AnimatePresence>
@@ -945,7 +945,7 @@ export default function TalentPoolView() {
                 ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800/40 text-emerald-800 dark:text-emerald-300"
                 : alertType === "warning"
                 ? "bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800/40 text-amber-800 dark:text-amber-300"
-                : "bg-indigo-50 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-800/40 text-indigo-800 dark:text-indigo-300"
+                : "bg-brand-50 dark:bg-brand-950/40 border-brand-200 dark:border-brand-800/40 text-brand-800 dark:text-brand-300"
             }`}
           >
             <CheckCircle className="h-4.5 w-4.5 shrink-0" />
@@ -958,19 +958,14 @@ export default function TalentPoolView() {
       </AnimatePresence>
 
       {/* Header Info Panel */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
         <div>
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 dark:text-slate-400 mb-1">
-            <span>Recruitment</span>
-            <span>&gt;</span>
-            <span className="font-bold text-slate-600 dark:text-slate-300">Talent Pool</span>
-          </div>
-          <h2 className="text-xl font-extrabold text-slate-950 dark:text-white tracking-tight flex items-center gap-2.5">
-            <Database className="h-6 w-6 text-indigo-600" />
-            <span>Talent Pool Repository</span>
+          <h2 className="font-display font-black text-2xl sm:text-3xl text-slate-950 dark:text-white tracking-tight flex items-center gap-2.5">
+            <Database className="h-7 w-7 text-brand-600" />
+            <span>Talent Pool</span>
           </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-1">
-            Centralized database of top standby candidates, referrals, and previous high-performers.
+          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+            Manage and review saved candidate profiles.
           </p>
         </div>
         
@@ -1034,7 +1029,7 @@ export default function TalentPoolView() {
         >
           <div className="flex justify-between items-start">
             <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">AI Recommended</span>
-            <div className="p-1.5 rounded-lg bg-purple-50 dark:bg-purple-950/40 text-purple-600">
+            <div className="p-1.5 rounded-lg bg-brand-50 dark:bg-brand-950/40 text-brand-600">
               <Sparkles className="h-4 w-4" />
             </div>
           </div>
@@ -1565,11 +1560,11 @@ export default function TalentPoolView() {
           </div>
         ) : (
           /* High Fidelity Table */
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+          <div className="w-full overflow-x-auto">
+            <table className="w-full text-left border-collapse min-w-[1000px]">
               <thead>
                 <tr className="bg-slate-50/75 dark:bg-slate-950/30 text-slate-400 dark:text-slate-500 text-[10.5px] font-bold uppercase tracking-wider border-b border-slate-100 dark:border-slate-800/50">
-                  <th className="px-5 py-3 w-10 text-center">
+                  <th className="px-4 py-3 w-10 text-center">
                     <input 
                       type="checkbox" 
                       onChange={handleSelectAll}
@@ -1577,16 +1572,16 @@ export default function TalentPoolView() {
                       className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5"
                     />
                   </th>
-                  <th className="px-5 py-3.5">Candidate Name</th>
-                  <th className="px-5 py-3.5">Current Role & Company</th>
-                  <th className="px-5 py-3.5">Experience</th>
-                  <th className="px-5 py-3.5">Primary Skills</th>
-                  <th className="px-5 py-3.5">Location</th>
-                  <th className="px-5 py-3.5 text-center">AI Fit Score</th>
-                  <th className="px-5 py-3.5">Availability</th>
-                  <th className="px-5 py-3.5">Last Active</th>
-                  <th className="px-5 py-3.5 text-center">Status</th>
-                  <th className="px-5 py-3.5 text-right">Actions</th>
+                  <th className="px-4 py-3.5 min-w-[180px]">Candidate Name</th>
+                  <th className="px-4 py-3.5 min-w-[180px]">Current Role & Company</th>
+                  <th className="px-4 py-3.5 min-w-[100px]">Experience</th>
+                  <th className="px-4 py-3.5 min-w-[200px]">Primary Skills</th>
+                  <th className="px-4 py-3.5 min-w-[110px]">Location</th>
+                  <th className="px-4 py-3.5 text-center min-w-[110px]">AI Fit Score</th>
+                  <th className="px-4 py-3.5 min-w-[110px]">Availability</th>
+                  <th className="px-4 py-3.5 min-w-[100px]">Last Active</th>
+                  <th className="px-4 py-3.5 text-center min-w-[100px]">Status</th>
+                  <th className="px-4 py-3.5 text-right min-w-[110px]">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/40 text-xs font-medium text-slate-700 dark:text-slate-300">
@@ -1717,7 +1712,7 @@ export default function TalentPoolView() {
                             : candidate.status === "Contacted"
                             ? "bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200 dark:border-blue-900"
                             : candidate.status === "Interested"
-                            ? "bg-purple-100 text-purple-800 dark:bg-purple-950/50 dark:text-purple-300 border border-purple-200 dark:border-purple-900"
+                            ? "bg-brand-100 text-brand-800 dark:bg-brand-950/50 dark:text-brand-300 border border-brand-200 dark:border-brand-900"
                             : candidate.status === "Not Interested"
                             ? "bg-rose-100 text-rose-800 dark:bg-rose-950/50 dark:text-rose-300 border border-rose-200 dark:border-rose-900"
                             : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
@@ -1887,10 +1882,10 @@ export default function TalentPoolView() {
                 {/* 2. Professional Summary */}
                 <div className="space-y-2">
                   <h4 className="text-[10.5px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
-                    <Sparkles className="h-3.5 w-3.5 text-purple-500" />
+                    <Sparkles className="h-3.5 w-3.5 text-brand-600" />
                     <span>Aura AI Professional Summary</span>
                   </h4>
-                  <div className="p-4 bg-purple-50/40 dark:bg-purple-950/10 border border-purple-100/50 dark:border-purple-900/35 rounded-xl text-xs text-slate-700 dark:text-slate-300 leading-relaxed italic">
+                  <div className="p-4 bg-brand-50/40 dark:bg-brand-950/10 border border-brand-100/50 dark:border-brand-900/35 rounded-xl text-xs text-slate-700 dark:text-slate-300 leading-relaxed italic">
                     "{selectedCandidate.aiSummary || selectedCandidate.resumeText || "No summary available."}"
                   </div>
                 </div>
@@ -2549,7 +2544,7 @@ export default function TalentPoolView() {
                     {/* Simulated progress track */}
                     <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-950 rounded-full overflow-hidden border border-slate-200/50 dark:border-slate-800/50">
                       <motion.div 
-                        className="h-full bg-gradient-to-r from-indigo-500 to-purple-600"
+                        className="h-full bg-brand-600"
                         animate={{ width: `${importProgress}%` }}
                         transition={{ duration: 0.1 }}
                       />

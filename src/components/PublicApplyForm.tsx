@@ -539,8 +539,8 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
       }}
     >
       {/* Dynamic ambient blur spots for ultra-premium depth */}
-      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-purple-300/30 blur-3xl pointer-events-none" />
-      <div className="absolute bottom-[-15%] right-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-300/20 blur-3xl pointer-events-none" />
+      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-brand-200/30 blur-3xl pointer-events-none" />
+      <div className="absolute bottom-[-15%] right-[-10%] w-[50%] h-[50%] rounded-full bg-brand-100/20 blur-3xl pointer-events-none" />
 
       <div className="max-w-2xl w-full space-y-4 relative z-10">
         
@@ -551,12 +551,12 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
             animate={{ opacity: 1, y: 0 }}
             className="bg-white rounded-lg border border-gray-200 shadow-xs overflow-hidden relative"
           >
-            {/* Top Google Forms Purple Strip */}
-            <div className="h-2.5 bg-[#673ab7] w-full" />
+            {/* Top Strip */}
+            <div className="h-2.5 bg-[#1F3B75] w-full" />
             
             <div className="p-8 text-center space-y-6">
-              <div className="mx-auto w-16 h-16 bg-purple-50 rounded-full flex items-center justify-center text-[#673ab7]">
-                <CheckCircle2 className="h-10 w-10" />
+              <div className="mx-auto w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center text-[#1F3B75]">
+                <CheckCircle2 className="h-10 w-10 text-emerald-600" />
               </div>
               
               <div className="space-y-2">
@@ -615,7 +615,7 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-4">
                     <div className="relative flex items-center justify-center shrink-0">
-                      <div className="h-14 w-14 rounded-xl bg-slate-50 flex items-center justify-center shadow-sm border border-purple-100 overflow-hidden">
+                      <div className="h-14 w-14 rounded-xl bg-slate-50 flex items-center justify-center shadow-sm border border-slate-200 overflow-hidden">
                         <img 
                           src="https://logo.clearbit.com/encureit.com" 
                           alt="EncureIT Logo" 
@@ -630,9 +630,9 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
                     <div>
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="font-sans font-semibold text-sm text-slate-700 tracking-tight">
-                          Encure<span className="text-[#673ab7]">IT</span>
+                          Encure<span className="text-[#1F3B75]">IT</span>
                         </span>
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 bg-purple-50/70 text-[#673ab7] rounded-md uppercase tracking-wider font-mono">
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 bg-blue-50 text-[#1F3B75] rounded-md uppercase tracking-wider font-mono">
                           Systems
                         </span>
                       </div>

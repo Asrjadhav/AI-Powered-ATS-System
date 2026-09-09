@@ -7,14 +7,12 @@ import React, { useState, useEffect, useRef } from "react";
 import { LocalStorageService } from "./services/localStorageService";
 import { NotificationRepository, PreferenceRepository } from "./repositories";
 import { motion, AnimatePresence } from "motion/react";
-import Sidebar from "./components/Sidebar";
 import TopNavbar from "./components/TopNavbar";
 import DashboardView from "./components/DashboardView";
 import JobsView from "./components/JobsView";
 import CandidatesView from "./components/CandidatesView";
 import InterviewsView from "./components/InterviewsView";
-import ReportsView from "./components/ReportsView";
-import VisualInsightsView from "./components/VisualInsightsView";
+import InsightsView from "./components/InsightsView";
 import OffersView from "./components/OffersView";
 import EmailTemplatesView from "./components/EmailTemplatesView";
 import NotificationsView, { INITIAL_NOTIFICATIONS } from "./components/NotificationsView";
@@ -163,12 +161,21 @@ export default function App() {
     };
   }, []);
 
+  const normalizeTab = (tab: string) => {
+    if (tab === "reports") return "insights";
+    if (tab === "talent-pool") return "talent_pool";
+    if (tab === "email-templates") return "email_templates";
+    if (tab === "integration-hub" || tab === "integration_hub") return "integrations";
+    return tab;
+  };
+
   const [activeTab, setActiveTabState] = useState<string>(() => {
     try {
-      const hash = window.location.hash.replace("#", "").trim();
+      let hash = window.location.hash.replace("#", "").trim();
+      hash = normalizeTab(hash);
       if (hash) return hash;
       const saved = sessionStorage.getItem("ats_active_tab");
-      if (saved) return saved;
+      if (saved) return normalizeTab(saved);
     } catch (e) {
       // Fallback
     }
@@ -176,11 +183,12 @@ export default function App() {
   });
 
   const setActiveTab = (tab: string) => {
-    setActiveTabState(tab);
+    const targetTab = normalizeTab(tab);
+    setActiveTabState(targetTab);
     try {
-      sessionStorage.setItem("ats_active_tab", tab);
-      if (window.location.hash !== `#${tab}`) {
-        window.history.replaceState(null, "", `#${tab}`);
+      sessionStorage.setItem("ats_active_tab", targetTab);
+      if (window.location.hash !== `#${targetTab}`) {
+        window.history.replaceState(null, "", `#${targetTab}`);
       }
     } catch (e) {
       // Fallback
@@ -189,11 +197,15 @@ export default function App() {
 
   useEffect(() => {
     const handleHashChange = () => {
-      const hash = window.location.hash.replace("#", "").trim();
-      if (hash && hash !== activeTab) {
-        setActiveTabState(hash);
+      let hash = window.location.hash.replace("#", "").trim();
+      const targetHash = normalizeTab(hash);
+      if (hash === "reports" || hash === "talent-pool") {
+        window.history.replaceState(null, "", `#${targetHash}`);
+      }
+      if (targetHash && targetHash !== activeTab) {
+        setActiveTabState(targetHash);
         try {
-          sessionStorage.setItem("ats_active_tab", hash);
+          sessionStorage.setItem("ats_active_tab", targetHash);
         } catch (e) {}
       }
     };
@@ -385,8 +397,8 @@ export default function App() {
         />
       );
       case "email_templates": return <EmailTemplatesView />;
-      case "reports": return <ReportsView />;
-      case "insights": return <VisualInsightsView />;
+      case "reports":
+      case "insights": return <InsightsView />;
       case "notifications": return <NotificationsView notifications={notifications} setNotifications={setNotifications} />;
       case "talent_pool": return <TalentPoolView />;
       case "profile": return <ProfileView currentUser={user} onProfileUpdate={handleProfileUpdate} />;
@@ -430,16 +442,20 @@ export default function App() {
   }
 
   return (
-    <div className="flex flex-col lg:flex-row h-screen w-screen bg-slate-50 dark:bg-slate-950 overflow-hidden font-sans text-slate-800 dark:text-slate-100 antialiased">
-      <Sidebar activeTab={activeTab} setActiveTab={handleNavigateWithFilters} notifications={notifications} onSimulateNotification={triggerSimulatedNotification} currentUser={user} onLogout={handleLogout} />
-      <div className="flex-1 flex flex-col h-full min-w-0 overflow-hidden">
-        <TopNavbar activeTab={activeTab} setActiveTab={handleNavigateWithFilters} notifications={notifications} currentUser={user} onLogout={handleLogout} />
-        <main className="flex-1 overflow-y-auto h-full min-w-0">
-          <AnimatePresence mode="wait">
-            {renderActiveView()}
-          </AnimatePresence>
-        </main>
-      </div>
+    <div className="min-h-screen w-full max-w-full bg-slate-50 dark:bg-slate-950 flex flex-col font-sans text-slate-800 dark:text-slate-100 antialiased overflow-x-hidden">
+      <TopNavbar 
+        activeTab={activeTab} 
+        setActiveTab={handleNavigateWithFilters} 
+        notifications={notifications} 
+        onSimulateNotification={triggerSimulatedNotification} 
+        currentUser={user} 
+        onLogout={handleLogout} 
+      />
+      <main className="flex-1 min-w-0">
+        <AnimatePresence mode="wait">
+          {renderActiveView()}
+        </AnimatePresence>
+      </main>
       {toastNotif && (() => {
         const getIconAndColors = (type: NotificationItem["type"]) => {
           switch (type) {

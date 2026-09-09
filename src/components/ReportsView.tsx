@@ -495,7 +495,7 @@ export default function ReportsView() {
   });
 
   return (
-    <div className={`${density === "compact" ? "p-4 space-y-4" : "p-8 space-y-8"} max-w-7xl mx-auto text-slate-800 dark:text-slate-100 transition-all`}>
+    <div className={`${density === "compact" ? "p-4 space-y-4" : "px-4 sm:px-6 lg:px-8 py-8 space-y-8"} w-full text-slate-800 dark:text-slate-100 transition-all`}>
       
       {/* Breadcrumb Section */}
       <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 dark:text-slate-500 mb-2 uppercase tracking-wider text-left">

@@ -447,14 +447,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
   const currentNav = SETTINGS_NAV_ITEMS.find(i => i.id === activeSubTab) || SETTINGS_NAV_ITEMS[0];
 
   return (
-    <div className={`${layoutDensity === "compact" ? "max-w-7xl mx-auto px-4 py-4 sm:py-6" : "max-w-7xl mx-auto px-4 py-6 sm:py-10"} text-slate-800 dark:text-slate-100 transition-all`}>
-      
-      {/* Breadcrumb Section */}
-      <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 dark:text-slate-500 mb-4 uppercase tracking-wider text-left">
-        <span>Administration</span>
-        <ChevronRight className="h-3 w-3" />
-        <span className="text-slate-600 dark:text-slate-300 font-extrabold">Settings</span>
-      </div>
+    <div className="w-full px-4 sm:px-6 lg:px-8 pt-7 sm:pt-8 pb-8 space-y-5 sm:space-y-6 text-slate-800 dark:text-slate-100 transition-all">
 
       {/* Main Settings Grid: Vertical Navigation (Left) + Content Panel (Right) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">

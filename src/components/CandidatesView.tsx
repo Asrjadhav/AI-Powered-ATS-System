@@ -1667,15 +1667,8 @@ export default function CandidatesView({
   const evalData: AIEvaluation | undefined = selectedApp?.aiEvaluation;
 
   return (
-    <div className={`${density === "compact" ? "p-4 space-y-4" : "p-8 space-y-8"} max-w-7xl mx-auto transition-all text-slate-800 dark:text-slate-100`}>
+    <div className="w-full px-4 sm:px-6 lg:px-8 pt-7 sm:pt-8 pb-8 space-y-5 sm:space-y-6 transition-all text-slate-800 dark:text-slate-100">
       <div>
-      
-      {/* Breadcrumb Section */}
-      <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 dark:text-slate-500 mb-2 uppercase tracking-wider text-left">
-        <span>Recruitment</span>
-        <ChevronRight className="h-3 w-3" />
-        <span className="text-slate-600 dark:text-slate-300 font-extrabold">Candidates</span>
-      </div>
 
       {/* Invisible inputs for file imports */}
       <input 
@@ -1687,14 +1680,14 @@ export default function CandidatesView({
       />
 
       {/* View Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-5">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
         <div>
           <h2 className="font-display font-black text-2xl sm:text-3xl text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
-            <Users className="h-7 w-7 text-indigo-600" />
-            <span>Candidate Profiles</span>
+            <Users className="h-7 w-7 text-brand-600" />
+            <span>Candidates</span>
           </h2>
-          <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
-            Track applicant profiles, evaluate experience metrics, and analyze AI matching insights.
+          <p className="text-slate-500 dark:text-slate-400 text-xs sm:text-sm mt-0.5 font-medium">
+            Manage applicant pipeline, candidate profiles, and AI screening insights.
           </p>
         </div>
         <div className="flex flex-wrap gap-2.5 items-center">
@@ -1758,7 +1751,7 @@ export default function CandidatesView({
           { label: "Total Applications", value: baseFilteredApplications.length, status: "all", icon: Users, color: "text-slate-500 dark:text-slate-400" },
           { label: "New Applications", value: baseFilteredApplications.filter(a => isNewCandidate(a)).length, status: "New Applications", icon: Plus, color: "text-blue-500" },
           { label: "Pending Evaluation", value: baseFilteredApplications.filter(a => isPendingEvaluation(a)).length, status: "Pending Evaluation", icon: Clock, color: "text-amber-500" },
-          { label: "AI Shortlisted", value: baseFilteredApplications.filter(a => isAIShortlisted(a, matchThreshold)).length, status: "AI Shortlisted", icon: Sparkles, color: "text-purple-500" },
+          { label: "AI Shortlisted", value: baseFilteredApplications.filter(a => isAIShortlisted(a, matchThreshold)).length, status: "AI Shortlisted", icon: Sparkles, color: "text-brand-600 dark:text-brand-400" },
           { label: "Interviews", value: baseFilteredApplications.filter(a => isInterviewStage(a)).length, status: "INTERVIEW", icon: Activity, color: "text-amber-500" },
           { label: "Offered", value: baseFilteredApplications.filter(a => isOfferedStage(a)).length, status: "OFFERED", icon: UserCheck, color: "text-emerald-500" },
           { label: "Rejected", value: baseFilteredApplications.filter(a => isRejectedStage(a)).length, status: "REJECTED", icon: XCircle, color: "text-rose-500" },
@@ -2025,9 +2018,9 @@ export default function CandidatesView({
                   </span>
                 )}
                 {filterApprovalStatus !== "all" && (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-400 text-[10px] font-bold rounded-lg border border-purple-100 dark:border-purple-900/30">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-brand-50 dark:bg-brand-950/40 text-brand-700 dark:text-brand-300 text-[10px] font-bold rounded-lg border border-brand-200 dark:border-brand-900/30">
                     <span>HR: {filterApprovalStatus}</span>
-                    <button onClick={() => setFilterApprovalStatus("all")} className="hover:text-purple-900 dark:hover:text-purple-200"><X className="h-3 w-3" /></button>
+                    <button onClick={() => setFilterApprovalStatus("all")} className="hover:text-brand-900 dark:hover:text-brand-100"><X className="h-3 w-3" /></button>
                   </span>
                 )}
               </div>
@@ -2071,31 +2064,39 @@ export default function CandidatesView({
       {/* Primary Concise Candidates Table */}
       {boardViewMode === "table" ? (
         <div className="overflow-hidden border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-900 shadow-xs transition-all">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
+        <div className="w-full overflow-x-auto">
+          <table className="w-full text-left border-collapse text-xs min-w-[1300px]">
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800">
-                <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Candidate ID</th>
-                <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Candidate</th>
-                <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Email ID</th>
-                <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Mobile Number</th>
-                <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Location</th>
-                <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Total Experience</th>
-                <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Position</th>
-                <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Source</th>
-                <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Current CTC</th>
-                <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Expected CTC</th>
-                <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Resume</th>
-                <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">ATS Score</th>
-                <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Pipeline Stage</th>
-                <th className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] text-right">Actions</th>
+                <th className="px-4 py-3.5 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] min-w-[100px]">Candidate ID</th>
+                <th className="px-4 py-3.5 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] min-w-[160px]">Candidate</th>
+                <th className="px-4 py-3.5 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] min-w-[170px]">Email ID</th>
+                <th className="px-4 py-3.5 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] min-w-[120px]">Mobile Number</th>
+                <th className="px-4 py-3.5 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] min-w-[110px]">Location</th>
+                <th className="px-4 py-3.5 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] min-w-[100px]">Total Exp</th>
+                <th className="px-4 py-3.5 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] min-w-[150px]">Position</th>
+                <th className="px-4 py-3.5 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] min-w-[100px]">Source</th>
+                <th className="px-4 py-3.5 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] min-w-[100px]">Current CTC</th>
+                <th className="px-4 py-3.5 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] min-w-[100px]">Expected CTC</th>
+                <th className="px-4 py-3.5 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] min-w-[90px]">Resume</th>
+                <th className="px-4 py-3.5 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] min-w-[90px]">ATS Score</th>
+                <th className="px-4 py-3.5 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] min-w-[130px]">Pipeline Stage</th>
+                <th className="px-4 py-3.5 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] text-right min-w-[110px]">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-150 dark:divide-slate-800">
               {filteredApplications.length === 0 ? (
                 <tr>
-                  <td colSpan={14} className="p-8 text-center text-slate-400 dark:text-slate-500 font-semibold font-sans">
-                    No candidates found matching the criteria.
+                  <td colSpan={14} className="py-16 text-center">
+                    <div className="flex flex-col items-center justify-center max-w-sm mx-auto space-y-3">
+                      <div className="h-12 w-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400">
+                        <Users className="h-6 w-6 stroke-[1.5]" />
+                      </div>
+                      <h4 className="font-bold text-sm text-slate-700 dark:text-slate-200">No candidates match search criteria</h4>
+                      <p className="text-xs text-slate-400 dark:text-slate-500 leading-relaxed">
+                        No candidates found for your active search or stage filters. Try adjusting your position or keyword search.
+                      </p>
+                    </div>
                   </td>
                 </tr>
               ) : (
@@ -3890,7 +3891,7 @@ export default function CandidatesView({
                         cx="56"
                         cy="56"
                         r="48"
-                        stroke={evalData.score >= 85 ? "#6366f1" : evalData.score >= 70 ? "#f59e0b" : "#ef4444"}
+                        stroke={evalData.score >= 85 ? "#1F3B75" : evalData.score >= 70 ? "#f59e0b" : "#ef4444"}
                         strokeWidth="8"
                         fill="transparent"
                         strokeDasharray={2 * Math.PI * 48}
@@ -3991,7 +3992,7 @@ export default function CandidatesView({
                     <Activity className="h-4.5 w-4.5 text-indigo-500" />
                     <span>AI & HR Pipeline Decision Console</span>
                   </h4>
-                  <span className="text-[9px] font-extrabold px-2 py-0.5 rounded bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                  <span className="text-[9px] font-extrabold px-2 py-0.5 rounded bg-brand-50 text-brand-700 dark:bg-brand-950/40 dark:text-brand-300 border border-brand-200 dark:border-brand-800">
                     AI & HR Co-Pilot
                   </span>
                 </div>
@@ -4018,8 +4019,8 @@ export default function CandidatesView({
                         <span>Interviewing (AI & HR)</span>
                       </span>
                     ) : selectedApp.status === "Shortlisted" ? (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-900/40 text-purple-700 dark:text-purple-300 text-xs font-black rounded-lg uppercase tracking-wider">
-                        <Sparkles className="h-4 w-4 text-purple-500" />
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-50 dark:bg-brand-950/40 border border-brand-200 dark:border-brand-900/40 text-brand-700 dark:text-brand-300 text-xs font-black rounded-lg uppercase tracking-wider">
+                        <Sparkles className="h-4 w-4 text-brand-600" />
                         <span>Shortlisted (AI & HR)</span>
                       </span>
                     ) : (
@@ -4054,11 +4055,11 @@ export default function CandidatesView({
                     disabled={statusUpdating}
                     className={`px-2 py-1.5 text-[10px] font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1 ${
                       selectedApp.status === "Shortlisted"
-                        ? "bg-purple-100 text-purple-800 border border-purple-300 dark:bg-purple-900/50 dark:text-purple-200"
-                        : "bg-white hover:bg-purple-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700"
+                        ? "bg-brand-100 text-brand-800 border border-brand-300 dark:bg-brand-900/50 dark:text-brand-200"
+                        : "bg-white hover:bg-brand-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700"
                     }`}
                   >
-                    <Sparkles className="h-3 w-3 text-purple-500" />
+                    <Sparkles className="h-3 w-3 text-brand-600" />
                     <span>Shortlist (AI & HR)</span>
                   </button>
 
@@ -4942,7 +4943,7 @@ export default function CandidatesView({
                     <title>Resume - ${cand?.firstName || ''} ${cand?.lastName || ''}</title>
                     <style>
                       body { font-family: monospace; padding: 24px; white-space: pre-wrap; font-size: 13px; line-height: 1.5; color: #1e293b; }
-                      h2 { font-family: sans-serif; margin-bottom: 16px; border-bottom: 2px solid #6366f1; padding-bottom: 8px; color: #0f172a; }
+                      h2 { font-family: sans-serif; margin-bottom: 16px; border-bottom: 2px solid #1F3B75; padding-bottom: 8px; color: #0f172a; }
                     </style>
                   </head>
                   <body>

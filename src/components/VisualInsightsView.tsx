@@ -248,8 +248,8 @@ export default function VisualInsightsView() {
       conversionRate,
       offerConversionRate,
       scoreBuckets: [
-        { name: "Exceptional (90-100)", count: score90Plus, percentage: Math.round((score90Plus / total) * 100), color: "#4f46e5" },
-        { name: "Strong (75-89)", count: score75To89, percentage: Math.round((score75To89 / total) * 100), color: "#06b6d4" },
+        { name: "Exceptional (90-100)", count: score90Plus, percentage: Math.round((score90Plus / total) * 100), color: "#1F3B75" },
+        { name: "Strong (75-89)", count: score75To89, percentage: Math.round((score75To89 / total) * 100), color: "#355EA8" },
         { name: "Moderate (60-74)", count: score60To74, percentage: Math.round((score60To74 / total) * 100), color: "#f59e0b" },
         { name: "Needs Review (<60)", count: scoreBelow60, percentage: Math.round((scoreBelow60 / total) * 100), color: "#94a3b8" }
       ],
@@ -273,21 +273,21 @@ export default function VisualInsightsView() {
         stage: "Applications",
         count: stageApplied,
         percentage: 100,
-        color: "#6366f1",
+        color: "#1F3B75",
         conversion: "100%"
       },
       {
         stage: "AI Shortlisted",
         count: stageShortlisted,
         percentage: Math.round((stageShortlisted / total) * 100),
-        color: "#3b82f6",
+        color: "#2E549B",
         conversion: `${Math.round((stageShortlisted / stageApplied) * 100)}%`
       },
       {
         stage: "Interview Stage",
         count: stageInterview,
         percentage: Math.round((stageInterview / total) * 100),
-        color: "#8b5cf6",
+        color: "#557DBF",
         conversion: `${Math.round((stageInterview / (stageShortlisted || 1)) * 100)}%`
       },
       {
@@ -445,7 +445,7 @@ export default function VisualInsightsView() {
   };
 
   return (
-    <div className={`${density === "compact" ? "p-4 space-y-5" : "p-6 lg:p-8 space-y-8"} max-w-7xl mx-auto text-slate-800 dark:text-slate-100 transition-all`}>
+    <div className={`${density === "compact" ? "p-4 space-y-5" : "px-4 sm:px-6 lg:px-8 py-8 space-y-8"} w-full text-slate-800 dark:text-slate-100 transition-all`}>
       
       {/* Top Header & Toolbar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-5">
@@ -790,7 +790,7 @@ export default function VisualInsightsView() {
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-xs space-y-4">
           <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
             <h3 className="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
-              <Award className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+              <Award className="h-5 w-5 text-brand-600 dark:text-brand-400" />
               <span>Sourcing Channel Quality Index</span>
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
@@ -819,7 +819,7 @@ export default function VisualInsightsView() {
             ))}
           </div>
 
-          <div className="p-3 bg-purple-50 dark:bg-purple-950/30 border border-purple-100 dark:border-purple-900/40 rounded-lg text-[11px] text-purple-800 dark:text-purple-300">
+          <div className="p-3 bg-brand-50 dark:bg-brand-950/30 border border-brand-200 dark:border-brand-900/40 rounded-lg text-[11px] text-brand-800 dark:text-brand-300">
             🏆 <span className="font-bold">Top Source Channel:</span> <span className="font-bold">{stats.sourceData[0]?.name || "Employee Referral"}</span> delivers highest candidate quality rating.
           </div>
         </div>
