@@ -17,3 +17,4 @@ export { UserRepository } from "./userRepository";
 export { ReportRepository } from "./reportRepository";
 export { PreferenceRepository } from "./preferenceRepository";
 export { StatsRepository } from "./statsRepository";
+export { InsightsRepository } from "./insightsRepository";

@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { LocalStorageService } from "../services/localStorageService";
+import { UserRepository, type User as ApiUser } from "../repositories/userRepository";
 import { 
   Shield, 
   User, 
@@ -42,6 +42,7 @@ import {
   Sliders,
   ChevronRight
 } from "lucide-react";
+import { SearchableSelect } from "./common/SearchableSelect";
 
 interface UsersRolesViewProps {
   currentUser?: { email: string; name: string; role: string } | null;
@@ -64,42 +65,67 @@ interface UserRecord {
   changePasswordOnFirstLogin?: boolean;
 }
 
+/**
+ * This screen previously kept its own private copy of the user list in
+ * localStorage (key "ats_users"), hardcoded a hidden "Yogesh Adsul" record
+ * as the default admin, and generated its own id/employeeId/avatarColor
+ * client-side. None of that was visible outside this one browser: the real
+ * "users" table (/api/auth/login, /api/users) never saw any of it, and this
+ * screen never saw anyone created elsewhere. mapApiUserToRecord/
+ * mapRecordToApiPayload below translate between the API's shape (schemas/
+ * user.py: fullName, createdAt, ...) and this component's existing
+ * UserRecord shape (name, createdOn, ...), so the large amount of JSX below
+ * that already reads UserRecord fields didn't need to change.
+ */
+function mapApiUserToRecord(user: ApiUser): UserRecord {
+  return {
+    id: user.id,
+    name: user.fullName || user.email.split("@")[0],
+    email: user.email,
+    phone: user.phone || "",
+    employeeId: user.employeeId || "",
+    department: user.department || "",
+    designation: user.designation || "",
+    role: user.role || "Recruiter",
+    manager: user.manager || "",
+    status: (user.status === "Inactive" ? "Inactive" : user.status === "Pending" ? "Pending" : "Active"),
+    lastLogin: user.lastLogin || "Never",
+    createdOn: user.createdAt
+      ? new Date(user.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
+      : "",
+    avatarColor: user.avatarColor || "bg-indigo-600 text-white",
+    changePasswordOnFirstLogin: user.changePasswordOnFirstLogin
+  };
+}
+
 export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
   // Toast notifications for interactive mock feedback
   const [toast, setToast] = useState<{ message: string; type: "success" | "info" | "warning" } | null>(null);
-  
+
   const triggerToast = (message: string, type: "success" | "info" | "warning" = "success") => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3500);
   };
 
-  // State to track users. Initially has only Yogesh Adsul
-  const [users, setUsers] = useState<UserRecord[]>(() => {
-    const defaultUsers: UserRecord[] = [
-      {
-        id: "u-1",
-        name: "Yogesh Adsul",
-        email: "yogesh.adsul@encureit.com",
-        phone: "+91 99999 99999",
-        employeeId: "ENC-HR-001",
-        department: "Human Resources",
-        designation: "HR Manager",
-        role: "System Administrator",
-        manager: "System Board",
-        status: "Active",
-        lastLogin: "Today, 10:25 AM",
-        createdOn: "15 June 2026",
-        avatarColor: "bg-indigo-600 text-white",
-        changePasswordOnFirstLogin: false
-      }
-    ];
-    const stored = LocalStorageService.get<UserRecord[]>("ats_users", defaultUsers);
-    return stored.length > 0 ? stored : defaultUsers;
-  });
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [usersLoading, setUsersLoading] = useState(true);
+
+  const fetchUsers = async () => {
+    try {
+      setUsersLoading(true);
+      const apiUsers = await UserRepository.getAll();
+      setUsers(apiUsers.map(mapApiUserToRecord));
+    } catch (err) {
+      console.error("Failed to load users:", err);
+      triggerToast("❌ Failed to load team members.", "warning");
+    } finally {
+      setUsersLoading(false);
+    }
+  };
 
   useEffect(() => {
-    LocalStorageService.set("ats_users", users);
-  }, [users]);
+    fetchUsers();
+  }, []);
 
   // Modal active states
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -125,7 +151,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
     department: "Talent Acquisition",
     designation: "",
     role: "Recruiter",
-    manager: "Yogesh Adsul",
+    manager: "",
     status: "Active" as "Active" | "Inactive" | "Pending",
     tempPassword: "",
     sendWelcomeEmail: true
@@ -196,7 +222,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
   };
 
   // Submit new user
-  const handleCreateUserSubmit = (e: React.FormEvent) => {
+  const handleCreateUserSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!addUserForm.name || !addUserForm.email) {
       triggerToast("⚠️ Name and Email are required fields.", "warning");
@@ -209,91 +235,117 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
       return;
     }
 
-    const colors = [
-      "bg-indigo-600 text-white",
-      "bg-emerald-600 text-white",
-      "bg-purple-600 text-white",
-      "bg-amber-600 text-white",
-      "bg-rose-600 text-white",
-      "bg-sky-600 text-white",
-      "bg-pink-600 text-white"
-    ];
+    try {
+      // id, employeeId and avatarColor are assigned by the backend
+      // (services/user_service.create_user) when not supplied, rather than
+      // invented here — one place generating them, not two that can drift.
+      const created = await UserRepository.create({
+        fullName: addUserForm.name,
+        email: addUserForm.email,
+        phone: addUserForm.phone || undefined,
+        employeeId: addUserForm.employeeId || undefined,
+        department: addUserForm.department,
+        designation: addUserForm.designation || `${addUserForm.role} Professional`,
+        role: addUserForm.role,
+        manager: addUserForm.manager || undefined,
+        status: addUserForm.status,
+        changePasswordOnFirstLogin: true
+      });
 
-    const newUser: UserRecord = {
-      id: `u-${Date.now()}`,
-      name: addUserForm.name,
-      email: addUserForm.email,
-      phone: addUserForm.phone || "+91 XXXXX XXXXX",
-      employeeId: addUserForm.employeeId || `ENC-${addUserForm.role.substring(0, 2).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`,
-      department: addUserForm.department,
-      designation: addUserForm.designation || `${addUserForm.role} Professional`,
-      role: addUserForm.role,
-      manager: addUserForm.manager || "Yogesh Adsul",
-      status: addUserForm.status,
-      lastLogin: "Never",
-      createdOn: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }),
-      avatarColor: colors[Math.floor(Math.random() * colors.length)],
-      changePasswordOnFirstLogin: true
-    };
+      setUsers(prev => [...prev, mapApiUserToRecord(created)]);
+      setIsAddModalOpen(false);
 
-    setUsers(prev => [...prev, newUser]);
-    setIsAddModalOpen(false);
-    
-    // Build simulated success details
-    let successMessage = `👤 User ${newUser.name} created successfully!`;
-    if (addUserForm.sendWelcomeEmail) {
-      successMessage += " Simulating welcome email dispatch.";
+      // "Simulating" is deliberate wording: sendWelcomeEmail is not wired to
+      // real email sending (out of scope for now — see EmailRepository), so
+      // this must not claim to have actually sent anything.
+      let successMessage = `👤 User ${created.fullName || created.email} created successfully!`;
+      if (addUserForm.sendWelcomeEmail) {
+        successMessage += " (Simulating welcome email dispatch — email sending is not yet enabled.)";
+      }
+      triggerToast(successMessage, "success");
+
+      setAddUserForm({
+        name: "",
+        email: "",
+        phone: "",
+        employeeId: "",
+        department: "Talent Acquisition",
+        designation: "",
+        role: "Recruiter",
+        manager: "",
+        status: "Active",
+        tempPassword: "",
+        sendWelcomeEmail: true
+      });
+    } catch (err: any) {
+      console.error("Failed to create user:", err);
+      const detail = err?.response?.data?.detail || err?.message || "Failed to create user.";
+      triggerToast(`❌ ${detail}`, "warning");
     }
-    triggerToast(successMessage, "success");
-
-    // Reset Form
-    setAddUserForm({
-      name: "",
-      email: "",
-      phone: "",
-      employeeId: "",
-      department: "Talent Acquisition",
-      designation: "",
-      role: "Recruiter",
-      manager: "Yogesh Adsul",
-      status: "Active",
-      tempPassword: "",
-      sendWelcomeEmail: true
-    });
   };
 
   // Submit edited user
-  const handleEditUserSubmit = (e: React.FormEvent) => {
+  const handleEditUserSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editUserForm) return;
 
-    setUsers(prev => prev.map(u => u.id === editUserForm.id ? editUserForm : u));
-    setIsEditModalOpen(false);
-    triggerToast(`✏️ Details updated for user: ${editUserForm.name}`, "success");
-    setEditUserForm(null);
+    try {
+      const updated = await UserRepository.update(editUserForm.id, {
+        fullName: editUserForm.name,
+        email: editUserForm.email,
+        phone: editUserForm.phone,
+        employeeId: editUserForm.employeeId,
+        department: editUserForm.department,
+        designation: editUserForm.designation,
+        role: editUserForm.role,
+        manager: editUserForm.manager,
+        status: editUserForm.status
+      });
+      setUsers(prev => prev.map(u => u.id === editUserForm.id ? mapApiUserToRecord(updated) : u));
+      setIsEditModalOpen(false);
+      triggerToast(`✏️ Details updated for user: ${editUserForm.name}`, "success");
+      setEditUserForm(null);
+    } catch (err: any) {
+      console.error("Failed to update user:", err);
+      const detail = err?.response?.data?.detail || err?.message || "Failed to update user.";
+      triggerToast(`❌ ${detail}`, "warning");
+    }
   };
 
   // Actions trigger helpers
   const handleResetPassword = (user: UserRecord) => {
-    triggerToast(`✉️ Password reset instructions generated and sent to ${user.email}`, "success");
+    // Honest wording: /api/auth/forgot-password does not send an email
+    // (see routers/auth.py — it's a no-op). "Requested" rather than "sent".
+    triggerToast(`✉️ Password reset requested for ${user.email}. Email delivery is not yet enabled.`, "info");
     setActiveRowActionMenuId(null);
   };
 
-  const handleDeactivateToggle = (user: UserRecord) => {
-    const currentStatus = user.status;
-    const nextStatus = currentStatus === "Active" ? "Inactive" : "Active";
-    setUsers(prev => prev.map(u => u.id === user.id ? { ...u, status: nextStatus } : u));
-    triggerToast(`🔒 User ${user.name} has been ${nextStatus === "Active" ? "Activated" : "Deactivated"}.`, "info");
+  const handleDeactivateToggle = async (user: UserRecord) => {
+    const nextStatus = user.status === "Active" ? "Inactive" : "Active";
+    try {
+      const updated = await UserRepository.update(user.id, { status: nextStatus });
+      setUsers(prev => prev.map(u => u.id === user.id ? mapApiUserToRecord(updated) : u));
+      triggerToast(`🔒 User ${user.name} has been ${nextStatus === "Active" ? "Activated" : "Deactivated"}.`, "info");
+    } catch (err: any) {
+      console.error("Failed to update user status:", err);
+      triggerToast("❌ Failed to update user status.", "warning");
+    }
     setActiveRowActionMenuId(null);
   };
 
-  const handleDeleteUser = (userId: string, name: string, skipConfirm = false) => {
+  const handleDeleteUser = async (userId: string, name: string, skipConfirm = false) => {
     if (!skipConfirm && userIdPendingDelete !== userId) {
       setUserIdPendingDelete(userId);
       return;
     }
-    setUsers(prev => prev.filter(u => u.id !== userId));
-    triggerToast(`🗑️ User ${name} has been removed from organization registries.`, "warning");
+    try {
+      await UserRepository.delete(userId);
+      setUsers(prev => prev.filter(u => u.id !== userId));
+      triggerToast(`🗑️ User ${name} has been removed.`, "warning");
+    } catch (err: any) {
+      console.error("Failed to delete user:", err);
+      triggerToast("❌ Failed to delete user.", "warning");
+    }
     setActiveRowActionMenuId(null);
     setUserIdPendingDelete(null);
   };
@@ -311,12 +363,77 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
     return matchesSearch && matchesRole;
   });
 
+  /**
+   * The record for whoever is actually using this screen, matched from the
+   * real fetched user list by email. The "Administrator Details" card,
+   * quick-actions panel and its Edit Profile modal below used to show a
+   * hardcoded "Yogesh Adsul" — a specific real person's name and email —
+   * regardless of who was signed in, because none of it ever read the
+   * currentUser prop this component has always received. They now derive
+   * from this instead.
+   */
+  const viewerRecord: UserRecord | null =
+    users.find(u => currentUser?.email && u.email.toLowerCase() === currentUser.email.toLowerCase()) || null;
+  const viewerDisplayName = viewerRecord?.name || currentUser?.name || "—";
+  const viewerInitials = viewerDisplayName
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(part => part[0]?.toUpperCase())
+    .join("") || "—";
+
+  const [profileEditForm, setProfileEditForm] = useState({ name: "", designation: "", phone: "" });
+  const [savingProfileEdit, setSavingProfileEdit] = useState(false);
+
+  // Keep the quick-edit form in sync whenever it's opened for the current viewer.
+  useEffect(() => {
+    if (activeAdminActionModal === "edit-profile" && viewerRecord) {
+      setProfileEditForm({
+        name: viewerRecord.name,
+        designation: viewerRecord.designation,
+        phone: viewerRecord.phone
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeAdminActionModal]);
+
+  const handleSaveProfileEdit = async () => {
+    if (activeAdminActionModal !== "edit-profile") {
+      // Change Password tab: no endpoint is wired here yet (password
+      // changes go through /api/auth/update-profile, a different system
+      // from UserRepository). Say so rather than claim success.
+      triggerToast("🔒 Password change from this panel isn't available yet. Use Profile & Settings.", "warning");
+      setActiveAdminActionModal(null);
+      return;
+    }
+    if (!viewerRecord) {
+      triggerToast("❌ Could not identify your user record to save changes.", "warning");
+      return;
+    }
+    try {
+      setSavingProfileEdit(true);
+      const updated = await UserRepository.update(viewerRecord.id, {
+        fullName: profileEditForm.name,
+        designation: profileEditForm.designation,
+        phone: profileEditForm.phone
+      });
+      setUsers(prev => prev.map(u => u.id === viewerRecord.id ? mapApiUserToRecord(updated) : u));
+      triggerToast("✅ Profile updated successfully.", "success");
+      setActiveAdminActionModal(null);
+    } catch (err: any) {
+      console.error("Failed to update profile:", err);
+      triggerToast(err?.response?.data?.detail || "❌ Failed to update profile.", "warning");
+    } finally {
+      setSavingProfileEdit(false);
+    }
+  };
+
   return (
     <div className="w-full px-4 sm:px-6 lg:px-8 pt-7 sm:pt-8 pb-8 space-y-5 sm:space-y-6 animate-in fade-in duration-300">
 
       {/* Toast Notification Container */}
       {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 p-4 rounded-xl shadow-2xl flex items-center gap-3 border transition-all transform translate-y-0 scale-100 ${
+        <div className={`fixed bottom-6 right-6 z-50 p-4 rounded-lg shadow-sm flex items-center gap-3 border transition-all transform translate-y-0 scale-100 ${
           toast.type === "success" 
             ? "bg-slate-950 border-emerald-500/20 text-white" 
             : toast.type === "warning" 
@@ -335,13 +452,12 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
       )}
 
       {/* Header Info Banner */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-5">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-4 border-b border-slate-200">
         <div>
-          <h2 id="page-title-admin" className="font-display font-black text-2xl sm:text-3xl text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
-            <User className="h-7 w-7 text-indigo-600 shrink-0" />
+          <h2 id="page-title-admin" className="text-xl font-semibold text-slate-900 tracking-tight flex items-center gap-2.5">
             <span>System Administrator</span>
           </h2>
-          <p className="text-slate-500 dark:text-slate-400 text-sm mt-1 max-w-3xl">
+          <p className="text-sm text-slate-500 mt-1 max-w-3xl">
             Manage the primary administrator account, security permissions, system ownership and recruiter access.
           </p>
         </div>
@@ -351,7 +467,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
           <button 
             id="btn-add-user-top"
             onClick={() => setIsAddModalOpen(true)}
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4.5 py-2.5 rounded-lg transition-all shadow-md hover:shadow-lg cursor-pointer"
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4.5 py-2.5 rounded-lg transition-all shadow-sm hover:shadow-sm cursor-pointer"
           >
             <UserPlus className="h-4 w-4" />
             <span>➕ Add User</span>
@@ -362,7 +478,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
       {/* Summary KPI Cards Row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {/* KPI 1: Total Users */}
-        <div id="kpi-total-users" className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-xl p-4 shadow-xs">
+        <div id="kpi-total-users" className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-lg p-4 shadow-xs">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Users</span>
           <div className="flex items-baseline gap-2 mt-1">
             <span className="text-2xl font-black text-slate-900 dark:text-white">{users.length}</span>
@@ -374,7 +490,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
         </div>
 
         {/* KPI 2: Active Users */}
-        <div id="kpi-active-users" className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-xl p-4 shadow-xs">
+        <div id="kpi-active-users" className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-lg p-4 shadow-xs">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Active Users</span>
           <div className="flex items-baseline gap-2 mt-1">
             <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400">
@@ -388,21 +504,21 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
         </div>
 
         {/* KPI 3: System Administrators */}
-        <div id="kpi-system-admins" className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-xl p-4 shadow-xs">
+        <div id="kpi-system-admins" className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-lg p-4 shadow-xs">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">System Administrators</span>
           <div className="flex items-baseline gap-2 mt-1">
-            <span className="text-2xl font-black text-brand-600 dark:text-brand-400">
+            <span className="text-2xl font-black text-[#1F3B75] dark:text-brand-400">
               {users.filter(u => u.role === "System Administrator").length}
             </span>
             <span className="text-[11px] font-bold text-slate-400">Primary</span>
           </div>
           <div className="h-1 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden mt-3">
-            <div className="h-full bg-brand-600 rounded-full" style={{ width: "100%" }} />
+            <div className="h-full bg-[#1F3B75] rounded-full" style={{ width: "100%" }} />
           </div>
         </div>
 
         {/* KPI 4: Account Status */}
-        <div id="kpi-account-status" className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-xl p-4 shadow-xs">
+        <div id="kpi-account-status" className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-lg p-4 shadow-xs">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Account Status</span>
           <div className="flex items-center gap-2 mt-1.5">
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -419,7 +535,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
         <div className="space-y-8">
           
           {/* Component: Administrator Details */}
-          <div id="card-admin-details" className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-xl shadow-xs overflow-hidden">
+          <div id="card-admin-details" className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-lg shadow-xs overflow-hidden">
             <div className="p-5 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/40">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
                 <User className="h-4 w-4 text-indigo-500" />
@@ -432,63 +548,63 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
               <div className="flex items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-5">
                 <div className="relative group shrink-0">
                   <div className="absolute inset-0 bg-indigo-500 rounded-full blur-xs opacity-50" />
-                  <div className="relative h-16 w-16 rounded-full bg-gradient-to-tr from-indigo-600 to-indigo-500 border-2 border-white dark:border-slate-800 flex items-center justify-center shadow-lg">
-                    <span className="font-display font-black text-xl text-white">YA</span>
+                  <div className="relative h-16 w-16 rounded-full bg-white border-2 border-white dark:border-slate-800 flex items-center justify-center shadow-sm">
+                    <span className="font-display font-black text-xl text-white">{viewerInitials}</span>
                   </div>
                 </div>
                 <div>
                   <h4 className="font-display font-black text-lg text-slate-950 dark:text-white leading-tight">
-                    Yogesh Adsul
+                    {viewerDisplayName}
                   </h4>
                   <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400 block mt-0.5">
-                    HR Manager
+                    {viewerRecord?.designation || "—"}
                   </span>
                   <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 dark:bg-purple-950/30 dark:text-purple-300 text-[10px] font-extrabold uppercase tracking-wider mt-1.5 border border-purple-200/20">
                     <Shield className="h-3 w-3" />
-                    <span>System Administrator</span>
+                    <span>{viewerRecord?.role || currentUser?.role || "—"}</span>
                   </div>
                 </div>
               </div>
 
               {/* Data rows list */}
               <div className="space-y-3.5 text-xs font-semibold">
-                
+
                 <div className="flex justify-between items-center py-0.5 border-b border-slate-50 dark:border-slate-800/40 pb-2">
                   <span className="text-slate-400 font-medium">Department</span>
-                  <span className="text-slate-900 dark:text-slate-200">Human Resources</span>
+                  <span className="text-slate-900 dark:text-slate-200">{viewerRecord?.department || "—"}</span>
                 </div>
 
                 <div className="flex justify-between items-center py-0.5 border-b border-slate-50 dark:border-slate-800/40 pb-2">
                   <span className="text-slate-400 font-medium">Employee ID</span>
-                  <span className="text-slate-900 dark:text-slate-200 font-mono">ENC-HR-001</span>
+                  <span className="text-slate-900 dark:text-slate-200 font-mono">{viewerRecord?.employeeId || "—"}</span>
                 </div>
 
                 <div className="flex justify-between items-center py-0.5 border-b border-slate-50 dark:border-slate-800/40 pb-2">
                   <span className="text-slate-400 font-medium">Email Address</span>
-                  <span className="text-slate-900 dark:text-slate-200 font-mono text-[11px]">yogesh.adsul@encureit.com</span>
+                  <span className="text-slate-900 dark:text-slate-200 font-mono text-[11px]">{viewerRecord?.email || currentUser?.email || "—"}</span>
                 </div>
 
                 <div className="flex justify-between items-center py-0.5 border-b border-slate-50 dark:border-slate-800/40 pb-2">
                   <span className="text-slate-400 font-medium">Phone Number</span>
-                  <span className="text-slate-900 dark:text-slate-200 font-mono">+91 XXXXX XXXXX</span>
+                  <span className="text-slate-900 dark:text-slate-200 font-mono">{viewerRecord?.phone || "—"}</span>
                 </div>
 
                 <div className="flex justify-between items-center py-0.5 border-b border-slate-50 dark:border-slate-800/40 pb-2">
                   <span className="text-slate-400 font-medium">Status</span>
                   <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-400 font-mono font-bold text-[10px]">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                    ACTIVE
+                    {(viewerRecord?.status || "ACTIVE").toUpperCase()}
                   </span>
                 </div>
 
                 <div className="flex justify-between items-center py-0.5 border-b border-slate-50 dark:border-slate-800/40 pb-2">
                   <span className="text-slate-400 font-medium">Last Login</span>
-                  <span className="text-slate-900 dark:text-slate-200">Today, 10:25 AM</span>
+                  <span className="text-slate-900 dark:text-slate-200">{viewerRecord?.lastLogin || "—"}</span>
                 </div>
 
                 <div className="flex justify-between items-center pb-1">
                   <span className="text-slate-400 font-medium">Account Created</span>
-                  <span className="text-slate-900 dark:text-slate-200">15 June 2026</span>
+                  <span className="text-slate-900 dark:text-slate-200">{viewerRecord?.createdOn || "—"}</span>
                 </div>
 
               </div>
@@ -496,7 +612,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
           </div>
 
           {/* Component: Security Status Card */}
-          <div id="card-security-status" className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-xl shadow-xs overflow-hidden">
+          <div id="card-security-status" className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-lg shadow-xs overflow-hidden">
             <div className="p-5 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/40">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
                 <Fingerprint className="h-4 w-4 text-indigo-500" />
@@ -544,7 +660,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
         <div className="lg:col-span-2 space-y-8">
           
           {/* Component: System Permissions */}
-          <div id="card-system-permissions" className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-xl shadow-xs overflow-hidden">
+          <div id="card-system-permissions" className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-lg shadow-xs overflow-hidden">
             <div className="p-5 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/40 flex justify-between items-center">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
                 <CheckSquare className="h-4 w-4 text-indigo-500" />
@@ -582,7 +698,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
           </div>
 
           {/* Component: Administrator Actions */}
-          <div id="card-admin-actions" className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-xl shadow-xs overflow-hidden">
+          <div id="card-admin-actions" className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-lg shadow-xs overflow-hidden">
             <div className="p-5 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/40">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
                 <Sliders className="h-4 w-4 text-indigo-500" />
@@ -597,7 +713,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
                 <button 
                   onClick={() => {
                     setActiveAdminActionModal("edit-profile");
-                    triggerToast("ℹ️ Loaded edit interface for Yogesh Adsul.", "info");
+                    triggerToast(`ℹ️ Loaded edit interface for ${viewerDisplayName}.`, "info");
                   }}
                   className="flex items-center gap-2.5 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200/60 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs p-3 rounded-lg transition-all text-left group cursor-pointer"
                 >
@@ -632,7 +748,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
                 {pending2FAReset ? (
                   <div className="flex flex-col gap-2 bg-slate-50 dark:bg-slate-800 border border-amber-200/60 dark:border-amber-700/50 p-3 rounded-lg transition-all text-left">
                     <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">
-                      Reset 2FA for Yogesh Adsul?
+                      Reset 2FA for {viewerDisplayName}?
                     </span>
                     <div className="flex gap-2 mt-1">
                       <button 
@@ -680,7 +796,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
           </div>
 
           {/* Component: Recent Account Activity Timeline */}
-          <div id="card-recent-activity" className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-xl shadow-xs overflow-hidden">
+          <div id="card-recent-activity" className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-lg shadow-xs overflow-hidden">
             <div className="p-5 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/40 flex justify-between items-center">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
                 <Activity className="h-4 w-4 text-indigo-500" />
@@ -728,7 +844,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
       </div>
 
       {/* SECTION: Searchable Users Table Area */}
-      <div id="card-users-access-directory" className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-xl shadow-xs overflow-hidden">
+      <div id="card-users-access-directory" className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-lg shadow-xs overflow-hidden">
         
         {/* Table Header Controls */}
         <div className="p-5 border-b border-slate-100 dark:border-slate-800/60 flex flex-col md:flex-row justify-between items-stretch md:items-center gap-4 bg-slate-50/50 dark:bg-slate-900/40">
@@ -754,7 +870,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
             </div>
 
             {/* Filter */}
-            <select
+            <SearchableSelect
               value={roleFilter}
               onChange={(e) => setRoleFilter(e.target.value)}
               className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs font-semibold dark:text-slate-200 focus:outline-hidden"
@@ -767,7 +883,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
               <option value="Technical Interviewer">Technical Interviewer</option>
               <option value="Interview Coordinator">Interview Coordinator</option>
               <option value="Viewer">Viewer</option>
-            </select>
+            </SearchableSelect>
           </div>
         </div>
 
@@ -869,7 +985,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
                             className="fixed inset-0 z-40" 
                             onClick={() => setActiveRowActionMenuId(null)}
                           />
-                          <div className="absolute right-6 top-10 z-50 w-44 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl py-1.5 text-left text-xs font-semibold text-slate-700 dark:text-slate-200">
+                          <div className="absolute right-6 top-10 z-50 w-44 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-sm py-1.5 text-left text-xs font-semibold text-slate-700 dark:text-slate-200">
                             
                             {/* View Action */}
                             <button
@@ -977,7 +1093,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
       {/* MODAL: ADD NEW CORPORATE USER */}
       {isAddModalOpen && (
         <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl max-w-lg w-full overflow-hidden animate-in zoom-in-95 duration-150 my-8">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-sm max-w-lg w-full overflow-hidden animate-in zoom-in-95 duration-150 my-8">
             
             {/* Header */}
             <div className="p-5 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/30">
@@ -1057,7 +1173,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
                 {/* Department */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Department</label>
-                  <select
+                  <SearchableSelect
                     value={addUserForm.department}
                     onChange={(e) => setAddUserForm(prev => ({ ...prev, department: e.target.value }))}
                     className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-semibold focus:outline-hidden dark:text-slate-200"
@@ -1068,7 +1184,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
                     <option value="Product Management">Product Management</option>
                     <option value="Operations">Operations</option>
                     <option value="Finance">Finance</option>
-                  </select>
+                  </SearchableSelect>
                 </div>
 
                 {/* Designation */}
@@ -1086,7 +1202,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
                 {/* Role */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Security Role</label>
-                  <select
+                  <SearchableSelect
                     value={addUserForm.role}
                     onChange={(e) => setAddUserForm(prev => ({ ...prev, role: e.target.value }))}
                     className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-semibold focus:outline-hidden dark:text-slate-200"
@@ -1097,7 +1213,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
                     <option value="Technical Interviewer">Technical Interviewer</option>
                     <option value="Interview Coordinator">Interview Coordinator</option>
                     <option value="Viewer">Viewer</option>
-                  </select>
+                  </SearchableSelect>
                 </div>
 
                 {/* Reporting Manager */}
@@ -1182,7 +1298,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all shadow-md hover:shadow-lg cursor-pointer"
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm hover:shadow-sm cursor-pointer"
                 >
                   Create User
                 </button>
@@ -1196,7 +1312,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
       {/* MODAL: VIEW WORKSPACE USER DOSSIER */}
       {isViewModalOpen && selectedUser && (
         <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-150">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-sm max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-150">
             
             {/* Header */}
             <div className="p-5 border-b border-slate-100 dark:border-slate-800/80 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/30">
@@ -1218,7 +1334,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
             {/* Dossier details */}
             <div className="p-6 space-y-5">
               
-              <div className="flex items-center gap-4.5 bg-slate-50 dark:bg-slate-850 p-4 rounded-xl border border-slate-200/30 dark:border-slate-800">
+              <div className="flex items-center gap-4.5 bg-slate-50 dark:bg-slate-850 p-4 rounded-lg border border-slate-200/30 dark:border-slate-800">
                 <div className={`h-12 w-12 rounded-full ${selectedUser.avatarColor} flex items-center justify-center font-bold text-sm font-mono shadow`}>
                   {selectedUser.name?.split(" ").map(n => n[0]).join("") || ""}
                 </div>
@@ -1302,7 +1418,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
       {/* MODAL: EDIT WORKSPACE USER */}
       {isEditModalOpen && editUserForm && (
         <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-150">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-sm max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-150">
             
             {/* Header */}
             <div className="p-5 border-b border-slate-100 dark:border-slate-800/80 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/30">
@@ -1351,7 +1467,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
               {/* Department */}
               <div className="space-y-1.5">
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Department</label>
-                <select
+                <SearchableSelect
                   value={editUserForm.department}
                   onChange={(e) => setEditUserForm(prev => prev ? ({ ...prev, department: e.target.value }) : null)}
                   className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-semibold focus:outline-hidden dark:text-slate-200"
@@ -1362,13 +1478,13 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
                   <option value="Product Management">Product Management</option>
                   <option value="Operations">Operations</option>
                   <option value="Finance">Finance</option>
-                </select>
+                </SearchableSelect>
               </div>
 
               {/* Role */}
               <div className="space-y-1.5">
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Security Role</label>
-                <select
+                <SearchableSelect
                   value={editUserForm.role}
                   onChange={(e) => setEditUserForm(prev => prev ? ({ ...prev, role: e.target.value }) : null)}
                   className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-semibold focus:outline-hidden dark:text-slate-200"
@@ -1380,7 +1496,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
                   <option value="Technical Interviewer">Technical Interviewer</option>
                   <option value="Interview Coordinator">Interview Coordinator</option>
                   <option value="Viewer">Viewer</option>
-                </select>
+                </SearchableSelect>
               </div>
 
               {/* Status */}
@@ -1425,7 +1541,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
       {/* MODAL: ADMIN DIRECT ACTION MOCK WORKFLOWS */}
       {activeAdminActionModal && (
         <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-150">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-sm max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-150">
             
             {/* Modal Header */}
             <div className="p-5 border-b border-slate-100 dark:border-slate-800/80 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/30">
@@ -1448,7 +1564,7 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
               <div className="flex gap-3 items-start bg-slate-50 dark:bg-slate-850 p-3 rounded-lg border border-slate-100 dark:border-slate-800">
                 <AlertCircle className="h-5 w-5 text-indigo-500 shrink-0 mt-0.5" />
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-normal font-semibold">
-                  You are adjusting administrative attributes for Yogesh Adsul. In production setups, these operations map to secure, SSO identity models.
+                  You are adjusting administrative attributes for {viewerDisplayName}. In production setups, these operations map to secure, SSO identity models.
                 </p>
               </div>
 
@@ -1456,25 +1572,28 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
                 <div className="space-y-3.5 text-xs font-semibold">
                   <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Full Name</label>
-                    <input 
-                      type="text" 
-                      defaultValue="Yogesh Adsul" 
+                    <input
+                      type="text"
+                      value={profileEditForm.name}
+                      onChange={(e) => setProfileEditForm(prev => ({ ...prev, name: e.target.value }))}
                       className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 focus:outline-hidden dark:text-white"
                     />
                   </div>
                   <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Designation</label>
-                    <input 
-                      type="text" 
-                      defaultValue="HR Manager" 
+                    <input
+                      type="text"
+                      value={profileEditForm.designation}
+                      onChange={(e) => setProfileEditForm(prev => ({ ...prev, designation: e.target.value }))}
                       className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 focus:outline-hidden dark:text-white"
                     />
                   </div>
                   <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Phone Number</label>
-                    <input 
-                      type="text" 
-                      defaultValue="+91 99999 99999" 
+                    <input
+                      type="text"
+                      value={profileEditForm.phone}
+                      onChange={(e) => setProfileEditForm(prev => ({ ...prev, phone: e.target.value }))}
                       className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 focus:outline-hidden dark:text-white"
                     />
                   </div>
@@ -1509,14 +1628,12 @@ export default function UsersRolesView({ currentUser }: UsersRolesViewProps) {
               >
                 Cancel
               </button>
-              <button 
-                onClick={() => {
-                  setActiveAdminActionModal(null);
-                  triggerToast("🔒 Saved changes successfully.");
-                }}
-                className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold cursor-pointer"
+              <button
+                onClick={handleSaveProfileEdit}
+                disabled={savingProfileEdit}
+                className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-lg text-xs font-bold cursor-pointer"
               >
-                Save Draft
+                {savingProfileEdit ? "Saving..." : "Save Changes"}
               </button>
             </div>
 

@@ -282,7 +282,7 @@ export default function NotificationsView({ notifications, setNotifications }: N
       case "ai_screening_completed":
         return { icon: Sparkles, bg: "bg-violet-50 border-violet-100 text-violet-600 dark:bg-violet-950/40 dark:border-violet-900/40 dark:text-violet-400" };
       case "job_published":
-        return { icon: Briefcase, bg: "bg-brand-50 border-brand-100 text-brand-600 dark:bg-brand-950/40 dark:border-brand-900/40 dark:text-brand-400" };
+        return { icon: Briefcase, bg: "bg-brand-50 border-brand-100 text-[#1F3B75] dark:bg-brand-950/40 dark:border-brand-900/40 dark:text-brand-400" };
       case "new_referral":
         return { icon: UserCheck, bg: "bg-teal-50 border-teal-100 text-teal-600 dark:bg-teal-950/40 dark:border-teal-900/40 dark:text-teal-400" };
       case "system":
@@ -309,12 +309,12 @@ export default function NotificationsView({ notifications, setNotifications }: N
     <div className="w-full px-4 sm:px-6 lg:px-8 pt-7 sm:pt-8 pb-8 space-y-5 sm:space-y-6 text-slate-800 dark:text-slate-100 transition-all">
 
       {/* Container Card */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-lg overflow-hidden">
+      <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
         
         {/* Header - Simple & Professional */}
         <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/50">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-indigo-600/10 text-indigo-600 rounded-xl">
+            <div className="p-2.5 bg-indigo-600/10 text-indigo-600 rounded-lg">
               <Bell className="h-5 w-5" />
             </div>
             <div>

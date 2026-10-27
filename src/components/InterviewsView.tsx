@@ -9,6 +9,8 @@ import { InterviewRepository } from "../repositories/interviewRepository";
 import { ApplicationRepository } from "../repositories/applicationRepository";
 import { CandidateRepository } from "../repositories/candidateRepository";
 import { formatJobId } from "../repositories/repositoryUtils";
+import { SearchableSelect } from "./common/SearchableSelect";
+import { PeopleMultiSelect, useDirectoryPeople } from "./common/PeopleMultiSelect";
 
 const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || (import.meta as any).env?.VITE_API_URL || "https://ats-fastapi-backend.onrender.com";
 import { 
@@ -43,7 +45,7 @@ import {
   Trash2,
   ArrowRight
 } from "lucide-react";
-import { Interview, InterviewStatus, InterviewType, RecommendationType, Application, ApplicationStatus } from "../types";
+import { Interview, InterviewStatus, InterviewType, RecommendationType, Application, ApplicationStatus, DirectoryPerson } from "../types";
 
 interface InterviewsViewProps {
   initialFilter?: "all" | "today" | "upcoming" | "completed" | "cancelled";
@@ -107,7 +109,16 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
   // Form States - Scheduling
   const [selectedAppId, setSelectedAppId] = useState("");
   const [roundName, setRoundName] = useState("Technical Interview 1");
-  const [interviewerName, setInterviewerName] = useState("");
+  // Interviewers are the CC recipients of the invitation and are required (at least one person); BCC is optional.
+  // The backend enforces the same.
+  const [interviewers, setInterviewers] = useState<DirectoryPerson[]>([]);
+  const [bccPeople, setBccPeople] = useState<DirectoryPerson[]>([]);
+  const directory = useDirectoryPeople();
+  const interviewerName = interviewers.map((p) => p.name).join(", ");
+  const resetParticipants = () => {
+    setInterviewers([]);
+    setBccPeople([]);
+  };
   const [interviewDate, setInterviewDate] = useState(new Date().toISOString().split("T")[0]);
   const [interviewTime, setInterviewTime] = useState("14:00");
   const [interviewType, setInterviewType] = useState<InterviewType>(InterviewType.ONLINE);
@@ -304,7 +315,8 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
     setEditingInterview(interview);
     setSelectedAppId(interview.applicationId);
     setRoundName(interview.round);
-    setInterviewerName(interview.interviewer);
+    setInterviewers(interview.interviewers || []);
+    setBccPeople(interview.bcc || []);
     setInterviewDate(interview.date);
     setInterviewTime(interview.time);
     setInterviewType(interview.type as InterviewType);
@@ -316,8 +328,12 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
 
   const handleScheduleInterview = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedAppId || !interviewerName || !interviewDate || !interviewTime) {
+    if (!selectedAppId || !interviewDate || !interviewTime) {
       triggerToast("Please fill in all required fields.", "error");
+      return;
+    }
+    if (interviewers.length === 0) {
+      triggerToast("Interviewers cannot be empty: select at least one person.", "error");
       return;
     }
 
@@ -350,6 +366,8 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
         await InterviewRepository.update(editingInterview.id, {
           round: roundName,
           interviewer: interviewerName,
+          interviewers,
+          bcc: bccPeople,
           date: interviewDate,
           time: interviewTime,
           type: interviewType,
@@ -377,6 +395,8 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
           jobTitle: jobTitle,
           round: roundName,
           interviewer: interviewerName,
+          interviewers,
+          bcc: bccPeople,
           date: interviewDate,
           time: interviewTime,
           type: interviewType,
@@ -390,7 +410,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
       // Reset form & reload
       setShowScheduleModal(false);
       setEditingInterview(null);
-      setInterviewerName("");
+      resetParticipants();
       setScheduleNotes("");
       setLocation("");
       setViewMode("list");
@@ -410,7 +430,9 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
       window.dispatchEvent(new Event("candidates-updated"));
     } catch (err: any) {
       console.error("Error scheduling interview:", err);
-      triggerToast(err.response?.data?.error || "Failed to schedule interview.", "error");
+      // InterviewRepository already turned the backend's `detail` into err.message
+      // (e.g. "Google Meet generation failed, mail not sent.").
+      triggerToast(err?.message || "Failed to schedule interview.", "error");
     } finally {
       setScheduling(false);
     }
@@ -663,75 +685,76 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
     }
   };
 
-  const handleMoveToNextStage = async (interviewItem: any) => {
+  /**
+   * Advances a candidate to their next interview round, or to the offer
+   * stage.
+   *
+   * The interview-scheduling branches (tech2 / hr) used to silently create a
+   * real interview with an invented interviewer ("Lead Technical Evaluator",
+   * "HR Manager"), an invented date (exactly 2 or 3 days out, always), and a
+   * "Google Meet" link nothing generated — written straight to the database
+   * with no one actually scheduling anything. They now prefill and open the
+   * real scheduling form (handleScheduleInterview) instead, which requires
+   * a real interviewer, date and time before it will submit, and checks
+   * real interviewer availability first. Nothing is created here.
+   *
+   * The offer branch is untouched: it only changes a status, it never
+   * invented data.
+   */
+  const handleMoveToNextStage = (interviewItem: any) => {
     if (!interviewItem) return;
     const assocApp = getAssocApp(interviewItem);
     const roundInfo = getNextStageInfo(interviewItem);
     const candName = interviewItem.candidateName || assocApp?.candidateName || "Candidate";
-    const jobTitle = interviewItem.jobTitle || assocApp?.appliedRole || "Job Position";
 
-    try {
-      setActionLoading(interviewItem.id);
-      if (roundInfo.target === "tech2") {
-        await InterviewRepository.create({
-          candidateId: interviewItem.candidateId,
-          jobId: interviewItem.jobId,
-          applicationId: interviewItem.applicationId,
-          candidateName: candName,
-          candidateEmail: interviewItem.candidateEmail || assocApp?.candidateEmail || "",
-          jobTitle: jobTitle,
-          round: "Technical Round 2",
-          date: new Date(Date.now() + 86400000 * 2).toISOString().split("T")[0],
-          time: "11:00",
-          interviewer: "Lead Technical Evaluator",
-          status: "Scheduled",
-          meetingLink: "Google Meet"
-        });
-        triggerToast(`Moved ${candName} to Technical Round 2!`, "success");
-      } else if (roundInfo.target === "offer") {
-        if (assocApp?.id) {
-          await ApplicationRepository.updateStatus(assocApp.id, "Offered");
-        } else if (interviewItem.candidateId) {
-          await axios.patch(`/api/candidates/${interviewItem.candidateId}`, { status: "Offered" }, { headers: { "X-Skip-Interceptor": "true" } });
+    if (roundInfo.target === "offer") {
+      (async () => {
+        try {
+          setActionLoading(interviewItem.id);
+          if (assocApp?.id) {
+            await ApplicationRepository.updateStatus(assocApp.id, "Offer");
+          } else if (interviewItem.candidateId) {
+            await CandidateRepository.update(interviewItem.candidateId, { status: "Offer" });
+          }
+          triggerToast(`Moved ${candName} to Offer Stage!`, "success");
+          await fetchInterviewsAndApps();
+          window.dispatchEvent(new Event("trigger-notification-sync"));
+          window.dispatchEvent(new Event("applications-updated"));
+          window.dispatchEvent(new Event("candidates-updated"));
+          window.dispatchEvent(new Event("offers-updated"));
+          setShowFeedbackDetailModal(false);
+          setSelectedInterview(null);
+        } catch (err: any) {
+          console.error("Error moving candidate to offer stage:", err);
+          triggerToast("Failed to move candidate to next stage.", "error");
+        } finally {
+          setActionLoading(null);
         }
-        triggerToast(`Moved ${candName} to Offer Stage!`, "success");
-      } else {
-        await InterviewRepository.create({
-          candidateId: interviewItem.candidateId,
-          jobId: interviewItem.jobId,
-          applicationId: interviewItem.applicationId,
-          candidateName: candName,
-          candidateEmail: interviewItem.candidateEmail || assocApp?.candidateEmail || "",
-          jobTitle: jobTitle,
-          round: "HR Interview",
-          date: new Date(Date.now() + 86400000 * 3).toISOString().split("T")[0],
-          time: "15:00",
-          interviewer: "HR Manager",
-          status: "Scheduled",
-          meetingLink: "Google Meet"
-        });
-        triggerToast(`Moved ${candName} to HR Interview!`, "success");
-      }
-
-      await fetchInterviewsAndApps();
-      window.dispatchEvent(new Event("trigger-notification-sync"));
-      window.dispatchEvent(new Event("applications-updated"));
-      window.dispatchEvent(new Event("interviews-updated"));
-      window.dispatchEvent(new Event("candidates-updated"));
-      window.dispatchEvent(new Event("offers-updated"));
-      setShowFeedbackDetailModal(false);
-      setSelectedInterview(null);
-    } catch (err: any) {
-      console.error("Error moving candidate to next stage:", err);
-      triggerToast("Failed to move candidate to next stage.", "error");
-    } finally {
-      setActionLoading(null);
+      })();
+      return;
     }
+
+    // tech2 / hr: open the real scheduling form instead of fabricating an
+    // interview. selectedAppId/roundName carry the candidate and suggested
+    // round across; interviewerName is left blank so the form's own
+    // required-field check forces a real name before it can submit.
+    setEditingInterview(null);
+    setSelectedAppId(interviewItem.candidateId || "");
+    setRoundName(roundInfo.target === "tech2" ? "Technical Round 2" : "HR Interview");
+    resetParticipants();
+    setInterviewDate(new Date().toISOString().split("T")[0]);
+    setInterviewTime("14:00");
+    setInterviewType(InterviewType.ONLINE);
+    setPlatform("Google Meet");
+    setLocation("");
+    setScheduleNotes("");
+    setShowFeedbackDetailModal(false);
+    setShowScheduleModal(true);
   };
 
   // Dynamic Timeline render component inside card and modal
   const renderCandidateStageTimeline = (app: any, interview?: any) => {
-    const currentStatus = String(app?.status || interview?.status || "Applied");
+    const currentStatus = String(app?.status || interview?.status || "New");
     const appInterviews = interviews.filter(i => {
       if (app?.id && i.applicationId === app.id) return true;
       if (app?.candidateId && i.candidateId === app.candidateId) return true;
@@ -759,8 +782,8 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
     const isSingleTech = (!hasTech1 && !hasTech2 && currentRound.includes("technical interview") && !currentRound.includes("1") && !currentRound.includes("2")) || 
       (appInterviews.length === 1 && String(appInterviews[0]?.round || "").toLowerCase() === "technical interview");
 
-    const isAppliedDone = true;
-    const isScreeningDone = currentStatus.toLowerCase() !== "applied";
+    const isNewDone = true;
+    const isShortlistedDone = currentStatus.toLowerCase() !== "new";
 
     const isTech1Done = appInterviews.some(i => {
       const r = String(i.round || "").toLowerCase();
@@ -782,7 +805,8 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
       return r.includes("hr") && isCompletedStatus(i.status);
     }) || (interview && currentRound.includes("hr") && isCompletedStatus(interview.status));
 
-    const isOfferDone = currentStatus.toLowerCase() === "offered" || currentStatus.toLowerCase() === "hired";
+    const isOfferDone = currentStatus.toLowerCase() === "offer" || currentStatus.toLowerCase() === "hired";
+    const isHiredDone = currentStatus.toLowerCase() === "hired";
 
     let stages: { key: string; label: string; isDone: boolean; isActive: boolean; isRejected?: boolean }[] = [];
 
@@ -792,27 +816,29 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
 
     if (isRejected) {
       stages = [
-        { key: "applied", label: "Applied", isDone: isAppliedDone, isActive: false },
-        { key: "screening", label: "AI Screening", isDone: isScreeningDone, isActive: false },
+        { key: "new", label: "New", isDone: isNewDone, isActive: false },
+        { key: "shortlisted", label: "Shortlisted", isDone: isShortlistedDone, isActive: false },
         { key: "interview", label: isSingleTech ? "Technical Interview" : "Technical Interview 1", isDone: isSingleTech ? isSingleTechDone : isTech1Done, isActive: false },
         { key: "rejected", label: "Rejected", isDone: false, isActive: true, isRejected: true },
       ];
     } else if (isSingleTech) {
       stages = [
-        { key: "applied", label: "Applied", isDone: isAppliedDone, isActive: false },
-        { key: "screening", label: "AI Screening", isDone: isScreeningDone, isActive: !isScreeningDone && currentStatus.toLowerCase() === "screening" },
+        { key: "new", label: "New", isDone: isNewDone, isActive: false },
+        { key: "shortlisted", label: "Shortlisted", isDone: isShortlistedDone, isActive: !isShortlistedDone },
         { key: "tech", label: "Technical Interview", isDone: isSingleTechDone, isActive: !isSingleTechDone && isScheduledNow && !isHRRoundNow },
         { key: "hr", label: "HR Interview", isDone: isHRInterviewDone, isActive: isSingleTechDone && !isHRInterviewDone && isHRRoundNow },
-        { key: "offer", label: "Offer", isDone: isOfferDone, isActive: isOfferDone },
+        { key: "offer", label: "Offer", isDone: isOfferDone, isActive: isOfferDone && !isHiredDone },
+        { key: "hired", label: "Hired", isDone: isHiredDone, isActive: isHiredDone },
       ];
     } else {
       stages = [
-        { key: "applied", label: "Applied", isDone: isAppliedDone, isActive: false },
-        { key: "screening", label: "AI Screening", isDone: isScreeningDone, isActive: !isScreeningDone && currentStatus.toLowerCase() === "screening" },
+        { key: "new", label: "New", isDone: isNewDone, isActive: false },
+        { key: "shortlisted", label: "Shortlisted", isDone: isShortlistedDone, isActive: !isShortlistedDone },
         { key: "tech1", label: "Technical Interview 1", isDone: isTech1Done, isActive: !isTech1Done && isScheduledNow && !isTech2Now && !isHRRoundNow },
         { key: "tech2", label: "Technical Interview 2", isDone: isTech2Done, isActive: (isTech1Done || isTech2Now) && !isTech2Done && !isHRRoundNow },
         { key: "hr", label: "HR Interview", isDone: isHRInterviewDone, isActive: (isTech2Done || isHRRoundNow) && !isHRInterviewDone },
-        { key: "offer", label: "Offer", isDone: isOfferDone, isActive: isOfferDone },
+        { key: "offer", label: "Offer", isDone: isOfferDone, isActive: isOfferDone && !isHiredDone },
+        { key: "hired", label: "Hired", isDone: isHiredDone, isActive: isHiredDone },
       ];
     }
 
@@ -865,16 +891,15 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
   };
 
   return (
-    <div className="w-full px-4 sm:px-6 lg:px-8 pt-7 sm:pt-8 pb-8 space-y-5 sm:space-y-6 text-slate-800 dark:text-slate-100 transition-all">
+    <div className="ats-enterprise-page w-full px-4 sm:px-6 lg:px-8 pt-5 sm:pt-6 pb-8 space-y-5 text-slate-800 dark:text-slate-100 transition-all">
 
       {/* Header Panel */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-5">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-slate-200">
         <div>
-          <h2 className="font-display font-black text-2xl sm:text-3xl text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
-            <CalendarIcon className="h-7 w-7 text-indigo-600" />
+          <h2 className="text-xl font-semibold text-slate-900 tracking-tight flex items-center gap-2.5">
             <span>Interview Management</span>
           </h2>
-          <p className="text-sm text-slate-400 mt-1">
+          <p className="text-sm text-slate-500 mt-1">
             Coordinate, schedule, evaluate, and track candidate interviews and executive screening reviews.
           </p>
         </div>
@@ -908,7 +933,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
               setEditingInterview(null);
               setSelectedAppId(applications[0]?.id || "");
               setRoundName("Technical Interview");
-              setInterviewerName("");
+              resetParticipants();
               setInterviewDate(new Date().toISOString().split("T")[0]);
               setInterviewTime("14:00");
               setInterviewType(InterviewType.ONLINE);
@@ -929,9 +954,9 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <button
           onClick={() => { setViewMode("list"); setActiveFilter("all"); setSelectedCalendarDate(null); }}
-          className={`p-4 rounded-xl border text-left transition-all ${
+          className={`p-4 rounded-lg border text-left transition-all ${
             activeFilter === "all" && viewMode === "list"
-              ? "bg-indigo-600 border-indigo-600 text-white shadow-md"
+              ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
               : "bg-white border-slate-200 hover:border-slate-300 text-slate-800 shadow-xs"
           }`}
         >
@@ -946,9 +971,9 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
 
         <button
           onClick={() => { setViewMode("list"); setActiveFilter("today"); setSelectedCalendarDate(null); }}
-          className={`p-4 rounded-xl border text-left transition-all ${
+          className={`p-4 rounded-lg border text-left transition-all ${
             activeFilter === "today" && viewMode === "list"
-              ? "bg-indigo-600 border-indigo-600 text-white shadow-md animate-pulse"
+              ? "bg-indigo-600 border-indigo-600 text-white shadow-sm animate-pulse"
               : "bg-white border-slate-200 hover:border-slate-300 text-slate-800 shadow-xs"
           }`}
         >
@@ -963,9 +988,9 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
 
         <button
           onClick={() => { setViewMode("list"); setActiveFilter("upcoming"); setSelectedCalendarDate(null); }}
-          className={`p-4 rounded-xl border text-left transition-all ${
+          className={`p-4 rounded-lg border text-left transition-all ${
             activeFilter === "upcoming" && viewMode === "list"
-              ? "bg-indigo-600 border-indigo-600 text-white shadow-md"
+              ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
               : "bg-white border-slate-200 hover:border-slate-300 text-slate-800 shadow-xs"
           }`}
         >
@@ -980,9 +1005,9 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
 
         <button
           onClick={() => { setViewMode("list"); setActiveFilter("completed"); setSelectedCalendarDate(null); }}
-          className={`p-4 rounded-xl border text-left transition-all ${
+          className={`p-4 rounded-lg border text-left transition-all ${
             activeFilter === "completed" && viewMode === "list"
-              ? "bg-indigo-600 border-indigo-600 text-white shadow-md"
+              ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
               : "bg-white border-slate-200 hover:border-slate-300 text-slate-800 shadow-xs"
           }`}
         >
@@ -997,9 +1022,9 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
 
         <button
           onClick={() => { setViewMode("list"); setActiveFilter("cancelled"); setSelectedCalendarDate(null); }}
-          className={`p-4 rounded-xl border text-left transition-all ${
+          className={`p-4 rounded-lg border text-left transition-all ${
             activeFilter === "cancelled" && viewMode === "list"
-              ? "bg-indigo-600 border-indigo-600 text-white shadow-md"
+              ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
               : "bg-white border-slate-200 hover:border-slate-300 text-slate-800 shadow-xs"
           }`}
         >
@@ -1014,12 +1039,12 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
       </div>
 
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-20 bg-white border border-slate-200 rounded-xl">
+        <div className="flex flex-col items-center justify-center py-20 bg-white border border-slate-200 rounded-lg">
           <Loader2 className="h-10 w-10 text-indigo-600 animate-spin" />
           <p className="text-slate-400 text-sm font-medium mt-4">Assembling schedules...</p>
         </div>
       ) : error ? (
-        <div className="flex items-center gap-3 p-6 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl">
+        <div className="flex items-center gap-3 p-6 bg-rose-50 border border-rose-200 text-rose-800 rounded-lg">
           <AlertCircle className="h-5 w-5 shrink-0" />
           <p className="text-sm font-semibold">{error}</p>
         </div>
@@ -1040,7 +1065,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                 </div>
 
                 {filteredInterviews.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center p-12 bg-white border border-slate-200 rounded-xl text-center space-y-3">
+                  <div className="flex flex-col items-center justify-center p-12 bg-white border border-slate-200 rounded-lg text-center space-y-3">
                     <CalendarDays className="h-10 w-10 text-slate-300" />
                     <h4 className="font-semibold text-slate-800">No scheduled sessions found</h4>
                     <p className="text-xs text-slate-400 max-w-sm">
@@ -1055,7 +1080,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                         <div 
                           key={item.id ? `${item.id}-${idx}` : `int-${idx}`}
                           onClick={() => handleOpenInterviewDetails(item)}
-                          className="bg-white border border-slate-200 hover:border-indigo-400 rounded-xl p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between gap-4 cursor-pointer hover:bg-slate-50/10"
+                          className="bg-white border border-slate-200 hover:border-indigo-400 rounded-lg p-5 shadow-sm hover:shadow-sm transition-all flex flex-col justify-between gap-4 cursor-pointer hover:bg-slate-50/10"
                         >
                           {/* Card Top */}
                           <div className="flex justify-between items-start gap-4">
@@ -1116,7 +1141,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                                   {item.type === InterviewType.ONLINE ? (
                                     <>
                                       <Video className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
-                                      <span className="truncate">{item.meetingProvider || item.platform || "Google Meet"} Session</span>
+                                      <span className="truncate">{item.meetingProvider || item.platform || "Online"} Session</span>
                                       {item.calendarSynced && (
                                         <span className="text-[9px] font-mono font-bold bg-emerald-500/10 text-emerald-600 px-1.5 py-0.5 rounded-sm shrink-0">
                                           GCal Synced
@@ -1132,20 +1157,12 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                                 </div>
                               </div>
 
-                              {item.type === InterviewType.ONLINE && (
-                                <a 
-                                  href={item.googleMeetUrl || "#"}
-                                  target={item.googleMeetUrl ? "_blank" : undefined}
-                                  rel={item.googleMeetUrl ? "noopener noreferrer" : undefined}
-                                  onClick={(e) => { 
-                                    if (!item.googleMeetUrl) {
-                                      e.preventDefault(); 
-                                      e.stopPropagation(); 
-                                      triggerToast(`Launching meeting link for ${item.candidateName}'s interview via ${item.platform}...`, "info"); 
-                                    } else {
-                                      e.stopPropagation();
-                                    }
-                                  }}
+                              {item.type === InterviewType.ONLINE && item.googleMeetUrl && (
+                                <a
+                                  href={item.googleMeetUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
                                   className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 shrink-0"
                                 >
                                   <span>Join Meeting</span>
@@ -1323,7 +1340,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
               </div>
             ) : (
               /* CALENDAR VIEWS */
-              <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-6">
+              <div className="bg-white border border-slate-200 rounded-lg p-6 shadow-sm space-y-6">
                 {/* Calendar View Selector / Month Navigator */}
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-slate-100">
                   <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg">
@@ -1460,7 +1477,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                         <div
                           key={`week-day-${day.getTime()}-${idx}`}
                           onClick={() => setSelectedCalendarDate(day)}
-                          className={`rounded-xl border p-3 flex flex-col min-h-64 justify-between transition-all cursor-pointer ${
+                          className={`rounded-lg border p-3 flex flex-col min-h-64 justify-between transition-all cursor-pointer ${
                             isTodayDate 
                               ? "bg-indigo-600/5 border-indigo-200 ring-1 ring-indigo-200" 
                               : isSelected 
@@ -1518,7 +1535,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
 
           {/* Right Hand Sidebar: Daily Focus Schedule details OR Candidate Pool info */}
           <div className="lg:col-span-1 space-y-6">
-            <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-5">
+            <div className="bg-white border border-slate-200 rounded-lg p-6 shadow-sm space-y-5">
               <div className="flex items-center justify-between pb-3.5 border-b border-slate-100">
                 <h4 className="font-display font-semibold text-sm text-slate-900 flex items-center gap-2">
                   <CalendarIcon className="h-4 w-4 text-indigo-600" />
@@ -1609,7 +1626,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
             </div>
 
             {/* Quick Helper Tips Panel */}
-            <div className="bg-gradient-to-br from-slate-900 to-indigo-950 text-white rounded-xl p-6 shadow-sm space-y-4 relative overflow-hidden">
+            <div className="bg-white text-white rounded-lg p-6 shadow-sm space-y-4 relative overflow-hidden">
               <div className="absolute right-0 bottom-0 translate-y-6 translate-x-6 opacity-10">
                 <Sparkles className="h-32 w-32" />
               </div>
@@ -1640,7 +1657,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex justify-center items-center p-4">
           <form 
             onSubmit={handleScheduleInterview}
-            className="w-full max-w-xl bg-white rounded-xl shadow-2xl flex flex-col max-h-[90vh] animate-scale-in border border-slate-200"
+            className="w-full max-w-xl bg-white rounded-lg shadow-sm flex flex-col max-h-[90vh] animate-scale-in border border-slate-200"
           >
             {/* Modal Header */}
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-900 text-white rounded-t-xl">
@@ -1675,7 +1692,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                     className="w-full px-4 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-slate-500 text-sm font-semibold focus:outline-hidden"
                   />
                 ) : (
-                  <select
+                  <SearchableSelect
                     value={selectedAppId}
                     onChange={(e) => setSelectedAppId(e.target.value)}
                     className="w-full px-4 py-2.5 rounded-lg border border-slate-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm font-medium transition-all bg-white"
@@ -1694,7 +1711,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                         );
                       })
                     )}
-                  </select>
+                  </SearchableSelect>
                 )}
               </div>
 
@@ -1715,16 +1732,40 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-600 block">Interviewer(s) *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g., Aris Thorne (Core AI Architect)"
-                    value={interviewerName}
-                    onChange={(e) => setInterviewerName(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-lg border border-slate-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm font-medium transition-all"
+                  <label className="text-xs font-bold text-slate-600 block">
+                    Interviewer(s) * <span className="font-medium text-slate-400">(CC'd on the invitation)</span>
+                  </label>
+                  <PeopleMultiSelect
+                    aria-label="Interviewers"
+                    placeholder="Select one or more interviewers"
+                    options={directory.people}
+                    loading={directory.loading}
+                    error={directory.error}
+                    selected={interviewers}
+                    onChange={setInterviewers}
+                    excludeIds={bccPeople.map((p) => p.id)}
+                    invalid={interviewers.length === 0}
+                    className="rounded-lg border border-slate-200 bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                   />
                 </div>
+              </div>
+
+              {/* BCC (optional) */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-600 block">
+                  BCC <span className="font-medium text-slate-400">(optional, hidden from other recipients)</span>
+                </label>
+                <PeopleMultiSelect
+                  aria-label="BCC"
+                  placeholder="Select people to BCC"
+                  options={directory.people}
+                  loading={directory.loading}
+                  error={directory.error}
+                  selected={bccPeople}
+                  onChange={setBccPeople}
+                  excludeIds={interviewers.map((p) => p.id)}
+                  className="rounded-lg border border-slate-200 bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                />
               </div>
 
               {/* Date & Time */}
@@ -1856,7 +1897,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex justify-center items-center p-4">
           <form 
             onSubmit={handleSubmitFeedback}
-            className="w-full max-w-xl bg-white rounded-xl shadow-2xl flex flex-col max-h-[90vh] animate-scale-in border border-slate-200"
+            className="w-full max-w-xl bg-white rounded-lg shadow-sm flex flex-col max-h-[90vh] animate-scale-in border border-slate-200"
           >
             {/* Modal Header */}
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-900 text-white rounded-t-xl">
@@ -2056,7 +2097,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
 
       {showFeedbackDetailModal && selectedInterview && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex justify-center items-center p-4">
-          <div className="w-full max-w-4xl bg-white rounded-xl shadow-2xl flex flex-col max-h-[90vh] animate-scale-in border border-slate-200">
+          <div className="w-full max-w-4xl bg-white rounded-lg shadow-sm flex flex-col max-h-[90vh] animate-scale-in border border-slate-200">
             {/* Modal Header */}
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-900 text-white rounded-t-xl">
               <div>
@@ -2119,7 +2160,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                     <div className="space-y-1">
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Venue / Platform</p>
                       <p className="text-sm font-semibold text-slate-800">
-                        {selectedInterview.type === InterviewType.ONLINE ? (selectedInterview.meetingProvider || selectedInterview.platform || "Google Meet") : selectedInterview.location || "Office Boardroom"}
+                        {selectedInterview.type === InterviewType.ONLINE ? (selectedInterview.meetingProvider || selectedInterview.platform || "Online") : selectedInterview.location || "Office Boardroom"}
                       </p>
                     </div>
                     {selectedInterview.calendarSynced && (
@@ -2160,7 +2201,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                 {renderCandidateStageTimeline(getAssocApp(selectedInterview), selectedInterview)}
 
                 {/* Join Session Link if Online & Upcoming */}
-                {selectedInterview.type === InterviewType.ONLINE && selectedInterview.status === InterviewStatus.UPCOMING && (
+                {selectedInterview.type === InterviewType.ONLINE && selectedInterview.status === InterviewStatus.UPCOMING && selectedInterview.googleMeetUrl && (
                   <div className="bg-indigo-50/50 border border-indigo-100 rounded-lg p-4 flex items-center justify-between gap-3">
                     <div className="space-y-0.5">
                       <p className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
@@ -2170,15 +2211,9 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                       <p className="text-[10px] text-slate-500">Host and candidate can join the conference room directly.</p>
                     </div>
                     <a
-                      href={selectedInterview.googleMeetUrl || "#"}
-                      target={selectedInterview.googleMeetUrl ? "_blank" : undefined}
-                      rel={selectedInterview.googleMeetUrl ? "noopener noreferrer" : undefined}
-                      onClick={(e) => { 
-                        if (!selectedInterview.googleMeetUrl) {
-                          e.preventDefault(); 
-                          triggerToast(`Launching meeting link for ${selectedInterview.candidateName}'s interview via ${selectedInterview.platform}...`, "info"); 
-                        }
-                      }}
+                      href={selectedInterview.googleMeetUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-md shadow-xs transition-all flex items-center gap-1 shrink-0"
                     >
                       <span>Join Call</span>
@@ -2408,7 +2443,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
                   </form>
                 ) : (
                   /* Cancelled status feedback screen */
-                  <div className="bg-rose-50/50 border border-rose-100 p-5 rounded-xl text-center space-y-2">
+                  <div className="bg-rose-50/50 border border-rose-100 p-5 rounded-lg text-center space-y-2">
                     <XCircle className="h-8 w-8 text-rose-400 mx-auto" />
                     <h5 className="font-bold text-xs text-rose-800">Session Cancelled</h5>
                     <p className="text-[11px] text-slate-500 leading-relaxed">
@@ -2480,7 +2515,7 @@ export default function InterviewsView({ initialFilter, clearInitialFilter }: In
         </div>
       )}
       {toast && (
-        <div className="fixed bottom-5 right-5 z-50 flex items-center gap-2.5 bg-slate-905 border border-slate-800 text-white px-4 py-3 rounded-xl shadow-2xl animate-fade-in text-xs font-bold bg-slate-900">
+        <div className="fixed bottom-5 right-5 z-50 flex items-center gap-2.5 bg-slate-905 border border-slate-800 text-white px-4 py-3 rounded-lg shadow-sm animate-fade-in text-xs font-bold bg-slate-900">
           {toast.type === "success" ? <Check className="h-4 w-4 text-emerald-400" /> : <AlertCircle className="h-4 w-4 text-rose-400" />}
           <span>{toast.message}</span>
         </div>

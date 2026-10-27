@@ -19,6 +19,14 @@ def read_jobs(
     """
     return job_service.get_jobs(db, status_filter=status, search=search)
 
+@router.get("/jobs/positions", response_model=List[dict])
+def read_job_positions(db: Session = Depends(get_db)):
+    """
+    The distinct positions (job titles) in the jobs table, each with the ids of its job openings.
+    The Applications page loads this for its "Job Position / Role" filter.
+    """
+    return job_service.list_positions(db)
+
 @router.get("/jobs/{id}", response_model=JobResponse)
 def read_job(
     id: str,

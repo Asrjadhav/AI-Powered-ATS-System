@@ -7,6 +7,9 @@ import {
 } from "lucide-react";
 import { JobRepository, CandidateRepository } from "../repositories";
 import { formatJobId } from "../repositories/repositoryUtils";
+import { SearchableSelect } from "./common/SearchableSelect";
+import { WorkModeSelect } from "./common/WorkModeSelect";
+import { workModeForJob } from "../lib/workMode";
 
 interface PublicApplyFormProps {
   jobId: string;
@@ -24,6 +27,8 @@ interface JobDetails {
   requirements: string[] | any;
   responsibilities?: string[] | string;
   workMode?: string;
+  /** The job's own work mode as configured (empty when the job does not say); decides the Work Mode choices. */
+  configuredWorkMode?: string;
   experienceRange?: string;
   salaryRange?: string;
   openings?: number;
@@ -145,6 +150,7 @@ const getEnrichedJobDetails = (job: JobDetails): JobDetails => {
     responsibilities: responsibilitiesArray,
     preferredSkills: preferredSkillsArray,
     benefits: benefitsArray,
+    configuredWorkMode: job.workMode || "",
     workMode,
     experienceRange,
     salaryRange,
@@ -174,6 +180,7 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
   const [phone, setPhone] = useState("");
   const [currentLocation, setCurrentLocation] = useState("");
   const [relocateToPune, setRelocateToPune] = useState("");
+  const [preferredWorkMode, setPreferredWorkMode] = useState("");
   const [experienceLevel, setExperienceLevel] = useState(""); // Experienced or Fresher
   const [noticePeriod, setNoticePeriod] = useState("");
   const [linkedinProfile, setLinkedinProfile] = useState("");
@@ -197,7 +204,6 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
 
   // Resume attachment
   const [cvFile, setCvFile] = useState<File | null>(null);
-  const [cvBase64, setCvBase64] = useState<string>("");
   const [dragActive, setDragActive] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [confirmConsent, setConfirmConsent] = useState(false);
@@ -245,6 +251,12 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
     loadJobs();
   }, [jobId]);
 
+  // The Work Mode choices follow the selected job: keep the choice if the job still offers it, preselect
+  // the only choice when there is one, otherwise ask again.
+  useEffect(() => {
+    setPreferredWorkMode((current) => workModeForJob(current, selectedJob?.configuredWorkMode));
+  }, [selectedJob]);
+
   // Handle Dropdown Change
   const handleJobChange = (e: ChangeEvent<HTMLSelectElement>) => {
     const matched = activeJobs.find(j => j.id === e.target.value);
@@ -271,17 +283,11 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
     if (file.type !== "application/pdf") {
       setErrorMsg("We only support PDF formats for resumes. Please upload a standard PDF CV.");
       setCvFile(null);
-      setCvBase64("");
       return;
     }
     setErrorMsg(null);
+    // The file is uploaded as-is on submit; nothing is read in the browser.
     setCvFile(file);
-
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setCvBase64(reader.result as string);
-    };
-    reader.readAsDataURL(file);
   };
 
   const handleDrop = (e: DragEvent) => {
@@ -327,6 +333,10 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
     }
     if (!relocateToPune) {
       setErrorMsg("Please select whether you are willing to relocate to Pune.");
+      return;
+    }
+    if (!preferredWorkMode) {
+      setErrorMsg("Please select your preferred Work Mode.");
       return;
     }
     if (!experienceLevel) {
@@ -378,7 +388,7 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
       }
     }
 
-    if (!cvFile || !cvBase64) {
+    if (!cvFile) {
       setErrorMsg("Uploading a PDF Resume/CV is required.");
       return;
     }
@@ -406,8 +416,8 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
         phone: `${phoneCode} ${phone}`,
         currentLocation,
         relocateToPune,
-        cvBase64,
-        cvFileName: cvFile.name,
+        preferredWorkMode,
+        resumeFile: cvFile,
         source: "Job Application Form",
         
         experienceLevel,
@@ -472,7 +482,7 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
           backgroundSize: "24px 24px, auto, auto, auto, auto, auto, auto",
         }}
       >
-        <div className="flex flex-col items-center gap-4 bg-white p-8 rounded-2xl shadow-xl max-w-sm w-full text-center border border-purple-100/50 z-10">
+        <div className="flex flex-col items-center gap-4 bg-white p-8 rounded-lg shadow-sm max-w-sm w-full text-center border border-purple-100/50 z-10">
           <Loader2 className="h-8 w-8 text-[#673ab7] animate-spin mx-auto" />
           <p className="text-[#202124] font-semibold text-sm">Loading Application Form...</p>
         </div>
@@ -498,7 +508,7 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
           backgroundSize: "24px 24px, auto, auto, auto, auto, auto, auto",
         }}
       >
-        <div className="max-w-md w-full bg-white rounded-lg border border-gray-200 shadow-xl overflow-hidden text-center p-8 space-y-6 z-10">
+        <div className="max-w-md w-full bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden text-center p-8 space-y-6 z-10">
           <div className="mx-auto w-16 h-16 bg-red-50 rounded-full flex items-center justify-center text-red-600">
             <AlertCircle className="h-10 w-10" />
           </div>
@@ -583,7 +593,6 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
                   onClick={() => {
                     setSuccess(false);
                     setCvFile(null);
-                    setCvBase64("");
                     setFullName("");
                     setEmail("");
                     setPhone("");
@@ -615,7 +624,7 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-4">
                     <div className="relative flex items-center justify-center shrink-0">
-                      <div className="h-14 w-14 rounded-xl bg-slate-50 flex items-center justify-center shadow-sm border border-slate-200 overflow-hidden">
+                      <div className="h-14 w-14 rounded-lg bg-slate-50 flex items-center justify-center shadow-sm border border-slate-200 overflow-hidden">
                         <img 
                           src="https://logo.clearbit.com/encureit.com" 
                           alt="EncureIT Logo" 
@@ -698,7 +707,7 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
                 <p className="text-xs text-gray-400 mb-2">Choose an active job role from our careers database</p>
               </div>
 
-              <select
+              <SearchableSelect
                 value={selectedJob?.id || ""}
                 onChange={handleJobChange}
                 required
@@ -710,7 +719,7 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
                     {job.title} ({formatJobId(job.id)} &middot; {job.department} / {job.location})
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
 
               {/* DYNAMIC JOB DESCRIPTION VIEW */}
               <AnimatePresence>
@@ -967,6 +976,23 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
                 </div>
               </div>
 
+              {/* Preferred Work Mode (the candidate's choice; the options follow the selected job) */}
+              <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-xs space-y-3">
+                <label className="block text-sm font-semibold text-[#202124]">
+                  What is your preferred Work Mode? <span className="text-[#d93025]">*</span>
+                </label>
+                <p className="text-xs text-gray-400">The options shown are the ones this position offers</p>
+                <div className="w-full sm:w-2/3">
+                  <WorkModeSelect
+                    id="apply-work-mode"
+                    value={preferredWorkMode}
+                    onChange={setPreferredWorkMode}
+                    jobWorkMode={selectedJob?.configuredWorkMode}
+                    className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-[#202124] outline-none cursor-pointer"
+                  />
+                </div>
+              </div>
+
               {/* Experience Level */}
               <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-xs space-y-3">
                 <label className="block text-sm font-semibold text-[#202124]">
@@ -1051,7 +1077,7 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
                       Total Work Experience <span className="text-[#d93025]">*</span>
                     </label>
                     <p className="text-xs text-gray-400 mb-2">Select your total years of professional industry experience</p>
-                    <select
+                    <SearchableSelect
                       value={totalExperience}
                       onChange={(e) => setTotalExperience(e.target.value)}
                       required
@@ -1064,7 +1090,7 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
                       <option value="3 Years">3 Years</option>
                       <option value="4 Years">4 Years</option>
                       <option value="5+ Years">5+ Years</option>
-                    </select>
+                    </SearchableSelect>
                   </div>
 
                   {/* Notice Period */}
@@ -1073,7 +1099,7 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
                       Notice Period <span className="text-[#d93025]">*</span>
                     </label>
                     <p className="text-xs text-gray-400 mb-2">How soon can you join if selected?</p>
-                    <select
+                    <SearchableSelect
                       value={noticePeriod}
                       onChange={(e) => setNoticePeriod(e.target.value)}
                       required
@@ -1085,7 +1111,7 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
                       <option value="30 Days">30 Days</option>
                       <option value="60 Days">60 Days</option>
                       <option value="90 Days">90 Days</option>
-                    </select>
+                    </SearchableSelect>
                   </div>
 
                   {/* Current CTC */}
@@ -1151,7 +1177,7 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
                       Highest Educational Degree <span className="text-[#d93025]">*</span>
                     </label>
                     <p className="text-xs text-gray-400 mb-2">Select your highest academic qualification</p>
-                    <select
+                    <SearchableSelect
                       value={highestEducation}
                       onChange={(e) => setHighestEducation(e.target.value)}
                       required
@@ -1164,7 +1190,7 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
                       <option value="BCA / BSc CS">BCA / BSc CS</option>
                       <option value="MBA / PGDM">MBA / PGDM</option>
                       <option value="Other Graduate">Other Graduate</option>
-                    </select>
+                    </SearchableSelect>
                   </div>
 
                   {/* Specialization */}
@@ -1189,7 +1215,7 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
                       Year of Passing <span className="text-[#d93025]">*</span>
                     </label>
                     <p className="text-xs text-gray-400 mb-2">When did you complete / will you complete your degree?</p>
-                    <select
+                    <SearchableSelect
                       value={yearOfPassing}
                       onChange={(e) => setYearOfPassing(e.target.value)}
                       required
@@ -1201,7 +1227,7 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
                       <option value="2025">2025</option>
                       <option value="2024">2024</option>
                       <option value="2023">2023</option>
-                    </select>
+                    </SearchableSelect>
                   </div>
 
                   {/* Projects Worked On */}
@@ -1332,7 +1358,6 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
                         onClick={(e) => {
                           e.stopPropagation();
                           setCvFile(null);
-                          setCvBase64("");
                         }}
                         className="flex items-center gap-1.5 text-xs font-bold text-rose-600 hover:text-rose-700 pt-1 cursor-pointer"
                       >
@@ -1411,7 +1436,6 @@ export default function PublicApplyForm({ jobId, onClose }: PublicApplyFormProps
                       setCurrentRole("");
                       setProjectsDescription("");
                       setCvFile(null);
-                      setCvBase64("");
                       setConfirmConsent(false);
                       setIsPendingClear(false);
                     }}

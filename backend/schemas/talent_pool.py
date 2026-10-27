@@ -42,3 +42,16 @@ class TalentPoolResponse(TalentPoolBase):
 
     class Config:
         from_attributes = True
+
+class TalentPoolStats(BaseModel):
+    """
+    KPI figures for the Talent Pool screen, aggregated in the database.
+
+    Previously computed in TalentPoolView.tsx from the full fetched pool
+    (candidates.reduce(...), candidates.filter(...).length), duplicating work
+    the database can do directly and more cheaply as the pool grows.
+    """
+    total: int = 0
+    aiRecommendedCount: int = 0
+    immediateJoinersCount: int = 0
+    averageMatchScore: int = 0

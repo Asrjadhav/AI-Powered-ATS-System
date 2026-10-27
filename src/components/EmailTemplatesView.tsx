@@ -1,5 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
 import { PreferenceRepository, TemplateRepository, EmailRepository } from "../repositories";
+import type { EmailRecipient, EmailTrigger } from "../repositories/emailRepository";
+import {
+  EMPTY_OFFER_FORM, formatLongDate, lpaToRupees, missingOfferFields, rupeesToLpa
+} from "../lib/offerLetter";
+import type { OfferLetterForm } from "../lib/offerLetter";
+import { renderEmailMarkup } from "../lib/emailMarkup";
 import { 
   Sparkles, 
   Plus, 
@@ -33,6 +39,7 @@ import {
 } from "lucide-react";
 import axios from "axios";
 import { motion, AnimatePresence } from "motion/react";
+import { apiUrl } from "../lib/api";
 
 interface Template {
   id: string;
@@ -43,7 +50,6 @@ interface Template {
   isSystem?: boolean;
   lastUsed?: string;
   status: "Active" | "Draft";
-  aiGenerated?: boolean;
 }
 
 interface SimulatedEmail {
@@ -58,63 +64,26 @@ interface SimulatedEmail {
   sentAt: string;
 }
 
-const CANDIDATE_PROFILES = [
-  {
-    id: "cand-1",
-    name: "Sarah Jenkins",
-    email: "sarah.jenkins@gmail.com",
-    jobTitle: "Senior React Developer",
-    department: "Engineering",
-    experience: "6 years of frontend experience",
-    skills: "React 19, TypeScript, Tailwind CSS, System Design",
-    atsScore: "94",
-    interviewStatus: "Resume Shortlisted",
-    offerStatus: "Pending Offer"
-  },
-  {
-    id: "cand-2",
-    name: "Marcus Vance",
-    email: "marcus.vance@techops.io",
-    jobTitle: "Backend Engineer",
-    department: "Engineering",
-    experience: "4 years of backend development",
-    skills: "Node.js, Go, PostgreSQL, Docker, Redis",
-    atsScore: "89",
-    interviewStatus: "Interview Scheduled",
-    offerStatus: "None"
-  },
-  {
-    id: "cand-3",
-    name: "Emma Watson",
-    email: "emma.watson@prodmgmt.com",
-    jobTitle: "Product Manager",
-    department: "Product Management",
-    experience: "8 years of agile product management",
-    skills: "Product Strategy, Scrum, UI/UX Wireframing, Jira, Agile",
-    atsScore: "78",
-    interviewStatus: "Offer Accepted",
-    offerStatus: "Accepted"
-  }
-];
-
-const CATEGORIES = [
-  "Application Received",
-  "Resume Shortlisted",
-  "Interview Invitation",
-  "Interview Reminder",
-  "Interview Rescheduled",
-  "Interview Rejected",
-  "Offer Letter",
-  "Offer Reminder",
-  "Offer Accepted",
-  "Offer Rejected",
-  "Joining Instructions",
-  "Welcome Email",
-  "General Communication"
-];
+// Shown until real candidates load (or when there are none); sending is disabled for it.
+const EMPTY_RECIPIENT: EmailRecipient = {
+  id: "",
+  candidateId: "",
+  name: "",
+  email: "",
+  phone: "",
+  jobTitle: "",
+  department: "",
+  experience: "",
+  skills: "",
+  atsScore: "",
+  interviewStatus: "",
+  offerStatus: "",
+  variables: {}
+};
 
 const VARIABLES_LIST = [
   { key: "candidate_name", label: "Candidate Name", desc: "Full name of candidate" },
+  { key: "candidate_first_name", label: "First Name", desc: "For the greeting (Dear Priya,)" },
   { key: "job_title", label: "Job Title", desc: "Role they applied for" },
   { key: "company_name", label: "Company Name", desc: "EncureIT Systems Private Limited" },
   { key: "recruiter_name", label: "Recruiter Name", desc: "Assigned Recruiter" },
@@ -122,13 +91,18 @@ const VARIABLES_LIST = [
   { key: "experience", label: "Experience Years", desc: "Years/skills level" },
   { key: "ats_score", label: "ATS Score", desc: "AI match score percentage" },
   { key: "skills", label: "Key Skills", desc: "Extracted competencies" },
-  { key: "interview_date", label: "Interview Date", desc: "Scheduled date" },
-  { key: "interview_time", label: "Interview Time", desc: "Scheduled time" },
-  { key: "interview_mode", label: "Interview Mode", desc: "Online / In-Person" },
+  { key: "interview_round", label: "Interview Round", desc: "First Round Discussion" },
+  { key: "interview_round_phrase", label: "Round (in a sentence)", desc: "1st Round of Interview" },
+  { key: "interview_date", label: "Interview Date", desc: "Aug 11, 2026" },
+  { key: "interview_date_subject", label: "Interview Date (subject)", desc: "August 11 2026" },
+  { key: "interview_time", label: "Interview Time", desc: "05:00 PM" },
+  { key: "interview_mode", label: "Interview Mode", desc: "G Meet / In-Person" },
   { key: "meeting_link", label: "Meeting Link", desc: "Meet/Video URL" },
-  { key: "joining_date", label: "Joining Date", desc: "Expected Day 1" },
+  { key: "joining_label", label: "Joining Label", desc: "Joining Link or Location" },
+  { key: "joining_details", label: "Joining Details", desc: "The link, or the office address" },
+  { key: "joining_date", label: "Joining Date", desc: "Offer: 9th September 2026" },
   { key: "salary", label: "Salary Details", desc: "Annual compensation" },
-  { key: "offer_expiry", label: "Offer Expiry", desc: "Decision deadline" },
+  { key: "offer_expiry", label: "Offer Valid Till", desc: "Offer: 9th September 2026" },
   { key: "office_location", label: "Office Location", desc: "Workplace address" },
   { key: "custom_message", label: "Custom Message", desc: "General update text" }
 ];
@@ -145,7 +119,6 @@ export default function EmailTemplatesView() {
   }, []);
 
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<string>("Application Received");
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
   
   // Editor form states
@@ -157,21 +130,23 @@ export default function EmailTemplatesView() {
   const [isSystem, setIsSystem] = useState(false);
   const [attachments, setAttachments] = useState<string[]>([]);
   const [newAttachmentName, setNewAttachmentName] = useState("");
-  const [aiGenerated, setAiGenerated] = useState(false);
 
   // Search and filter states
   const [searchText, setSearchText] = useState("");
-  const [selectedStatusFilter, setSelectedStatusFilter] = useState<"All" | "Active" | "Draft" | "AI">("All");
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<"All" | "Active" | "Draft">("All");
 
-  // Simulated Candidates Preview
-  const [selectedCandidate, setSelectedCandidate] = useState(CANDIDATE_PROFILES[0]);
+  // Real candidates (from the backend) to preview and send to
+  const [recipients, setRecipients] = useState<EmailRecipient[]>([]);
+  const [selectedCandidate, setSelectedCandidate] = useState<EmailRecipient>(EMPTY_RECIPIENT);
+  const [sender, setSender] = useState<{ name: string; email: string }>({ name: "", email: "" });
+  const [emailConfigured, setEmailConfigured] = useState(true);
   const [activeTab, setActiveTab] = useState<"preview" | "automation">("preview");
 
-  // AI Generation state
-  const [aiPrompt, setAiPrompt] = useState("");
-  const [showAiModal, setShowAiModal] = useState(false);
-  const [generating, setGenerating] = useState(false);
-  const [aiError, setAiError] = useState("");
+  // Offer letter form (shown for an Offer Letter template). Starts from the candidate's saved
+  // offer, if any; HR reviews and edits every value before the PDF is previewed or sent.
+  const [offerForm, setOfferForm] = useState<OfferLetterForm>(EMPTY_OFFER_FORM);
+  const [letterPreviewUrl, setLetterPreviewUrl] = useState("");
+  const [letterPreviewing, setLetterPreviewing] = useState(false);
 
   // Email logs state
   const [emailLogs, setEmailLogs] = useState<SimulatedEmail[]>([]);
@@ -182,22 +157,105 @@ export default function EmailTemplatesView() {
   const [successToast, setSuccessToast] = useState("");
   const [templateDeletePending, setTemplateDeletePending] = useState(false);
 
-  // Automation Triggers setup
-  const [automationRules, setAutomationRules] = useState([
-    { id: "auto-1", trigger: "Application Submitted", template: "Application Received Confirmation", active: true },
-    { id: "auto-2", trigger: "ATS Score > 80%", template: "Resume Shortlisted Announcement", active: false },
-    { id: "auto-3", trigger: "Interview Scheduled", template: "Technical Interview Invitation", active: true },
-    { id: "auto-4", trigger: "Interview 24h Reminder", template: "Upcoming Interview Reminder", active: true },
-    { id: "auto-5", trigger: "Candidate Selected", template: "Official Job Offer Letter", active: false },
-    { id: "auto-6", trigger: "Offer Accepted", template: "New Hire Day 1 Joining Instructions", active: true }
-  ]);
+  // Automation Triggers: the automatic emails and their on/off switches, kept on the backend
+  const [triggers, setTriggers] = useState<EmailTrigger[]>([]);
+  const [triggersLoading, setTriggersLoading] = useState(true);
+  const [triggersError, setTriggersError] = useState("");
+  const [triggerSaving, setTriggerSaving] = useState<string | null>(null);
 
   const editorRef = useRef<HTMLTextAreaElement>(null);
+
+  // A different candidate means different offer details: start again from what is saved for them.
+  useEffect(() => {
+    setOfferForm({
+      jobTitle: selectedCandidate.jobTitle || "",
+      annualCtcLpa: rupeesToLpa(selectedCandidate.offerDefaults?.annualCtc),
+      joiningDate: selectedCandidate.offerDefaults?.joiningDate || "",
+      validTill: "",
+      reportingManager: ""
+    });
+  }, [selectedCandidate.id]);
+
+  const isOfferTemplate = selectedTemplate?.category === "Offer Letter";
+  const missingOffer = isOfferTemplate ? missingOfferFields(offerForm) : [];
+  const offerPayload = () => ({
+    jobTitle: offerForm.jobTitle.trim(),
+    annualCtc: lpaToRupees(offerForm.annualCtcLpa),
+    joiningDate: offerForm.joiningDate,
+    validTill: offerForm.validTill,
+    reportingManager: offerForm.reportingManager.trim()
+  });
+
+  const closeLetterPreview = () => {
+    if (letterPreviewUrl) URL.revokeObjectURL(letterPreviewUrl);
+    setLetterPreviewUrl("");
+  };
+
+  // Opens the offer letter PDF for the details on the form, so HR can read it before sending.
+  const handlePreviewLetter = async () => {
+    if (!selectedCandidate.id) return;
+    if (missingOffer.length > 0) {
+      showToast(`Fill in: ${missingOffer.join(", ")}.`);
+      return;
+    }
+    setLetterPreviewing(true);
+    try {
+      const blob = await EmailRepository.previewOfferLetter(selectedCandidate.id, offerPayload());
+      closeLetterPreview();
+      setLetterPreviewUrl(URL.createObjectURL(blob));
+    } catch (e: any) {
+      showToast(e?.message || "Failed to prepare the offer letter.");
+    } finally {
+      setLetterPreviewing(false);
+    }
+  };
 
   // Fetch initial templates & email dispatches
   useEffect(() => {
     fetchTemplatesAndLogs();
+    fetchRecipients();
+    fetchTriggers();
   }, []);
+
+  const fetchTriggers = async () => {
+    try {
+      setTriggersLoading(true);
+      setTriggers(await EmailRepository.getTriggers());
+      setTriggersError("");
+    } catch (e) {
+      console.error("Error loading email triggers", e);
+      setTriggersError("Could not load the automatic emails from the server.");
+    } finally {
+      setTriggersLoading(false);
+    }
+  };
+
+  // Switch an automatic email on or off on the backend; the switch moves only once the server confirms.
+  const handleToggleTrigger = async (trigger: EmailTrigger) => {
+    setTriggerSaving(trigger.event);
+    try {
+      const saved = await EmailRepository.setTrigger(trigger.event, !trigger.enabled);
+      setTriggers(prev => prev.map(t => (t.event === saved.event ? saved : t)));
+      showToast(`${saved.label} email switched ${saved.enabled ? "ON" : "OFF"}.`);
+    } catch (e: any) {
+      showToast(e?.message || "Failed to update the trigger.");
+    } finally {
+      setTriggerSaving(null);
+    }
+  };
+
+  const fetchRecipients = async () => {
+    try {
+      const data = await EmailRepository.getRecipients();
+      const list = Array.isArray(data?.recipients) ? data.recipients : [];
+      setRecipients(list);
+      setSender(data?.sender || { name: "", email: "" });
+      setEmailConfigured(data?.configured !== false);
+      setSelectedCandidate(list[0] || EMPTY_RECIPIENT);
+    } catch (e) {
+      console.error("Error loading email recipients", e);
+    }
+  };
 
   const fetchTemplatesAndLogs = async () => {
     try {
@@ -213,12 +271,8 @@ export default function EmailTemplatesView() {
       const safeLogs = Array.isArray(loadedLogs) ? loadedLogs : [];
       setEmailLogs(safeLogs);
 
-      // Select default template from current category
-      const defaultForCategory = safeTemplates.find(
-        (t: Template) => t.category === selectedCategory
-      ) || safeTemplates[0] || null;
-      
-      selectTemplate(defaultForCategory);
+      // Open the first template in the editor
+      selectTemplate(safeTemplates[0] || null);
     } catch (e) {
       console.error("Error loading templates/logs", e);
     } finally {
@@ -235,44 +289,24 @@ export default function EmailTemplatesView() {
       setBody(temp.body);
       setStatus(temp.status);
       setIsSystem(!!temp.isSystem);
-      setAiGenerated(!!temp.aiGenerated);
       setAttachments(temp.isSystem ? ["Official_Information_Guide.pdf"] : []);
     } else {
       setTemplateName("");
-      setTemplateCategory(selectedCategory);
+      // Templates have no category to pick; the stored one only matters for the four main templates.
+      setTemplateCategory("General");
       setSubject("");
       setBody("");
       setStatus("Active");
       setIsSystem(false);
-      setAiGenerated(false);
       setAttachments([]);
     }
   };
 
-  const handleCreateNew = async () => {
-    try {
-      setSaving(true);
-      const newTempPayload = {
-        name: `New Custom ${selectedCategory} Template`,
-        category: selectedCategory,
-        subject: "Regarding your application for {{job_title}}",
-        body: "Hi {{candidate_name}},\n\n[Write email body here...]\n\nBest regards,\n{{recruiter_name}}\n{{company_name}}",
-        status: "Draft",
-        isSystem: false,
-        aiGenerated: false
-      };
-      
-      const createdTemplate = await TemplateRepository.createOrUpdate(newTempPayload);
-      
-      setTemplates(prev => [...prev, createdTemplate]);
-      selectTemplate(createdTemplate);
-      showToast(`Created new template: "${createdTemplate.name}"!`);
-    } catch (err) {
-      console.error("Error creating new template:", err);
-      showToast("Failed to create new template");
-    } finally {
-      setSaving(false);
-    }
+  // "New Template": opens a blank editor. Nothing is saved until HR clicks Save Template.
+  const handleCreateNew = () => {
+    selectTemplate(null);
+    setSubject("Regarding your application for {{job_title}}");
+    setBody("Hi {{candidate_name}},\n\n[Write email body here...]\n\nBest regards,\n{{recruiter_name}}\n{{company_name}}");
   };
 
   // Save changes
@@ -282,7 +316,7 @@ export default function EmailTemplatesView() {
       return;
     }
     const nextStatus = targetStatus || status;
-    const catToUse = templateCategory || selectedCategory;
+    const catToUse = templateCategory || "General";
     setSaving(true);
     try {
       const payload: Partial<Template> = {
@@ -292,7 +326,6 @@ export default function EmailTemplatesView() {
         subject,
         body,
         status: nextStatus,
-        aiGenerated,
         isSystem
       };
       
@@ -317,11 +350,8 @@ export default function EmailTemplatesView() {
       setBody(savedTemplate.body);
       setStatus(savedTemplate.status || nextStatus);
 
-      // Ensure active category and status filter reflect saved template
-      if (savedTemplate.category && savedTemplate.category !== selectedCategory) {
-        setSelectedCategory(savedTemplate.category);
-      }
-      if (selectedStatusFilter !== "All" && selectedStatusFilter !== nextStatus && selectedStatusFilter !== "AI") {
+      // Make sure the saved template is not hidden by the status filter
+      if (selectedStatusFilter !== "All" && selectedStatusFilter !== nextStatus) {
         setSelectedStatusFilter("All");
       }
     } catch (e) {
@@ -352,7 +382,7 @@ export default function EmailTemplatesView() {
       setTemplates(updated);
       
       // Select another template
-      const nextTemp = updated.find(t => t.category === selectedCategory) || updated[0] || null;
+      const nextTemp = updated[0] || null;
       selectTemplate(nextTemp);
     } catch (e) {
       console.error("Error deleting template", e);
@@ -371,7 +401,6 @@ export default function EmailTemplatesView() {
     setBody(body);
     setStatus("Draft");
     setIsSystem(false);
-    setAiGenerated(false);
     showToast("Template duplicated to edit tray");
   };
 
@@ -431,10 +460,9 @@ export default function EmailTemplatesView() {
         }
       };
 
-      const res = await axios.post("/api/templates/generate", payload);
+      const res = await axios.post(apiUrl("/api/templates/generate"), payload);
       if (res.data.subject) setSubject(res.data.subject);
       if (res.data.body) setBody(res.data.body);
-      setAiGenerated(true);
       showToast(`AI successfully optimized content using tool: "${action}"!`);
     } catch (err) {
       console.error("AI error:", err);
@@ -444,169 +472,78 @@ export default function EmailTemplatesView() {
     }
   };
 
-  // AI generation modal submit
-  const handleAIGenerateFull = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setGenerating(true);
-    setAiError("");
-    try {
-      const payload = {
-        action: "generate",
-        prompt: aiPrompt,
-        context: {
-          candidateName: selectedCandidate.name,
-          experience: selectedCandidate.experience,
-          skills: selectedCandidate.skills,
-          jobRole: selectedCandidate.jobTitle,
-          department: selectedCandidate.department,
-          interviewStatus: selectedCategory, // Generate for current category
-          atsScore: selectedCandidate.atsScore,
-          offerStatus: selectedCandidate.offerStatus,
-          recruiterName: "Sophia Patel",
-          companyName: "EncureIT Systems Private Limited"
-        }
-      };
-
-      const res = await axios.post("/api/templates/generate", payload);
-      
-      const newName = `AI ${selectedCategory} Template`;
-      const savePayload = {
-        name: newName,
-        category: selectedCategory,
-        subject: res.data.subject || `Application regarding ${selectedCandidate.jobTitle}`,
-        body: res.data.body || "",
-        status: "Active",
-        isSystem: false,
-        aiGenerated: true
-      };
-
-      const generatedTemplate = await TemplateRepository.createOrUpdate(savePayload);
-
-      setTemplates(prev => [...prev, generatedTemplate]);
-      selectTemplate(generatedTemplate);
-
-      setShowAiModal(false);
-      setAiPrompt("");
-      showToast("Gemini AI has built and saved a brilliant personalized template!");
-    } catch (err) {
-      console.error("Gemini AI error:", err);
-      setAiError("Failed to communicate with AI. Falling back to local template.");
-    } finally {
-      setGenerating(false);
+  // Send the rendered template to the selected candidate through the backend (SMTP)
+  const handleSendEmail = async () => {
+    if (!selectedCandidate.id || !selectedCandidate.email) {
+      showToast("Select a candidate with an email address first.");
+      return;
     }
-  };
-
-  // Dispatch mock email
-  const handleSendSimulatedMail = async () => {
+    if (isOfferTemplate && missingOffer.length > 0) {
+      showToast(`Fill in the offer details first: ${missingOffer.join(", ")}.`);
+      return;
+    }
     setSendingMail(true);
     try {
-      // Form variables payload
-      const variablesMap = {
-        candidate_name: selectedCandidate.name,
-        job_title: selectedCandidate.jobTitle,
-        company_name: "EncureIT Systems Private Limited",
-        recruiter_name: "Sophia Patel",
-        department: selectedCandidate.department,
-        experience: selectedCandidate.experience,
-        skills: selectedCandidate.skills,
-        interview_date: "July 24, 2026 at 2:00 PM EST",
-        meeting_link: "https://meet.google.com/abc-defg-hij",
-        joining_date: "August 10, 2026",
-        salary: "₹18,50,000 / year",
-        offer_expiry: "July 30, 2026"
-      };
-
-      const sentEmail = await EmailRepository.send({
-        to: selectedCandidate.email,
+      const sentEmail = await EmailRepository.sendToCandidate({
+        candidateId: selectedCandidate.id,
         subject: renderPreviewContent(subject),
         body: renderPreviewContent(body),
-        variables: variablesMap,
-        templateName: templateName
+        variables: selectedCandidate.variables,
+        templateId: selectedTemplate?.id,
+        templateName: templateName,
+        // The offer letter PDF is generated from these and attached to this candidate's email
+        offerLetter: isOfferTemplate ? offerPayload() : undefined
       });
 
-      showToast(`Email dispatched successfully to ${selectedCandidate.name} (${selectedCandidate.email})!`);
-      
+      const attached = Array.isArray(sentEmail?.attachmentNames) && sentEmail.attachmentNames.length > 0
+        ? ` with ${sentEmail.attachmentNames.join(", ")} attached`
+        : "";
+      showToast(`Email sent to ${selectedCandidate.name} (${selectedCandidate.email})${attached}.`);
+
       // Prepend to list
       setEmailLogs(prev => [sentEmail, ...prev]);
-    } catch (e) {
-      console.error("Error dispatching email", e);
-      showToast("Failed to dispatch email");
+    } catch (e: any) {
+      console.error("Error sending email", e);
+      showToast(e?.message || "Failed to send email.");
     } finally {
       setSendingMail(false);
     }
   };
 
-  // Variable replacement helper for preview render
+  // Fills {{variables}} with the selected candidate's real data; anything not available renders empty.
   const renderPreviewContent = (text: string) => {
     if (!text) return "";
-    let rendered = text;
-    const replacements: { [key: string]: string } = {
-      candidate_name: selectedCandidate.name,
-      job_title: selectedCandidate.jobTitle,
-      company_name: "EncureIT Systems Private Limited",
-      recruiter_name: "Sophia Patel",
-      department: selectedCandidate.department,
-      experience: selectedCandidate.experience,
-      skills: selectedCandidate.skills,
-      ats_score: selectedCandidate.atsScore ? `${selectedCandidate.atsScore}%` : "92%",
-      interview_date: "July 24, 2026",
-      interview_time: "02:30 PM IST",
-      interview_mode: "Google Meet (Video Conference)",
-      meeting_link: "https://meet.google.com/abc-defg-hij",
-      joining_date: "August 10, 2026",
-      salary: "₹18,50,000 / year",
-      offer_expiry: "July 30, 2026",
-      office_location: "EncureIT Tech Park, Building 4, Suite 302, Pune",
-      custom_message: "We appreciate your interest in EncureIT Systems Private Limited and wanted to share a quick update regarding your profile."
-    };
-
-    Object.keys(replacements).forEach(key => {
-      const regex = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'g');
-      rendered = rendered.replace(regex, replacements[key]);
-    });
-    return rendered;
+    const values: Record<string, string> = { ...(selectedCandidate.variables || {}) };
+    if (isOfferTemplate) {
+      // The email says what the letter says, including anything HR edited on the form.
+      values.job_title = offerForm.jobTitle.trim();
+      values.joining_date = formatLongDate(offerForm.joiningDate);
+      values.offer_expiry = formatLongDate(offerForm.validTill);
+    }
+    return text.replace(/\{\{\s*(\w+)\s*\}\}/g, (_match, key) => values[key] ?? "");
   };
 
-  // Categories count tracker
-  const getCategoryCount = (category: string) => {
-    return templates.filter(t => t.category === category).length;
-  };
-
-  // Filter templates list based on search, selected category, and active status filter
+  // Filter the templates list based on the search box and the status card filter
   const filteredTemplates = templates.filter(t => {
-    const matchesSearch = t.name.toLowerCase().includes(searchText.toLowerCase()) || 
+    const matchesSearch = t.name.toLowerCase().includes(searchText.toLowerCase()) ||
                           t.subject.toLowerCase().includes(searchText.toLowerCase());
-    const matchesCategory = t.category === selectedCategory;
-    
+
     let matchesStatus = true;
     if (selectedStatusFilter === "Active") {
       matchesStatus = t.status === "Active";
     } else if (selectedStatusFilter === "Draft") {
       matchesStatus = t.status === "Draft";
-    } else if (selectedStatusFilter === "AI") {
-      matchesStatus = !!t.aiGenerated;
     }
     
-    return matchesSearch && matchesCategory && matchesStatus;
+    return matchesSearch && matchesStatus;
   });
 
   // Calculate metrics
   const totalTemplates = templates.length;
   const activeTemplates = templates.filter(t => t.status === "Active").length;
   const draftTemplates = templates.filter(t => t.status === "Draft").length;
-  const aiGeneratedTemplates = templates.filter(t => t.aiGenerated).length;
   const automatedEmailsSent = emailLogs.length + 142; // Add realistic dummy count + actual logs
   const recentlyUsed = emailLogs[0]?.templateName || "Technical Interview Invitation";
-
-  const handleToggleRule = (id: string) => {
-    setAutomationRules(prev => prev.map(rule => {
-      if (rule.id === id) {
-        return { ...rule, active: !rule.active };
-      }
-      return rule;
-    }));
-    showToast("Automation trigger updated!");
-  };
 
   return (
     <div className="w-full px-4 sm:px-6 lg:px-8 pt-7 sm:pt-8 pb-12 space-y-5 sm:space-y-6 text-slate-800 dark:text-slate-100 transition-all text-left" id="email-templates-container">
@@ -617,7 +554,7 @@ export default function EmailTemplatesView() {
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className="fixed top-20 right-6 z-50 flex items-center gap-2 bg-slate-900 text-white px-5 py-3.5 rounded-xl border border-slate-800 shadow-xl"
+            className="fixed top-20 right-6 z-50 flex items-center gap-2 bg-slate-900 text-white px-5 py-3.5 rounded-lg border border-slate-800 shadow-sm"
           >
             <CheckCircle className="h-5 w-5 text-emerald-400 shrink-0" />
             <span className="text-sm font-medium">{successToast}</span>
@@ -626,24 +563,16 @@ export default function EmailTemplatesView() {
       </AnimatePresence>
 
       {/* Header Container */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-slate-200">
         <div>
-          <h2 className="font-display font-black text-2xl sm:text-3xl text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
-            <Mail className="h-7 w-7 text-brand-600" />
+          <h2 className="text-xl font-semibold text-slate-900 tracking-tight flex items-center gap-2.5">
             <span>Email Templates</span>
           </h2>
-          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5 font-medium text-left">
+          <p className="text-sm text-slate-500 mt-1 text-left">
             Manage automated email response templates and triggers.
           </p>
         </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={() => setShowAiModal(true)}
-              className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm hover:shadow-indigo-500/10 transition-all border border-indigo-500/10 cursor-pointer"
-            >
-              <Sparkles className="h-4.5 w-4.5 text-indigo-200 animate-pulse" />
-              Generate with AI
-            </button>
             <button
               onClick={handleCreateNew}
               className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-sm animate-in fade-in"
@@ -655,14 +584,13 @@ export default function EmailTemplatesView() {
         </div>
 
       {/* SUMMARY CARDS METRICS SECTION */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 animate-in fade-in duration-300" id="metrics-summary">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 animate-in fade-in duration-300" id="metrics-summary">
         {[
-          { title: "Total Templates", value: loading ? "..." : totalTemplates, status: "All", icon: Mail, color: "text-indigo-600 bg-indigo-50 dark:bg-indigo-950/30", action: () => { setSelectedStatusFilter("All"); showToast("Showing all templates in this category"); } },
+          { title: "Total Templates", value: loading ? "..." : totalTemplates, status: "All", icon: Mail, color: "text-indigo-600 bg-indigo-50 dark:bg-indigo-950/30", action: () => { setSelectedStatusFilter("All"); showToast("Showing all templates"); } },
           { title: "Active Templates", value: loading ? "..." : activeTemplates, status: "Active", icon: CheckCircle2, color: "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30", action: () => { setSelectedStatusFilter("Active"); showToast("Filtered to Active templates"); } },
           { title: "Draft Templates", value: loading ? "..." : draftTemplates, status: "Draft", icon: FileText, color: "text-amber-600 bg-amber-50 dark:bg-amber-950/30", action: () => { setSelectedStatusFilter("Draft"); showToast("Filtered to Draft templates"); } },
-          { title: "AI Generated", value: loading ? "..." : aiGeneratedTemplates, status: "AI", icon: Sparkles, color: "text-violet-600 bg-violet-50 dark:bg-violet-950/30", action: () => { setSelectedStatusFilter("AI"); showToast("Filtered to AI Generated templates"); } },
           { title: "Automated Sent", value: automatedEmailsSent, status: "Sent", icon: Send, color: "text-sky-600 bg-sky-50 dark:bg-sky-950/30", action: () => { const target = document.getElementById("email-history-logs"); if (target) { target.scrollIntoView({ behavior: "smooth" }); showToast("Scrolled to dispatch logs"); } } },
-          { title: "Recently Used", value: recentlyUsed, status: "Recent", icon: Clock, color: "text-pink-600 bg-pink-50 dark:bg-pink-950/30", action: () => { const found = templates.find(t => t.name === recentlyUsed); if (found) { setSelectedCategory(found.category); selectTemplate(found); showToast(`Selected recently used template: "${found.name}"`); } else { showToast(`Recently used: "${recentlyUsed}"`); } } }
+          { title: "Recently Used", value: recentlyUsed, status: "Recent", icon: Clock, color: "text-pink-600 bg-pink-50 dark:bg-pink-950/30", action: () => { const found = templates.find(t => t.name === recentlyUsed); if (found) { selectTemplate(found); showToast(`Selected recently used template: "${found.name}"`); } else { showToast(`Recently used: "${recentlyUsed}"`); } } }
         ].map((card, idx) => {
           const Icon = card.icon;
           const isSelected = selectedStatusFilter === card.status;
@@ -670,9 +598,9 @@ export default function EmailTemplatesView() {
             <button
               key={`metric-card-${card.status}-${idx}`}
               onClick={card.action}
-              className={`p-4 rounded-xl border text-left transition-all cursor-pointer shadow-xs flex flex-col justify-between h-32 ${
+              className={`p-4 rounded-lg border text-left transition-all cursor-pointer shadow-xs flex flex-col justify-between h-32 ${
                 isSelected 
-                  ? "bg-indigo-600 border-indigo-600 text-white shadow-md scale-[1.01]" 
+                  ? "bg-indigo-600 border-indigo-600 text-white shadow-sm scale-[1.01]" 
                   : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 text-slate-800 dark:text-slate-100 hover:scale-[1.02]"
               }`}
             >
@@ -698,58 +626,51 @@ export default function EmailTemplatesView() {
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
         {/* COLUMN 1: LEFT SIDEBAR PANEL (4/12 columns) */}
         <div className="xl:col-span-3 flex flex-col gap-6">
-          {/* Categories card */}
-          <div className="bg-white border border-slate-200 rounded-xl shadow-xs">
+          {/* Templates list card */}
+          <div className="bg-white border border-slate-200 rounded-lg shadow-xs">
             <div className="p-4.5 border-b border-slate-200">
-              <h2 className="text-sm font-semibold text-slate-950">Template Categories</h2>
-              <p className="text-xs text-slate-500 mt-0.5">Select a group to manage templates</p>
-              
+              <h2 className="text-sm font-semibold text-slate-950">Email Templates</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Select a template to edit, or add a new one</p>
+
               {/* Intelligent Search Input */}
               <div className="relative mt-3">
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                 <input
                   type="text"
-                  placeholder="Search templates in category..."
+                  placeholder="Search templates..."
                   value={searchText}
                   onChange={(e) => setSearchText(e.target.value)}
                   className="w-full pl-9 pr-4 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-indigo-500 text-slate-800 placeholder:text-slate-400"
                 />
               </div>
             </div>
-            
+
             <div className="p-2 max-h-[460px] overflow-y-auto space-y-0.5 scrollbar-thin">
-              {CATEGORIES.map((cat, idx) => {
-                const isSelected = selectedCategory === cat;
-                const count = getCategoryCount(cat);
-                return (
-                  <button
-                    key={`cat-${cat}-${idx}`}
-                    onClick={() => {
-                      setSelectedCategory(cat);
-                      // Select the first template of the new category or empty
-                      const firstTemp = templates.find(t => t.category === cat) || null;
-                      selectTemplate(firstTemp);
-                    }}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
-                      isSelected 
-                        ? "bg-indigo-50 border-l-2 border-indigo-600 text-indigo-700" 
-                        : "text-slate-600 hover:bg-slate-50 border-l-2 border-transparent"
-                    }`}
-                  >
-                    <span className="truncate">{cat}</span>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${
-                      isSelected ? "bg-indigo-200 text-indigo-800" : "bg-slate-100 text-slate-500"
-                    }`}>
-                      {count}
-                    </span>
-                  </button>
-                );
-              })}
+              {filteredTemplates.length === 0 ? (
+                <p className="px-3 py-4 text-xs text-slate-400 italic">No templates found</p>
+              ) : (
+                filteredTemplates.map((t, idx) => {
+                  const isSelected = selectedTemplate?.id === t.id;
+                  return (
+                    <button
+                      key={t.id ? `tmpl-${t.id}-${idx}` : `tmpl-${idx}`}
+                      onClick={() => selectTemplate(t)}
+                      className={`w-full flex items-center px-3 py-2.5 rounded-lg text-xs font-medium text-left transition-all cursor-pointer ${
+                        isSelected
+                          ? "bg-indigo-50 border-l-2 border-indigo-600 text-indigo-700"
+                          : "text-slate-600 hover:bg-slate-50 border-l-2 border-transparent"
+                      }`}
+                    >
+                      <span className="truncate">{t.name}</span>
+                    </button>
+                  );
+                })
+              )}
             </div>
           </div>
 
           {/* AI RECRUITING RECOMMENDATIONS PANEL */}
-          <div className="bg-gradient-to-br from-indigo-950 to-slate-900 border border-slate-800 rounded-xl shadow-md p-4.5 text-white">
+          <div className="bg-white border border-slate-800 rounded-lg shadow-sm p-4.5 text-white">
             <div className="flex items-center gap-2 mb-3">
               <Sparkles className="h-4.5 w-4.5 text-indigo-400" />
               <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-200">AI Recruiter Insights</h3>
@@ -781,7 +702,7 @@ export default function EmailTemplatesView() {
         </div>
 
         {/* COLUMN 2: CENTER PANEL (PROFESSIONAL EDITOR) (5/12 columns) */}
-        <div className="xl:col-span-5 bg-white border border-slate-200 rounded-xl shadow-xs flex flex-col overflow-hidden">
+        <div className="xl:col-span-5 bg-white border border-slate-200 rounded-lg shadow-xs flex flex-col overflow-hidden">
           {/* Editor Header */}
           <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -792,11 +713,6 @@ export default function EmailTemplatesView() {
               {isSystem && (
                 <span className="px-2 py-0.5 bg-slate-200 text-slate-700 text-[10px] font-semibold rounded-md font-mono">
                   System Standard
-                </span>
-              )}
-              {aiGenerated && (
-                <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 text-[10px] font-semibold rounded-md font-mono flex items-center gap-1">
-                  <Sparkles className="h-3 w-3" /> AI
                 </span>
               )}
             </div>
@@ -841,35 +757,10 @@ export default function EmailTemplatesView() {
             </div>
           </div>
 
-          {/* Sub-navigation of available templates in current category */}
-          <div className="px-4 py-2 border-b border-slate-150 bg-slate-50/50 flex items-center gap-2 overflow-x-auto scrollbar-none">
-            <span className="text-[10px] font-bold text-slate-400 uppercase shrink-0">Templates:</span>
-            {filteredTemplates.length === 0 ? (
-              <span className="text-xs text-slate-400 italic">No custom templates in this stage yet</span>
-            ) : (
-              filteredTemplates.map((t, idx) => {
-                const isActive = selectedTemplate?.id === t.id;
-                return (
-                  <button
-                    key={t.id ? `tmpl-${t.id}-${idx}` : `tmpl-${idx}`}
-                    onClick={() => selectTemplate(t)}
-                    className={`px-3 py-1 text-xs font-medium rounded-full border transition-all shrink-0 cursor-pointer ${
-                      isActive 
-                        ? "bg-indigo-600 text-white border-indigo-600 shadow-xs" 
-                        : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
-                    }`}
-                  >
-                    {t.name}
-                  </button>
-                );
-              })
-            )}
-          </div>
-
           {/* Editor Form fields */}
           <div className="p-5 flex-1 space-y-4">
-            {/* Template Name & Category */}
-            <div className="grid grid-cols-2 gap-4">
+            {/* Template Name */}
+            <div>
               <div>
                 <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Template Name</label>
                 <input
@@ -880,19 +771,6 @@ export default function EmailTemplatesView() {
                   className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-indigo-500 bg-white disabled:bg-slate-50 disabled:text-slate-500"
                   placeholder="e.g. Technical Session Invite"
                 />
-              </div>
-              <div>
-                <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Recruitment Stage Category</label>
-                <select
-                  value={templateCategory}
-                  onChange={(e) => setTemplateCategory(e.target.value)}
-                  disabled={isSystem}
-                  className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-indigo-500 bg-white disabled:bg-slate-50 disabled:text-slate-500"
-                >
-                  {CATEGORIES.map((c, idx) => (
-                    <option key={`opt-${c}-${idx}`} value={c}>{c}</option>
-                  ))}
-                </select>
               </div>
             </div>
 
@@ -912,7 +790,7 @@ export default function EmailTemplatesView() {
             <div>
               <div className="flex justify-between items-center mb-1.5">
                 <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">Email Body Content</label>
-                <span className="text-[10px] text-slate-400 font-mono">Accepts double-curly-bracket variables</span>
+                <span className="text-[10px] text-slate-400 font-mono">Variables: {"{{name}}"} &nbsp; Format: **bold** ***bold italic*** [[label|link]]</span>
               </div>
               <textarea
                 ref={editorRef}
@@ -1039,7 +917,7 @@ export default function EmailTemplatesView() {
                     <Languages className="h-3.5 w-3.5" />
                     Translate
                   </button>
-                  <div className="absolute bottom-full right-0 mb-2 w-32 bg-slate-900 border border-slate-800 rounded-lg shadow-xl hidden group-hover:block z-50 text-slate-300">
+                  <div className="absolute bottom-full right-0 mb-2 w-32 bg-slate-900 border border-slate-800 rounded-lg shadow-sm hidden group-hover:block z-50 text-slate-300">
                     <button onClick={() => handleAITransform("translate", "Spanish")} className="w-full text-left px-3 py-1.5 text-[10px] hover:bg-indigo-600 hover:text-white transition-all">Spanish 🇪🇸</button>
                     <button onClick={() => handleAITransform("translate", "French")} className="w-full text-left px-3 py-1.5 text-[10px] hover:bg-indigo-600 hover:text-white transition-all">French 🇫🇷</button>
                     <button onClick={() => handleAITransform("translate", "German")} className="w-full text-left px-3 py-1.5 text-[10px] hover:bg-indigo-600 hover:text-white transition-all">German 🇩🇪</button>
@@ -1074,22 +952,31 @@ export default function EmailTemplatesView() {
             </div>
 
             <div>
-              <span className="text-[10px] font-semibold text-slate-400 uppercase block text-right">Send simulation</span>
+              <span className="text-[10px] font-semibold text-slate-400 uppercase block text-right">
+                {emailConfigured ? "Send to candidate" : "Email not configured"}
+              </span>
               <button
-                disabled={sendingMail}
-                onClick={handleSendSimulatedMail}
+                disabled={sendingMail || !selectedCandidate.email}
+                onClick={handleSendEmail}
                 className="mt-1 flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow-xs disabled:opacity-50 cursor-pointer"
-                title={`Simulate sending of this template to selected Candidate ${selectedCandidate.name}`}
+                title={selectedCandidate.email ? `Send this template to ${selectedCandidate.name} <${selectedCandidate.email}>` : "Select a candidate first"}
               >
                 {sendingMail ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                Send Mock Email
+                Send Email
               </button>
+              {isOfferTemplate && selectedCandidate.id && (
+                <p className={`mt-1 max-w-[230px] text-right text-[10px] ${missingOffer.length === 0 ? "text-slate-500" : "text-rose-600"}`}>
+                  {missingOffer.length === 0
+                    ? `Offer letter PDF for ${selectedCandidate.name} will be generated and attached`
+                    : `Fill in the offer details (${missingOffer.join(", ")}) to attach the offer letter`}
+                </p>
+              )}
             </div>
           </div>
         </div>
 
         {/* COLUMN 3: RIGHT PANEL (PREVIEW & AUTOMATION RULES) (4/12 columns) */}
-        <div className="xl:col-span-4 bg-white border border-slate-200 rounded-xl shadow-xs flex flex-col overflow-hidden">
+        <div className="xl:col-span-4 bg-white border border-slate-200 rounded-lg shadow-xs flex flex-col overflow-hidden">
           {/* Tab Selection */}
           <div className="flex border-b border-slate-200 bg-slate-50">
             <button
@@ -1129,8 +1016,11 @@ export default function EmailTemplatesView() {
                   <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
                     Render Content For Candidate:
                   </label>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {CANDIDATE_PROFILES.map((c, idx) => {
+                  {recipients.length === 0 && (
+                    <p className="text-[11px] text-slate-400 italic">No candidates with an email address yet.</p>
+                  )}
+                  <div className="grid grid-cols-3 gap-1.5 max-h-40 overflow-y-auto">
+                    {recipients.map((c, idx) => {
                       const isSelected = selectedCandidate.id === c.id;
                       return (
                         <button
@@ -1150,8 +1040,86 @@ export default function EmailTemplatesView() {
                   </div>
                 </div>
 
+                {/* Offer letter details: reviewed and edited by HR before the PDF is generated and attached */}
+                {isOfferTemplate && selectedCandidate.id && (
+                  <div className="border border-slate-200 rounded-lg p-3 bg-slate-50/60 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Offer Letter Details</span>
+                      <span className="text-[10px] text-slate-400">Review before sending</span>
+                    </div>
+                    <div className="text-[11px] text-slate-600 space-y-0.5">
+                      <p><span className="text-slate-400">Candidate:</span> <span className="font-semibold text-slate-800">{selectedCandidate.name}</span></p>
+                      <p><span className="text-slate-400">Mobile:</span> {selectedCandidate.phone || <span className="italic text-slate-400">not on the profile (left off the letter)</span>}</p>
+                      <p><span className="text-slate-400">Email:</span> {selectedCandidate.email}</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="col-span-2 text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                        Job Title
+                        <input
+                          type="text"
+                          value={offerForm.jobTitle}
+                          onChange={(e) => setOfferForm(prev => ({ ...prev, jobTitle: e.target.value }))}
+                          className="mt-1 w-full px-2.5 py-1.5 text-xs font-normal normal-case text-slate-800 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+                        />
+                      </label>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                        Annual CTC (LPA)
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={offerForm.annualCtcLpa}
+                          onChange={(e) => setOfferForm(prev => ({ ...prev, annualCtcLpa: e.target.value }))}
+                          className="mt-1 w-full px-2.5 py-1.5 text-xs font-normal normal-case text-slate-800 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+                        />
+                      </label>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                        Reporting Manager <span className="font-normal normal-case text-slate-400">(optional)</span>
+                        <input
+                          type="text"
+                          value={offerForm.reportingManager}
+                          onChange={(e) => setOfferForm(prev => ({ ...prev, reportingManager: e.target.value }))}
+                          className="mt-1 w-full px-2.5 py-1.5 text-xs font-normal normal-case text-slate-800 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+                        />
+                      </label>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                        Joining Date
+                        <input
+                          type="date"
+                          value={offerForm.joiningDate}
+                          onChange={(e) => setOfferForm(prev => ({ ...prev, joiningDate: e.target.value }))}
+                          className="mt-1 w-full px-2.5 py-1.5 text-xs font-normal normal-case text-slate-800 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+                        />
+                      </label>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                        Offer Valid Till
+                        <input
+                          type="date"
+                          value={offerForm.validTill}
+                          onChange={(e) => setOfferForm(prev => ({ ...prev, validTill: e.target.value }))}
+                          className="mt-1 w-full px-2.5 py-1.5 text-xs font-normal normal-case text-slate-800 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+                        />
+                      </label>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className={`text-[10px] ${missingOffer.length === 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                        {missingOffer.length === 0 ? "Ready: the letter is attached when you send" : `Missing: ${missingOffer.join(", ")}`}
+                      </p>
+                      <button
+                        type="button"
+                        disabled={letterPreviewing || missingOffer.length > 0}
+                        onClick={handlePreviewLetter}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-lg text-[11px] font-semibold disabled:opacity-50 cursor-pointer"
+                      >
+                        {letterPreviewing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                        Preview offer letter
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Styled Email Frame */}
-                <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-md">
+                <div className="border border-slate-200 rounded-lg overflow-hidden bg-white shadow-sm">
                   {/* Window Controls bar */}
                   <div className="bg-slate-100 px-4 py-2 flex items-center justify-between border-b border-slate-200 text-slate-400">
                     <div className="flex gap-1.5">
@@ -1173,7 +1141,7 @@ export default function EmailTemplatesView() {
                     </div>
                     <div className="flex">
                       <span className="w-12 text-slate-400 font-medium">From:</span>
-                      <span className="text-slate-800 font-medium truncate">Sophia Patel &lt;recruiting@encureit.com&gt;</span>
+                      <span className="text-slate-800 font-medium truncate">{sender.name} &lt;{sender.email}&gt;</span>
                     </div>
                     <div className="flex">
                       <span className="w-12 text-slate-400 font-medium">Subject:</span>
@@ -1184,8 +1152,11 @@ export default function EmailTemplatesView() {
                   </div>
 
                   {/* Mail Body Render */}
-                  <div className="p-5 min-h-[300px] bg-white text-xs text-slate-800 leading-relaxed font-sans whitespace-pre-wrap">
-                    {renderPreviewContent(body) || (
+                  <div className="p-5 min-h-[300px] bg-white text-xs text-slate-800 leading-relaxed font-sans ">
+                    {body ? (
+                      // Same formatting as the email that is sent: bold / italic, links, the logo. The text is escaped first.
+                      <div dangerouslySetInnerHTML={{ __html: renderEmailMarkup(renderPreviewContent(body), "/encureit_mail_logo.png") }} />
+                    ) : (
                       <span className="text-slate-400 italic font-mono">[No Body Content Provided]</span>
                     )}
                   </div>
@@ -1198,14 +1169,14 @@ export default function EmailTemplatesView() {
                 </div>
 
                 {/* Candidate ATS Score Quick Card */}
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between text-xs text-slate-500">
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 flex items-center justify-between text-xs text-slate-500">
                   <div className="flex items-center gap-2">
                     <div className={`p-2 rounded-lg font-bold ${
                       parseInt(selectedCandidate.atsScore) >= 85 
                         ? "bg-emerald-50 text-emerald-600" 
                         : "bg-indigo-50 text-indigo-600"
                     }`}>
-                      {selectedCandidate.atsScore}%
+                      {selectedCandidate.atsScore ? `${selectedCandidate.atsScore}%` : "—"}
                     </div>
                     <div>
                       <p className="font-semibold text-slate-800">ATS Evaluation Match</p>
@@ -1220,52 +1191,63 @@ export default function EmailTemplatesView() {
               </div>
             )}
 
-            {/* TAB 2: AUTOMATION TRIGGER RULES */}
+            {/* TAB 2: AUTOMATIC EMAILS (each switch is saved on the backend and controls the real sending) */}
             {activeTab === "automation" && (
               <div className="space-y-4">
-                <div className="p-3 bg-indigo-50 text-indigo-800 border border-indigo-100 rounded-xl text-xs leading-relaxed flex items-start gap-2">
+                <div className="p-3 bg-indigo-50 text-indigo-800 border border-indigo-100 rounded-lg text-xs leading-relaxed flex items-start gap-2">
                   <AlertCircle className="h-4.5 w-4.5 text-indigo-600 shrink-0 mt-0.5" />
                   <div>
-                    <span className="font-semibold">Automation Engine Active:</span> When a candidate advances to the trigger stage, the respective active email template will be queued and sent automatically without manual input.
+                    When the event happens, the system sends that email to the candidate on its own. Switch a trigger off to stop it; the change applies immediately.
                   </div>
                 </div>
 
+                {triggersLoading && (
+                  <div className="flex justify-center py-6">
+                    <Loader2 className="h-5 w-5 animate-spin text-indigo-600" />
+                  </div>
+                )}
+
+                {!triggersLoading && triggersError && (
+                  <div className="p-3 bg-rose-50 border border-rose-100 rounded-lg text-xs text-rose-700 flex items-center justify-between gap-3">
+                    <span>{triggersError}</span>
+                    <button onClick={fetchTriggers} className="font-bold underline cursor-pointer shrink-0">Retry</button>
+                  </div>
+                )}
+
                 <div className="space-y-3">
-                  {automationRules.map((rule, idx) => (
-                    <div key={rule.id ? `rule-${rule.id}-${idx}` : `rule-${idx}`} className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex items-center justify-between gap-4">
-                      <div className="space-y-1">
+                  {triggers.map(trigger => (
+                    <div key={trigger.event} className="bg-slate-50 border border-slate-200 p-4 rounded-lg flex items-center justify-between gap-4">
+                      <div className="space-y-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="px-2 py-0.5 bg-slate-200 text-slate-800 text-[9px] font-bold uppercase rounded-md font-mono">Trigger</span>
-                          <span className="text-xs font-semibold text-slate-900">{rule.trigger}</span>
+                          <span className="text-xs font-semibold text-slate-900">{trigger.label}</span>
                         </div>
+                        <p className="text-[11px] text-slate-500">{trigger.when}</p>
                         <div className="text-[11px] text-slate-500 flex items-center gap-1">
-                          <ChevronRight className="h-3 w-3 text-slate-400" />
-                          <span className="truncate max-w-[180px]" title={rule.template}>Sends template: {rule.template}</span>
+                          <ChevronRight className="h-3 w-3 text-slate-400 shrink-0" />
+                          <span className="truncate" title={trigger.templateName || undefined}>
+                            Sends: {trigger.templateName || "built-in default text (no template found)"}
+                          </span>
                         </div>
                       </div>
 
-                      {/* Toggle button */}
+                      {/* Switch */}
                       <button
-                        onClick={() => handleToggleRule(rule.id)}
-                        className={`w-12 h-6.5 rounded-full transition-all relative shrink-0 cursor-pointer ${
-                          rule.active ? "bg-indigo-600" : "bg-slate-300"
+                        onClick={() => handleToggleTrigger(trigger)}
+                        disabled={triggerSaving !== null}
+                        role="switch"
+                        aria-checked={trigger.enabled}
+                        title={trigger.enabled ? "On: click to switch off" : "Off: click to switch on"}
+                        className={`w-12 h-6.5 rounded-full transition-all relative shrink-0 cursor-pointer disabled:opacity-60 disabled:cursor-wait ${
+                          trigger.enabled ? "bg-indigo-600" : "bg-slate-300"
                         }`}
                       >
                         <span className={`w-5.5 h-5.5 rounded-full bg-white absolute top-0.5 shadow-xs transition-all ${
-                          rule.active ? "right-0.5" : "left-0.5"
+                          trigger.enabled ? "right-0.5" : "left-0.5"
                         }`}></span>
                       </button>
                     </div>
                   ))}
-                </div>
-
-                {/* Custom automation logic builder teaser */}
-                <div className="p-4 border-2 border-dashed border-slate-200 rounded-xl text-center">
-                  <p className="text-xs font-bold text-slate-700">Add Custom Automation Workflow</p>
-                  <p className="text-[10px] text-slate-400 mt-1">Configure multi-stage triggers or conditional routing parameters.</p>
-                  <button className="mt-3.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded-lg border border-slate-200 transition-all cursor-pointer">
-                    Setup New Trigger Rule
-                  </button>
                 </div>
               </div>
             )}
@@ -1275,7 +1257,7 @@ export default function EmailTemplatesView() {
 
       {/* BOTTOM SECTION: EMAIL HISTORY & ANALYTICS TABLE */}
       <div className="px-6 mt-8" id="email-history-logs">
-        <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+        <div className="bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden">
           <div className="p-5 border-b border-slate-200 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
               <h2 className="text-sm font-semibold text-slate-950 flex items-center gap-1.5">
@@ -1343,7 +1325,7 @@ export default function EmailTemplatesView() {
                 {emailLogs.length === 0 && !loading && (
                   <tr>
                     <td colSpan={6} className="p-8 text-center text-slate-400 italic">
-                      No emails have been simulated or logged yet. Use "Send Mock Email" above to dispatch your first email!
+                      No emails have been sent or logged yet. Use "Send Email" above to send your first email.
                     </td>
                   </tr>
                 )}
@@ -1361,103 +1343,27 @@ export default function EmailTemplatesView() {
         </div>
       </div>
 
-      {/* FULL-STAGE AI GENERATE MODAL */}
-      <AnimatePresence>
-        {showAiModal && (
-          <div className="fixed inset-0 bg-slate-950/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white border border-slate-200 rounded-xl w-full max-w-lg shadow-2xl overflow-hidden text-slate-800"
-            >
-              <div className="p-4.5 bg-gradient-to-r from-indigo-950 to-slate-900 text-white flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="h-5 w-5 text-indigo-400 animate-pulse" />
-                  <h3 className="font-semibold text-sm">Gemini AI Email Architect</h3>
-                </div>
-                <button
-                  onClick={() => setShowAiModal(false)}
-                  className="p-1 text-slate-300 hover:text-white rounded-lg hover:bg-white/10"
-                >
-                  <X className="h-4.5 w-4.5" />
-                </button>
+      {/* Offer letter PDF preview: what will be attached to the email */}
+      {letterPreviewUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" onClick={closeLetterPreview}>
+          <div
+            className="bg-white rounded-lg shadow-xl w-full max-w-3xl h-[90vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200">
+              <div>
+                <p className="text-sm font-bold text-slate-800">Offer letter for {selectedCandidate.name}</p>
+                <p className="text-[11px] text-slate-500">This PDF is attached to the email when you send it.</p>
               </div>
-
-              <form onSubmit={handleAIGenerateFull} className="p-5 space-y-4">
-                <div className="p-3 bg-indigo-50 text-indigo-800 rounded-xl text-xs leading-relaxed flex gap-2">
-                  <Sparkles className="h-4 w-4 text-indigo-600 shrink-0 mt-0.5" />
-                  <div>
-                    This will automatically draft a brilliant, highly tailored recruitment template for the active stage category (<strong>{selectedCategory}</strong>) based on the candidate's custom skills, background, score, and your customized instructions.
-                  </div>
-                </div>
-
-                {/* Candidate context recap */}
-                <div>
-                  <span className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Selected Persona Context</span>
-                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs flex justify-between items-center">
-                    <div>
-                      <p className="font-bold text-slate-900">{selectedCandidate.name}</p>
-                      <p className="text-slate-500 text-[10px] mt-0.5">{selectedCandidate.jobTitle} • {selectedCandidate.department}</p>
-                    </div>
-                    <div className="text-right">
-                      <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 text-[10px] font-bold rounded-md font-mono">
-                        ATS {selectedCandidate.atsScore}%
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Special prompts input */}
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Custom Instructions / Prompt (Optional)</label>
-                  <textarea
-                    rows={4}
-                    value={aiPrompt}
-                    onChange={(e) => setAiPrompt(e.target.value)}
-                    className="w-full p-3 text-xs border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-indigo-500 font-sans text-slate-800"
-                    placeholder="e.g. Highlight our hybrid flexibility and specify they need to review the technical brief attached. Keep the tone extremely exciting."
-                  />
-                </div>
-
-                {aiError && (
-                  <div className="text-red-600 text-xs font-medium flex items-center gap-1.5">
-                    <AlertCircle className="h-4 w-4" />
-                    <span>{aiError}</span>
-                  </div>
-                )}
-
-                <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
-                  <button
-                    type="button"
-                    onClick={() => setShowAiModal(false)}
-                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={generating}
-                    className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-xs disabled:opacity-50 cursor-pointer"
-                  >
-                    {generating ? (
-                      <>
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        Generating Draft...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="h-3.5 w-3.5" />
-                        Generate Template
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
-            </motion.div>
+              <button onClick={closeLetterPreview} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer" aria-label="Close preview">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <iframe title="Offer letter preview" src={letterPreviewUrl} className="flex-1 w-full" />
           </div>
-        )}
-      </AnimatePresence>
+        </div>
+      )}
+
     </div>
   );
 }

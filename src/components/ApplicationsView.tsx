@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { ApplicationRepository, ApplicationRecord } from "../repositories/applicationRepository";
 import { CandidateRepository, JobRepository } from "../repositories/index";
+import { SearchableSelect } from "./common/SearchableSelect";
 
 interface ApplicationDisplayItem {
   id: string;
@@ -91,7 +92,7 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
 
           return {
             id: rec.applicationId,
-            jobId: rec.jobId || (job ? job.id : "JOB-0001"),
+            jobId: rec.jobId || (job ? job.id : ""),
             candidateName: cand ? (cand.name || `${cand.firstName || ""} ${cand.lastName || ""}`.trim() || "Candidate") : "Candidate",
             candidateEmail: cand ? (cand.email || "candidate@example.com") : "candidate@example.com",
             candidateAvatar: cand ? (cand.profileImage || cand.avatar || "") : "",
@@ -148,17 +149,17 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
   return (
     <div className="w-full px-4 sm:px-6 lg:px-8 pt-7 sm:pt-8 pb-8 space-y-5 sm:space-y-6">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-200">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold font-display text-slate-900 dark:text-white tracking-tight">Applications</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Track every job application submitted into the recruitment pipeline.</p>
+          <h1 className="text-xl font-semibold text-slate-900 tracking-tight">Applications</h1>
+          <p className="text-sm text-slate-500 mt-1">Track every job application submitted into the recruitment pipeline.</p>
         </div>
         <div className="flex items-center gap-3">
-          <button className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors shadow-sm">
+          <button className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors shadow-sm">
             <Download className="w-4 h-4 text-slate-400" />
             <span>Export CSV</span>
           </button>
-          <button className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-sm font-semibold text-white shadow-sm shadow-indigo-600/30 transition-colors">
+          <button className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-sm font-semibold text-white shadow-sm shadow-indigo-600/30 transition-colors">
             <FileText className="w-4 h-4" />
             <span>New Application</span>
           </button>
@@ -171,7 +172,7 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
           { label: "Total Applications", count: "1,284", icon: FileText, color: "text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50" },
           { label: "New Applications", count: "142", icon: Clock, color: "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/50" },
           { label: "Pending Screening", count: "88", icon: Filter, color: "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50" },
-          { label: "AI Shortlisted", count: "320", icon: Sparkles, color: "text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-950/50" },
+          { label: "AI Shortlisted", count: "320", icon: Sparkles, color: "text-[#1F3B75] dark:text-brand-400 bg-brand-50 dark:bg-brand-950/50" },
           { label: "Interviewing", count: "156", icon: Calendar, color: "text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-950/50" },
           { label: "Offered", count: "45", icon: Award, color: "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50" },
           { label: "Rejected", count: "412", icon: XCircle, color: "text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50" },
@@ -179,7 +180,7 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
         ].map((kpi, idx) => {
           const IconComp = kpi.icon;
           return (
-            <div key={`app-kpi-${kpi.label}-${idx}`} className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+            <div key={`app-kpi-${kpi.label}-${idx}`} className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 rounded-lg p-4 shadow-sm flex flex-col justify-between">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">{kpi.label}</span>
                 <div className={`p-1.5 rounded-lg ${kpi.color}`}>
@@ -193,7 +194,7 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
       </div>
 
       {/* Search & Filter Section */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-5 shadow-sm space-y-4">
         {/* Search Bar */}
         <div className="relative">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -202,7 +203,7 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
             placeholder="Search applications by candidate name, ID, or job title..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+            className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
           />
         </div>
 
@@ -211,7 +212,7 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
           {/* Job Filter */}
           <div>
             <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Job</label>
-            <select 
+            <SearchableSelect 
               value={selectedJobFilter}
               onChange={(e) => setSelectedJobFilter(e.target.value)}
               className="w-full px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
@@ -223,13 +224,13 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
               <option value="DevOps Architect">DevOps Architect</option>
               <option value="Product Marketing Manager">Product Marketing Manager</option>
               <option value="Data Scientist">Data Scientist</option>
-            </select>
+            </SearchableSelect>
           </div>
 
           {/* Department Filter */}
           <div>
             <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Department</label>
-            <select 
+            <SearchableSelect 
               value={selectedDeptFilter}
               onChange={(e) => setSelectedDeptFilter(e.target.value)}
               className="w-full px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
@@ -239,13 +240,13 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
               <option value="Design">Design</option>
               <option value="Product">Product</option>
               <option value="DevOps">DevOps</option>
-            </select>
+            </SearchableSelect>
           </div>
 
           {/* Recruiter Filter */}
           <div>
             <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Recruiter</label>
-            <select 
+            <SearchableSelect 
               value={selectedRecruiterFilter}
               onChange={(e) => setSelectedRecruiterFilter(e.target.value)}
               className="w-full px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
@@ -254,13 +255,13 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
               <option value="Sarah Jenkins">Sarah Jenkins</option>
               <option value="Alex Morgan">Alex Morgan</option>
               <option value="David Kim">David Kim</option>
-            </select>
+            </SearchableSelect>
           </div>
 
           {/* Status Filter */}
           <div>
             <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Status</label>
-            <select 
+            <SearchableSelect 
               value={selectedStatusFilter}
               onChange={(e) => setSelectedStatusFilter(e.target.value)}
               className="w-full px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
@@ -273,13 +274,13 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
               <option value="Offered">Offered</option>
               <option value="Hired">Hired</option>
               <option value="Rejected">Rejected</option>
-            </select>
+            </SearchableSelect>
           </div>
 
           {/* Source Filter */}
           <div>
             <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Source</label>
-            <select 
+            <SearchableSelect 
               value={selectedSourceFilter}
               onChange={(e) => setSelectedSourceFilter(e.target.value)}
               className="w-full px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
@@ -289,7 +290,7 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
               <option value="Careers Page">Careers Page</option>
               <option value="Indeed">Indeed</option>
               <option value="Referral">Referral</option>
-            </select>
+            </SearchableSelect>
           </div>
 
           {/* Date Filter */}
@@ -310,7 +311,7 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
       </div>
 
       {/* Application Table */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
@@ -393,7 +394,7 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
                     </td>
                     <td className="py-3.5 px-4 text-slate-600 dark:text-slate-300">
                       {app.interviewStatus === "Scheduled" ? (
-                        <span className="inline-flex items-center gap-1 text-brand-600 dark:text-brand-400 font-medium">
+                        <span className="inline-flex items-center gap-1 text-[#1F3B75] dark:text-brand-400 font-medium">
                           <Calendar className="w-3.5 h-3.5" /> Scheduled
                         </span>
                       ) : app.interviewStatus === "Completed" ? (
@@ -446,7 +447,7 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
       {/* Application Detail Modal (Placeholder) */}
       {selectedApplication && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-6">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg max-w-lg w-full p-6 shadow-sm space-y-6">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
               <div className="flex items-center gap-3">
                 <img src={selectedApplication.candidateAvatar} alt="" className="w-12 h-12 rounded-full object-cover ring-2 ring-indigo-500/20" />
@@ -464,7 +465,7 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
             </div>
 
             <div className="space-y-4 text-sm">
-              <div className="grid grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl">
+              <div className="grid grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-lg">
                 <div>
                   <span className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Applied Position</span>
                   <span className="font-semibold text-slate-800 dark:text-slate-200 block">{selectedApplication.appliedJob}</span>
@@ -501,7 +502,7 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
             <div className="flex justify-end gap-3 pt-2">
               <button 
                 onClick={() => setSelectedApplication(null)}
-                className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                className="px-4 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
               >
                 Close
               </button>
@@ -510,7 +511,7 @@ export default function ApplicationsView({ initialJobId = "all", clearInitialJob
                   alert(`Placeholder action: managing application ${selectedApplication.id}`);
                   setSelectedApplication(null);
                 }}
-                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-sm font-semibold text-white shadow-sm transition-colors"
+                className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-sm font-semibold text-white shadow-sm transition-colors"
               >
                 View Full Profile
               </button>

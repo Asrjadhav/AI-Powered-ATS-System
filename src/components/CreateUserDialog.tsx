@@ -16,7 +16,7 @@ export default function CreateUserDialog({ onClose }: Props) {
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 w-[500px] text-white">
+      <div className="bg-slate-900 border border-slate-800 rounded-lg p-6 w-[500px] text-white">
         <div className="flex justify-between items-center mb-4">
           <h3 className="font-bold">
             {view === "form" ? "Add User" : "Welcome Email Preview"}

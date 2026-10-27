@@ -3,15 +3,11 @@ import uuid
 import sys
 import os
 import json
-import hashlib
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from database import SessionLocal
 from models.user import UserModel
-
-def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 def seed_users():
     db = SessionLocal()
@@ -35,15 +31,17 @@ def seed_users():
 
             existing = db.query(UserModel).filter(UserModel.email.ilike(email)).first()
             if not existing:
-                pwd_hash = u_data.get("passwordHash")
-                if not pwd_hash:
-                    pwd_hash = hash_password("password123")
-
+                # passwordHash/passwordSalt are deliberately left unset. Any
+                # passwordHash committed to users_db.json predates salted
+                # hashing (routers/auth.py) and can't be verified without a
+                # matching salt this seed doesn't have. Leaving both unset
+                # means /api/auth/login treats this account as awaiting its
+                # first password, same as migration 006 does for existing
+                # rows — the next login sets a correctly salted hash.
                 user = UserModel(
                     id=f"usr-{uuid.uuid4().hex[:8]}",
                     email=email,
                     fullName=u_data.get("name", "Recruiter Admin"),
-                    passwordHash=pwd_hash,
                     role=u_data.get("role", "Lead Recruiting Admin"),
                     department="Talent Acquisition",
                     phone=u_data.get("phone", "+91 98765 43210"),
@@ -56,10 +54,9 @@ def seed_users():
                 )
                 db.add(user)
                 added_count += 1
-            else:
-                # Ensure passwordHash is set on legacy rows
-                if not existing.passwordHash and u_data.get("passwordHash"):
-                    existing.passwordHash = u_data.get("passwordHash")
+            # Note: no longer backfilling passwordHash on existing rows here.
+            # An unsalted hash pulled from users_db.json would silently
+            # recreate the exact vulnerability migration 006 removed.
 
         db.commit()
         print(f"[SUCCESS] Seeded {added_count} recruiter account(s) into PostgreSQL 'users' table!")

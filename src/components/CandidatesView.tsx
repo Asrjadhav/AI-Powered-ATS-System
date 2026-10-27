@@ -6,17 +6,15 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import axios from "axios";
 import { useTranslation } from "../utils/i18n";
-import { simulateResumeExtraction } from "../utils/resumeParser";
-import { formatJobId, cleanJobTitle } from "../repositories/repositoryUtils";
-import { 
+import { parseResume } from "../utils/resumeParser";
+import { formatJobId, cleanJobTitle, formatIndianMobile } from "../repositories/repositoryUtils";
+import {
   isNewCandidate,
-  isPendingEvaluation, 
-  isAIShortlisted, 
-  isInterviewStage, 
-  isOfferedStage, 
-  isHiredStage, 
-  isRejectedStage, 
-  isTodayCandidate,
+  isShortlisted,
+  isInterviewStage,
+  isOfferedStage,
+  isHiredStage,
+  isRejectedStage,
   filterCandidatesByStage,
   normalizeCandidateStatus
 } from "../utils/pipelineUtils";
@@ -72,10 +70,14 @@ import {
   Hash
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { Application, ApplicationStatus, Candidate, Job, AIEvaluation } from "../types";
+import { Application, ApplicationStatus, Candidate, Job, AIEvaluation, DirectoryPerson } from "../types";
 import { LocalStorageService } from "../services/localStorageService";
-import { CandidateRepository, ApplicationRepository, JobRepository, InterviewRepository, TalentPoolRepository } from "../repositories";
-import { CandidateWorkflowService } from "../services/workflowService";
+import { CandidateRepository, ApplicationRepository, JobRepository, InterviewRepository, TalentPoolRepository, OfferRepository, EmailRepository } from "../repositories";
+import { lpaToRupees, missingOfferFields } from "../lib/offerLetter";
+import { WorkModeSelect } from "./common/WorkModeSelect";
+import { workModeOptionsForJob } from "../lib/workMode";
+import { SearchableSelect } from "./common/SearchableSelect";
+import { PeopleMultiSelect, useDirectoryPeople } from "./common/PeopleMultiSelect";
 
 const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || (import.meta as any).env?.VITE_API_URL || "https://ats-fastapi-backend.onrender.com";
 const apiConfig = {
@@ -85,7 +87,8 @@ const apiConfig = {
   },
 };
 
-export const formatTotalExperience = (totalMonths?: number | null, totalExpStr?: string | null, expYears?: number | null): string => {
+// A candidate's total experience in months, the same way the "Total Exp" column works it out.
+export const experienceInMonths = (totalMonths?: number | null, totalExpStr?: string | null, expYears?: number | null): number => {
   let m = 0;
   if (typeof totalMonths === "number" && totalMonths >= 0) {
     m = totalMonths;
@@ -93,7 +96,7 @@ export const formatTotalExperience = (totalMonths?: number | null, totalExpStr?:
     m = Math.round(expYears * 12);
   } else if (totalExpStr && totalExpStr.trim()) {
     const s = totalExpStr.toLowerCase().trim();
-    if (s.includes("fresher")) return "0 years 0 months";
+    if (s.includes("fresher")) return 0;
     const ymMatch = s.match(/(\d+)\s*(?:years?|yrs?)\s*(\d+)?\s*(?:months?|mos?)?/);
     if (ymMatch) {
       const yrs = parseInt(ymMatch[1], 10);
@@ -105,6 +108,11 @@ export const formatTotalExperience = (totalMonths?: number | null, totalExpStr?:
     }
   }
 
+  return m;
+};
+
+export const formatTotalExperience = (totalMonths?: number | null, totalExpStr?: string | null, expYears?: number | null): string => {
+  const m = experienceInMonths(totalMonths, totalExpStr, expYears);
   const years = Math.floor(m / 12);
   const months = m % 12;
   const yStr = `${years} ${years === 1 ? "year" : "years"}`;
@@ -124,6 +132,9 @@ interface CandidatesViewProps {
   initialSortBy?: "date" | "score";
   clearInitialSortBy?: () => void;
 }
+
+// A position as the "Job Position / Role" filter compares it: titles that differ only in case or spacing are the same position.
+const normalizePosition = (title?: string) => (title || "").replace(/\s+/g, " ").trim().toLowerCase();
 
 const getInitials = (firstName?: string, lastName?: string, name?: string) => {
   if (firstName || lastName) {
@@ -207,6 +218,7 @@ export default function CandidatesView({
     setAddExpectedCTC(cand?.expectedCTC || cand?.customFields?.expectedCTC || 0);
     setAddHRApprovalStatus(cand?.hrApprovalStatus || "pending");
     setAddHRNotes(cand?.hrNotes || cand?.evaluationNotes || "");
+    setAddWorkMode(cand?.preferredWorkMode || "");
     setSkillsText(Array.isArray(cand?.skills) ? cand.skills.join(", ") : (cand?.skills || ""));
     setAddExperienceLevel((cand?.experienceYears && cand.experienceYears > 0) || cand?.currentCompany ? "Experienced" : "Fresher");
     setShowEditModal(true);
@@ -231,9 +243,10 @@ export default function CandidatesView({
         expectedCTC: Number(addExpectedCTC) || 0,
         hrApprovalStatus: addHRApprovalStatus,
         hrNotes: addHRNotes,
+        preferredWorkMode: addWorkMode,
         skills: skillsText ? skillsText.split(",").map((s: string) => s.trim()).filter(Boolean) : (editingCandidate.skills || [])
       };
-      await axios.patch(`/api/candidates/${editingCandidate.id}`, payload);
+      await CandidateRepository.update(editingCandidate.id, payload);
       await fetchApplications();
       window.dispatchEvent(new Event("trigger-notification-sync"));
       setShowEditModal(false);
@@ -282,9 +295,11 @@ export default function CandidatesView({
     }
   }, [initialFilterToday, clearInitialFilterToday]);
 
+  // A job opening picked on the Jobs page ("N applied") arrives as a job id; the filter works on positions.
+  const [pendingJobFilterId, setPendingJobFilterId] = useState("");
   useEffect(() => {
     if (initialFilterJobId && initialFilterJobId !== "all") {
-      setFilterJobId(initialFilterJobId);
+      setPendingJobFilterId(initialFilterJobId);
       if (clearInitialFilterJobId) {
         clearInitialFilterJobId();
       }
@@ -302,7 +317,9 @@ export default function CandidatesView({
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState("");
-  const [filterJobId, setFilterJobId] = useState("all");
+  // "Job Position / Role" filter: "all" or the title of a position. The options come from the backend.
+  const [filterPosition, setFilterPosition] = useState("all");
+  const [positions, setPositions] = useState<{ title: string; jobIds: string[] }[]>([]);
   const [viewingResumeApp, setViewingResumeApp] = useState<any | null>(null);
   const [parsedResumeText, setParsedResumeText] = useState<string | null>(null);
   const [resumeTextLoading, setResumeTextLoading] = useState<boolean>(false);
@@ -381,13 +398,14 @@ export default function CandidatesView({
   const [addHRNotes, setAddHRNotes] = useState<string>("");
   const [addHRApprovalStatus, setAddHRApprovalStatus] = useState<string>("pending");
   const [addExperienceLevel, setAddExperienceLevel] = useState<string>("Experienced"); // "Experienced" or "Fresher"
+  // The candidate's preferred Work Mode (Work from Office / Hybrid / Work from Home). The job's own work mode is separate.
+  const [addWorkMode, setAddWorkMode] = useState<string>("");
   const [addHighestDegree, setAddHighestDegree] = useState<string>("");
   const [addSpecialization, setAddSpecialization] = useState<string>("");
   const [addYearOfPassing, setAddYearOfPassing] = useState<string>("");
   const [addLinkedinLink, setAddLinkedinLink] = useState<string>("");
   const [addGithubLink, setAddGithubLink] = useState<string>("");
   const [manualCvFile, setManualCvFile] = useState<File | null>(null);
-  const [manualCvBase64, setManualCvBase64] = useState<string>("");
 
   // Sorting & Top N High Match filter state
   const [sortBy, setSortBy] = useState<"date" | "score">("date");
@@ -421,7 +439,11 @@ export default function CandidatesView({
 
   // Form states for scheduler
   const [schedulerRound, setSchedulerRound] = useState("Technical Interview");
-  const [schedulerInterviewer, setSchedulerInterviewer] = useState("");
+  // Interviewers are the CC recipients of the invitation and are required (at least one person); BCC is optional.
+  // Both rules are enforced again by the backend.
+  const [schedulerInterviewers, setSchedulerInterviewers] = useState<DirectoryPerson[]>([]);
+  const [schedulerBcc, setSchedulerBcc] = useState<DirectoryPerson[]>([]);
+  const directory = useDirectoryPeople();
   const [schedulerDate, setSchedulerDate] = useState("");
   const [schedulerTime, setSchedulerTime] = useState("10:00");
   const [schedulerType, setSchedulerType] = useState("Online");
@@ -430,7 +452,8 @@ export default function CandidatesView({
   const [schedulerNotes, setSchedulerNotes] = useState("");
 
   // Form states for offer
-  const [offerSalary, setOfferSalary] = useState("12");
+  // Offer details start empty: HR enters the CTC, the joining date and the valid-till date; nothing is assumed.
+  const [offerSalary, setOfferSalary] = useState("");
   const [offerNoticePeriod, setOfferNoticePeriod] = useState("Immediate");
   const [offerJoiningDate, setOfferJoiningDate] = useState("");
   const [offerExpiryDate, setOfferExpiryDate] = useState("");
@@ -445,20 +468,20 @@ export default function CandidatesView({
   // Prefill hook
   useEffect(() => {
     if (dragTargetApp) {
-      setSchedulerInterviewer(dragTargetApp.job?.hiringManager || dragTargetApp.job?.recruiter || "Hiring Manager");
+      // Pre-select the job's hiring manager only when they are in the people directory; BCC starts empty.
+      const suggestedName = String(dragTargetApp.job?.hiringManager || dragTargetApp.job?.recruiter || "Hiring Manager").trim().toLowerCase();
+      const suggested = directory.people.find((p) => p.name.trim().toLowerCase() === suggestedName);
+      setSchedulerInterviewers(suggested ? [suggested] : []);
+      setSchedulerBcc([]);
       setSchedulerNotes(`Technical evaluation for candidate: ${dragTargetApp.candidate?.firstName} ${dragTargetApp.candidate?.lastName} applying for ${dragTargetApp.job?.title || "Role"}`);
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
       setSchedulerDate(tomorrow.toISOString().split("T")[0]);
 
-      setOfferSalary(String(dragTargetApp.candidate?.expectedCTC || "12"));
-      const joinedDate = new Date();
-      joinedDate.setDate(joinedDate.getDate() + 30);
-      setOfferJoiningDate(joinedDate.toISOString().split("T")[0]);
-      const expDate = new Date();
-      expDate.setDate(expDate.getDate() + 7);
-      setOfferExpiryDate(expDate.toISOString().split("T")[0]);
-      setOfferManager(dragTargetApp.job?.hiringManager || "Hiring Manager");
+      setOfferSalary("");
+      setOfferJoiningDate("");
+      setOfferExpiryDate("");
+      setOfferManager(dragTargetApp.job?.hiringManager || "");
 
       setRejectNotes(`Candidate ${dragTargetApp.candidate?.firstName} ${dragTargetApp.candidate?.lastName} does not match current required skills threshold for ${dragTargetApp.job?.title || "Role"}. Moving application to Rejected and archived.`);
     }
@@ -515,86 +538,11 @@ export default function CandidatesView({
     }
   };
 
-  const handleImportClick = () => {
-    const input = document.getElementById("import-file-input");
-    if (input) {
-      (input as HTMLInputElement).click();
-    }
-  };
-
-  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const text = event.target?.result as string;
-        let importedCount = 0;
-
-        if (file.name.endsWith(".json")) {
-          const data = JSON.parse(text);
-          const list = Array.isArray(data) ? data : [data];
-          for (const [i, item] of list.entries()) {
-            await CandidateRepository.createApplication({
-              firstName: item.firstName || "Imported",
-              lastName: item.lastName || `Candidate ${i+1}`,
-              email: item.email || `imported.user${i}@example.com`,
-              phone: item.phone || "+91 99999 88888",
-              currentRole: item.currentRole || "Software Engineer",
-              currentCompany: item.currentCompany || "Previous Enterprise Tech",
-              skills: item.skills || ["React", "Node.js", "TypeScript"],
-              resumeText: item.resumeText || "Imported resume content.",
-              location: item.location || "Bangalore, India",
-              source: item.source || "LinkedIn",
-              experienceYears: item.experienceYears || 4,
-              expectedCTC: item.expectedCTC || 18,
-              jobId: item.jobId || "JOB-0001",
-              status: item.status || "NEW"
-            });
-            importedCount++;
-          }
-        } else {
-          const lines = text.split("\n").filter(l => l.trim().length > 0);
-          if (lines.length > 1) {
-            for (let i = 1; i < Math.min(lines.length, 10); i++) {
-              const parts = lines[i].split(",").map(p => p.replace(/^"|"$/g, '').trim());
-              if (parts.length >= 3) {
-                await CandidateRepository.createApplication({
-                  firstName: parts[0] || "CSV",
-                  lastName: parts[1] || `Candidate ${i}`,
-                  email: parts[2] || `csv.candidate${i}@example.com`,
-                  phone: parts[3] || "+91 90000 12345",
-                  currentRole: parts[4] || "Software Developer",
-                  currentCompany: parts[5] || "Tech Corp",
-                  skills: parts[6] ? parts[6].split(",") : ["JavaScript", "HTML", "CSS"],
-                  resumeText: "CSV imported candidate.",
-                  location: "Remote",
-                  source: "CSV Import",
-                  experienceYears: 3,
-                  expectedCTC: 12,
-                  jobId: "JOB-0001",
-                  status: "NEW"
-                });
-                importedCount++;
-              }
-            }
-          }
-        }
-
-        if (importedCount > 0) {
-          await fetchApplications();
-          triggerToast(`🎉 Successfully imported ${importedCount} candidate(s) from ${file.name}!`);
-        } else {
-          triggerToast("⚠️ No valid candidate rows were found in the uploaded file.");
-        }
-      } catch (err) {
-        console.error(err);
-        triggerToast("❌ Error parsing the candidate file.");
-      }
-    };
-    reader.readAsText(file);
-  };
+  // Bulk CSV/JSON candidate import (handleImportClick/handleImportFile,
+  // plus the hidden #import-file-input below) was removed here: the backend
+  // endpoint it called, POST /api/candidates/import, was intentionally
+  // deleted (bulk upload is not a supported feature). handleImportClick had
+  // no callers already, so this UI was unreachable before this cleanup too.
 
   // States and Effects for HR Drafts Auto-Save
   const [draftExists, setDraftExists] = useState(false);
@@ -622,7 +570,7 @@ export default function CandidatesView({
     const autoSaveTimer = setInterval(() => {
       const draftData = {
         firstName, lastName, email, phone, currentRole, currentCompany,
-        skillsText, experienceYears, resumeText, candidateLocation, selectedJobId, source
+        skillsText, experienceYears, resumeText, candidateLocation, selectedJobId, source, addWorkMode
       };
       if (firstName || lastName || email || currentRole || resumeText) {
         localStorage.setItem("add_candidate_draft", JSON.stringify(draftData));
@@ -631,7 +579,15 @@ export default function CandidatesView({
     }, intervalMs);
 
     return () => clearInterval(autoSaveTimer);
-  }, [showAddModal, firstName, lastName, email, phone, currentRole, currentCompany, skillsText, experienceYears, resumeText, candidateLocation, selectedJobId, source]);
+  }, [showAddModal, firstName, lastName, email, phone, currentRole, currentCompany, skillsText, experienceYears, resumeText, candidateLocation, selectedJobId, source, addWorkMode]);
+
+  // The Work Mode choices follow the job the candidate is added to; a choice the job does not offer is cleared.
+  const selectedJobWorkMode = (Array.isArray(jobs) ? jobs.find((j: any) => (j.jobId || j.id) === selectedJobId || j.id === selectedJobId) : undefined)?.workMode || "";
+  useEffect(() => {
+    if (addWorkMode && !workModeOptionsForJob(selectedJobWorkMode).includes(addWorkMode)) {
+      setAddWorkMode("");
+    }
+  }, [selectedJobWorkMode, addWorkMode]);
 
   const handleRestoreDraft = () => {
     const saved = localStorage.getItem("add_candidate_draft");
@@ -650,6 +606,7 @@ export default function CandidatesView({
         setCandidateLocation(data.candidateLocation || "Pune, India");
         setSelectedJobId(data.selectedJobId || "");
         setSource(data.source || "LinkedIn");
+        setAddWorkMode(data.addWorkMode || "");
         setUploadOption("manual");
         setDraftExists(false);
         triggerToast("✅ Previous candidate profile draft recovered!");
@@ -852,6 +809,28 @@ export default function CandidatesView({
     });
   };
 
+  // The positions that exist in the jobs table, loaded when the page opens and whenever jobs change.
+  useEffect(() => {
+    const loadPositions = async () => {
+      try {
+        setPositions(await JobRepository.getPositions());
+      } catch (e) {
+        console.error("Error loading job positions", e);
+      }
+    };
+    loadPositions();
+    window.addEventListener("jobs-updated", loadPositions);
+    return () => window.removeEventListener("jobs-updated", loadPositions);
+  }, []);
+
+  // Turn a pending job id (from the Jobs page) into its position once the jobs are loaded.
+  useEffect(() => {
+    if (!pendingJobFilterId || jobs.length === 0) return;
+    const job = jobs.find((j: any) => j.id === pendingJobFilterId || j.jobId === pendingJobFilterId);
+    if (job?.title) setFilterPosition(normalizePosition(job.title));
+    setPendingJobFilterId("");
+  }, [pendingJobFilterId, jobs]);
+
   useEffect(() => {
     fetchApplications();
     window.addEventListener("trigger-notification-sync", fetchApplications);
@@ -905,8 +884,8 @@ export default function CandidatesView({
       }, 500);
 
       if (newStatus === ApplicationStatus.INTERVIEWING) {
-        const intRes = await axios.get("/api/interviews").catch(() => ({ data: [] }));
-        setInterviews(intRes.data || []);
+        const intList = await InterviewRepository.getAll().catch(() => []);
+        setInterviews(intList || []);
       }
 
       if (newStatus === ApplicationStatus.REJECTED || String(newStatus).toLowerCase() === "rejected") {
@@ -1016,7 +995,9 @@ export default function CandidatesView({
         jobId: dragTargetApp.jobId || dragTargetApp.job?.id || "JOB-0001",
         jobTitle: dragTargetApp.job?.title || dragTargetApp.appliedRole || "Position",
         round: schedulerRound,
-        interviewer: schedulerInterviewer,
+        interviewer: schedulerInterviewers.map((p) => p.name).join(", "),
+        interviewers: schedulerInterviewers,
+        bcc: schedulerBcc,
         date: schedulerDate,
         time: schedulerTime,
         type: schedulerType,
@@ -1034,31 +1015,86 @@ export default function CandidatesView({
         setDragTargetApp(null);
       }, 2200);
       triggerToast(`✓ Candidate moved to Interview Stage.`);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to schedule interview:", err);
-      triggerToast("❌ Failed to schedule interview.");
+      // err.message carries the backend's reason, e.g. "Google Meet generation failed, mail not sent."
+      triggerToast(`❌ ${err?.message || "Failed to schedule interview."}`);
     } finally {
       setStatusUpdating(false);
     }
   };
 
+  // The offer letter is generated from these. The job title is the application's real role.
+  const offerJobTitle: string = dragTargetApp ? (dragTargetApp.job?.title || dragTargetApp.appliedRole || "") : "";
+  const offerMissing = missingOfferFields({
+    jobTitle: offerJobTitle,
+    annualCtcLpa: offerSalary,
+    joiningDate: offerJoiningDate,
+    validTill: offerExpiryDate,
+    reportingManager: offerManager
+  });
+  const [offerLetterUrl, setOfferLetterUrl] = useState("");
+  const [offerPreviewing, setOfferPreviewing] = useState(false);
+
+  const closeOfferLetterPreview = () => {
+    if (offerLetterUrl) URL.revokeObjectURL(offerLetterUrl);
+    setOfferLetterUrl("");
+  };
+
+  // Shows the offer letter PDF for the details entered, before anything is saved or sent.
+  const handlePreviewOfferLetter = async () => {
+    if (!dragTargetApp || offerMissing.length > 0) return;
+    setOfferPreviewing(true);
+    try {
+      const blob = await EmailRepository.previewOfferLetter(
+        dragTargetApp.candidateId || dragTargetApp.candidate?.id || dragTargetApp.candidate?.candidateId,
+        {
+          jobTitle: offerJobTitle,
+          annualCtc: lpaToRupees(offerSalary),
+          joiningDate: offerJoiningDate,
+          validTill: offerExpiryDate,
+          reportingManager: offerManager.trim()
+        }
+      );
+      closeOfferLetterPreview();
+      setOfferLetterUrl(URL.createObjectURL(blob));
+    } catch (err: any) {
+      triggerToast(`❌ ${err?.message || "Failed to prepare the offer letter."}`);
+    } finally {
+      setOfferPreviewing(false);
+    }
+  };
+
   const handleConfirmOffer = async () => {
     if (!dragTargetApp) return;
+    if (offerMissing.length > 0) {
+      triggerToast(`❌ Fill in: ${offerMissing.join(", ")}.`);
+      return;
+    }
     try {
       setStatusUpdating(true);
 
       const newOfferId = `OFF-2026-0${Date.now().toString().slice(-4)}`;
       const newOffer = {
         id: newOfferId,
+        // Required by the backend's OfferCreate schema. Missing previously —
+        // this payload was only ever validated by Express, which has no
+        // schema at all, so the gap was invisible until routed to FastAPI.
+        candidateId: dragTargetApp.candidateId || dragTargetApp.candidate?.id || dragTargetApp.candidate?.candidateId,
+        jobId: dragTargetApp.jobId || dragTargetApp.job?.id,
+        applicationId: dragTargetApp.id || dragTargetApp.applicationId,
         candidateName: `${dragTargetApp.candidate?.firstName || "Candidate"} ${dragTargetApp.candidate?.lastName || ""}`.trim(),
         candidateEmail: dragTargetApp.candidate?.email || "",
         candidatePhone: dragTargetApp.candidate?.phone || "",
-        jobTitle: dragTargetApp.job?.title || "Position",
+        jobTitle: offerJobTitle,
         department: dragTargetApp.job?.department || "",
         recruiter: dragTargetApp.job?.recruiter || "",
-        aiMatchScore: dragTargetApp.aiEvaluation?.score || 85,
+        aiMatchScore: dragTargetApp.aiEvaluation?.score ?? 0,
         offeredSalary: offerSalary + " LPA",
         offeredSalaryNum: Number(offerSalary),
+        // The backend stores the offer's salary in offeredCTC (rupees per year);
+        // the field above is in LPA, so convert. Without this the entered salary is dropped.
+        offeredCTC: Number(offerSalary) > 0 ? Math.round(Number(offerSalary) * 100000) : undefined,
         bonus: "Standard Performance Bonus Scheme",
         benefits: offerBenefits,
         reportingManager: offerManager,
@@ -1087,8 +1123,8 @@ export default function CandidatesView({
         }
       };
 
-      await axios.post("/api/offers", newOffer);
-      await handleUpdateStatus(ApplicationStatus.OFFERED, dragTargetApp);
+      await OfferRepository.create(newOffer);
+      await handleUpdateStatus(ApplicationStatus.OFFER, dragTargetApp);
 
       setShowDragOfferModal(false);
       setSuccessAnimType("Offer");
@@ -1209,13 +1245,14 @@ export default function CandidatesView({
       );
       
       const evalResult = res.data.evaluation;
-      const matchScore = evalResult?.score || 85;
+      const matchScore = evalResult?.score ?? 0;
 
       // Update applications state
       setApplications(prev => prev.map(app => {
         if (app.id === appToScreen.id || app.applicationId === appToScreen.applicationId) {
           const currentTimeline = Array.isArray(app.timeline) ? app.timeline : [];
-          const nextStatus = matchScore >= 50 ? ApplicationStatus.SHORTLISTED : ApplicationStatus.SCREENING;
+          // The stage the backend saved after screening (Shortlisted or Rejected), not a guess made here.
+          const nextStatus = res.data.status || app.status;
           return { 
             ...app, 
             aiEvaluation: evalResult, 
@@ -1238,7 +1275,7 @@ export default function CandidatesView({
       if (selectedApp?.id === appToScreen.id || selectedApp?.applicationId === appToScreen.applicationId) {
         setSelectedApp((prev: any) => {
           const currentTimeline = Array.isArray(prev?.timeline) ? prev.timeline : [];
-          const nextStatus = matchScore >= 50 ? ApplicationStatus.SHORTLISTED : ApplicationStatus.SCREENING;
+          const nextStatus = res.data.status || prev?.status;
           return {
             ...prev,
             aiEvaluation: evalResult,
@@ -1247,7 +1284,7 @@ export default function CandidatesView({
             status: nextStatus,
             timeline: [...currentTimeline, {
               id: `evt-${Date.now()}`,
-              status: "Screening",
+              status: nextStatus,
               title: "AI Analysis Processed",
               description: `Automated match calculated. Score: ${matchScore}%`,
               timestamp: new Date().toISOString()
@@ -1269,7 +1306,7 @@ export default function CandidatesView({
   const handleUpdateCandidateFields = async (candidateId: string, updatedFields: any) => {
     setUpdatingTracker(true);
     try {
-      const res = await axios.patch(`/api/candidates/${candidateId}`, updatedFields);
+      const res = await CandidateRepository.update(candidateId, updatedFields);
       
       // Update selectedApp's candidate as well to reflect changes in details panel
       if (selectedApp && selectedApp.candidateId === candidateId) {
@@ -1279,7 +1316,7 @@ export default function CandidatesView({
             ...prev,
             candidate: {
               ...prev.candidate!,
-              ...res.data
+              ...res
             }
           };
         });
@@ -1350,10 +1387,10 @@ export default function CandidatesView({
         linkedinUrl: isFresher ? addLinkedinLink : "",
         portfolioUrl: isFresher ? addGithubLink : "",
         experienceLevel: addExperienceLevel,
+        preferredWorkMode: addWorkMode,
         candidateType: isFresher ? "fresher" : "experienced",
         totalExperience: isFresher ? "Fresher" : `${experienceYears} Years`,
-        cvBase64: manualCvBase64 || "",
-        cvFileName: manualCvFile ? manualCvFile.name : ""
+        resumeFile: manualCvFile
       };
 
       let newApp: any = null;
@@ -1361,7 +1398,7 @@ export default function CandidatesView({
         newApp = await CandidateRepository.createApplication({
           ...candidatePayload,
           jobId: targetJobId,
-          status: "Applied"
+          status: "New"
         });
       } catch (err: any) {
         console.warn("Repository candidate creation failed:", err);
@@ -1375,16 +1412,8 @@ export default function CandidatesView({
         const targetCandId = newApp.candidate?.id || newApp.candidate?.candidateId || newApp.candidateId || newApp.id;
         const targetAppId = newApp.id || newApp.applicationId;
 
-        if (manualCvFile && targetCandId) {
-          try {
-            await CandidateRepository.uploadResume(targetCandId, manualCvFile);
-            triggerToast(`📄 Resume file uploaded to local storage successfully.`);
-          } catch (upErr: any) {
-            console.error("Resume upload failed:", upErr);
-            const errMsg = upErr?.message || upErr?.response?.data?.detail || "CV upload error";
-            triggerToast(`⚠️ Candidate created, but CV upload failed: ${errMsg}`);
-          }
-        }
+        // The CV is uploaded by CandidateRepository.create as part of
+        // candidate creation, so there is nothing to upload again here.
 
         // Auto-run initial JD-aware AI screening for this application
         if (targetAppId) {
@@ -1403,8 +1432,9 @@ export default function CandidatesView({
         }
 
         // Ensure new candidate isn't filtered out by active filters
-        if (filterJobId !== "all" && filterJobId !== targetJobId) {
-          setFilterJobId("all");
+        const targetTitle = jobs.find((j: any) => j.id === targetJobId)?.title;
+        if (filterPosition !== "all" && filterPosition !== normalizePosition(targetTitle)) {
+          setFilterPosition("all");
         }
         if (filterStatus !== "all" && filterStatus !== "Shortlisted" && filterStatus.toLowerCase() !== "shortlisted") {
           setFilterStatus("all");
@@ -1447,12 +1477,12 @@ export default function CandidatesView({
         setSkillsText("");
         setResumeText("");
         setCandidateLocation("Pune, India");
+        setAddWorkMode("");
         setManualCvFile(null);
-        setManualCvBase64("");
       }
     } catch (err: any) {
       console.error("Error creating candidate:", err);
-      triggerToast("❌ Error creating candidate profile.");
+      triggerToast(`❌ ${err?.message || "Error creating candidate profile."}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -1464,6 +1494,47 @@ export default function CandidatesView({
     if (numScore >= matchThreshold) return "border-emerald-200 text-emerald-700 bg-emerald-50/50 dark:border-emerald-900/40 dark:text-emerald-400 dark:bg-emerald-950/20";
     if (numScore >= Math.max(50, matchThreshold - 15)) return "border-amber-200 text-amber-700 bg-amber-50/50 dark:border-amber-900/40 dark:text-amber-400 dark:bg-amber-950/20";
     return "border-rose-200 text-rose-700 bg-rose-50/50 dark:border-rose-900/40 dark:text-rose-400 dark:bg-rose-950/20";
+  };
+
+  // Candidates table only. Red below the ATS threshold, orange from the threshold up to (not including)
+  // the "strong match" mark, green from there. 50 mirrors the backend's default ATS_MATCH_THRESHOLD;
+  // the backend does not expose it to the frontend, so change it here if you change it there.
+  const ATS_TABLE_THRESHOLD = 50;
+  const ATS_TABLE_STRONG_MATCH = 75;
+
+  const getTableScoreColor = (score?: number) => {
+    const numScore = Number(score);
+    if (numScore >= ATS_TABLE_STRONG_MATCH) return "border-emerald-200 text-emerald-700 bg-emerald-50/50 dark:border-emerald-900/40 dark:text-emerald-400 dark:bg-emerald-950/20";
+    if (numScore >= ATS_TABLE_THRESHOLD) return "border-orange-200 text-orange-700 bg-orange-50/50 dark:border-orange-900/40 dark:text-orange-400 dark:bg-orange-950/20";
+    return "border-rose-200 text-rose-700 bg-rose-50/50 dark:border-rose-900/40 dark:text-rose-400 dark:bg-rose-950/20";
+  };
+
+  // Candidates table only: Offer is green and Rejected is red (pill and dot); every other stage
+  // keeps the neutral pill and its existing dot colour. The backend stores the offer stage as "Offer".
+  const getTableStageStyle = (status?: string) => {
+    const stage = String(status || "").trim().toLowerCase();
+    if (stage === "offer") {
+      return {
+        pill: "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900/50",
+        dot: "bg-emerald-500",
+        text: "text-emerald-700 dark:text-emerald-400"
+      };
+    }
+    if (stage === "hired") {
+      return {
+        pill: "bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-900/50",
+        dot: "bg-green-500",
+        text: "text-green-700 dark:text-green-400"
+      };
+    }
+    if (stage === "rejected") {
+      return {
+        pill: "bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900/50",
+        dot: "bg-rose-500",
+        text: "text-rose-700 dark:text-rose-400"
+      };
+    }
+    return null;
   };
 
   const getScoreBgClass = (score: number) => {
@@ -1521,66 +1592,27 @@ export default function CandidatesView({
         (appCand.candidateId && appCand.candidateId.toLowerCase().includes(searchQuery.toLowerCase())) ||
         (app.candidateId && app.candidateId.toLowerCase().includes(searchQuery.toLowerCase()));
 
-      const matchesJob = filterJobId === "all" || 
-        app.jobId === filterJobId || 
-        app.job?.id === filterJobId || 
-        appCand.jobId === filterJobId;
+      const matchesJob = filterPosition === "all" ||
+        normalizePosition(app.job?.title || app.appliedRole) === filterPosition;
 
-      // Filter by Experience Years (Flexible search across multiple properties)
+      // Filter by experience level, on the same total experience the "Total Exp" column shows.
+      // Fresher: up to 1 year, Junior: over 1 up to 2, Mid-Level: over 2 up to 5, Senior-Level: over 5.
       let matchesExperience = true;
       if (filterMinExperience !== "all") {
-        const expVal = appCand.experienceYears !== undefined ? appCand.experienceYears : appCand.experience;
-        const expLevelStr = String(appCand.experienceLevel || appCand.candidateType || appCand.totalExperience || "").toLowerCase();
-        const isCategoricalFresher = expLevelStr.includes("fresh");
-        const isCategoricalJunior = expLevelStr.includes("junior");
-        const isCategoricalMid = expLevelStr.includes("mid");
-        const isCategoricalSenior = expLevelStr.includes("senior");
-
-        if (filterMinExperience === "fresh") {
-          if (isCategoricalFresher) {
-            matchesExperience = true;
-          } else if (expVal !== undefined && expVal !== "") {
-            const exp = Number(expVal);
-            matchesExperience = !isNaN(exp) && exp <= 1;
-          } else {
-            matchesExperience = isCategoricalFresher;
-          }
-        } else if (filterMinExperience === "junior") {
-          if (isCategoricalJunior) {
-            matchesExperience = true;
-          } else if (expVal !== undefined && expVal !== "") {
-            const exp = Number(expVal);
-            matchesExperience = !isNaN(exp) && exp > 1 && exp <= 2;
-          } else {
-            matchesExperience = isCategoricalJunior;
-          }
-        } else if (filterMinExperience === "mid") {
-          if (isCategoricalMid) {
-            matchesExperience = true;
-          } else if (expVal !== undefined && expVal !== "") {
-            const exp = Number(expVal);
-            matchesExperience = !isNaN(exp) && exp > 2 && exp <= 5;
-          } else {
-            matchesExperience = isCategoricalMid;
-          }
-        } else if (filterMinExperience === "senior") {
-          if (isCategoricalSenior) {
-            matchesExperience = true;
-          } else if (expVal !== undefined && expVal !== "") {
-            const exp = Number(expVal);
-            matchesExperience = !isNaN(exp) && exp > 5;
-          } else {
-            matchesExperience = isCategoricalSenior;
-          }
-        }
+        const years = experienceInMonths(appCand.totalExperienceMonths, appCand.totalExperience, appCand.experienceYears) / 12;
+        if (filterMinExperience === "fresh") matchesExperience = years <= 1;
+        else if (filterMinExperience === "junior") matchesExperience = years > 1 && years <= 2;
+        else if (filterMinExperience === "mid") matchesExperience = years > 2 && years <= 5;
+        else if (filterMinExperience === "senior") matchesExperience = years > 5;
       }
 
-      // Filter by Max Expected CTC (Flexible search across expectedCTC and expectedCtc)
+      // Filter by Max Expected CTC (in LPA). A candidate with no expected CTC on file is not shown:
+      // an empty value must not count as "0 LPA, within budget".
       let matchesCTC = true;
       if (filterMaxCTC !== "all") {
         const maxLimit = Number(filterMaxCTC);
-        const ctcVal = appCand.expectedCTC !== undefined ? appCand.expectedCTC : appCand.expectedCtc;
-        matchesCTC = ctcVal !== undefined && Number(ctcVal) <= maxLimit;
+        const expectedCtc = Number(appCand.expectedCTC ?? appCand.expectedCtc);
+        matchesCTC = Number.isFinite(expectedCtc) && expectedCtc > 0 && expectedCtc <= maxLimit;
       }
 
       // Filter by HR Approval Status (Normalize casing and fallback to candidate/app properties)
@@ -1604,7 +1636,7 @@ export default function CandidatesView({
 
       return matchesSearch && matchesJob && matchesExperience && matchesCTC && matchesApproval && matchesToday;
     });
-  }, [applications, searchQuery, filterJobId, filterMinExperience, filterMaxCTC, filterApprovalStatus, filterToday]);
+  }, [applications, searchQuery, filterPosition, filterMinExperience, filterMaxCTC, filterApprovalStatus, filterToday]);
 
   const filteredApplications = useMemo(() => {
     let result = baseFilteredApplications.filter((app) => {
@@ -1648,15 +1680,15 @@ export default function CandidatesView({
     }
 
     return result;
-  }, [applications, searchQuery, filterJobId, sortBy, topN, filterMinExperience, filterMaxCTC, filterApprovalStatus, filterStatus, matchThreshold, filterToday]);
+  }, [applications, searchQuery, filterPosition, sortBy, topN, filterMinExperience, filterMaxCTC, filterApprovalStatus, filterStatus, matchThreshold, filterToday]);
 
   if (loading && applications.length === 0) {
     return (
       <div className="p-6 space-y-4 animate-pulse">
         <div className="h-8 w-48 bg-slate-200 rounded-lg" />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="h-96 bg-slate-200 rounded-xl" />
-          <div className="h-96 bg-slate-200 rounded-xl lg:col-span-2" />
+          <div className="h-96 bg-slate-200 rounded-lg" />
+          <div className="h-96 bg-slate-200 rounded-lg lg:col-span-2" />
         </div>
       </div>
     );
@@ -1666,27 +1698,30 @@ export default function CandidatesView({
   const job = selectedApp?.job;
   const evalData: AIEvaluation | undefined = selectedApp?.aiEvaluation;
 
+  // The Google Form submits "Key Skills" as a comma-separated string. Fall
+  // back to it (or to a comma-separated skills string) when the structured
+  // skills array is empty so the detailed view always shows exactly what the
+  // candidate submitted.
+  const candSkillsRaw = cand?.skills;
+  const submittedSkills: string[] =
+    Array.isArray(candSkillsRaw) && candSkillsRaw.length > 0
+      ? candSkillsRaw
+      : String(candSkillsRaw || cand?.keySkills || "")
+          .split(",")
+          .map((s: string) => s.trim())
+          .filter(Boolean);
+
   return (
-    <div className="w-full px-4 sm:px-6 lg:px-8 pt-7 sm:pt-8 pb-8 space-y-5 sm:space-y-6 transition-all text-slate-800 dark:text-slate-100">
+    <div className="ats-enterprise-page w-full px-4 sm:px-6 lg:px-8 pt-5 sm:pt-6 pb-8 space-y-5 transition-all text-slate-800 dark:text-slate-100">
       <div>
 
-      {/* Invisible inputs for file imports */}
-      <input 
-        type="file" 
-        id="import-file-input" 
-        className="hidden" 
-        accept=".json,.csv" 
-        onChange={handleImportFile} 
-      />
-
       {/* View Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-slate-200">
         <div>
-          <h2 className="font-display font-black text-2xl sm:text-3xl text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
-            <Users className="h-7 w-7 text-brand-600" />
-            <span>Candidates</span>
+          <h2 className="text-xl font-semibold text-slate-900 tracking-tight flex items-center gap-2.5">
+            <span>Applications</span>
           </h2>
-          <p className="text-slate-500 dark:text-slate-400 text-xs sm:text-sm mt-0.5 font-medium">
+          <p className="text-sm text-slate-500 mt-1">
             Manage applicant pipeline, candidate profiles, and AI screening insights.
           </p>
         </div>
@@ -1746,14 +1781,14 @@ export default function CandidatesView({
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 sm:gap-4">
+      <div className="pt-4 pb-2 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 sm:gap-4">
         {[
           { label: "Total Applications", value: baseFilteredApplications.length, status: "all", icon: Users, color: "text-slate-500 dark:text-slate-400" },
           { label: "New Applications", value: baseFilteredApplications.filter(a => isNewCandidate(a)).length, status: "New Applications", icon: Plus, color: "text-blue-500" },
-          { label: "Pending Evaluation", value: baseFilteredApplications.filter(a => isPendingEvaluation(a)).length, status: "Pending Evaluation", icon: Clock, color: "text-amber-500" },
-          { label: "AI Shortlisted", value: baseFilteredApplications.filter(a => isAIShortlisted(a, matchThreshold)).length, status: "AI Shortlisted", icon: Sparkles, color: "text-brand-600 dark:text-brand-400" },
-          { label: "Interviews", value: baseFilteredApplications.filter(a => isInterviewStage(a)).length, status: "INTERVIEW", icon: Activity, color: "text-amber-500" },
-          { label: "Offered", value: baseFilteredApplications.filter(a => isOfferedStage(a)).length, status: "OFFERED", icon: UserCheck, color: "text-emerald-500" },
+          { label: "Shortlisted", value: baseFilteredApplications.filter(a => isShortlisted(a)).length, status: "Shortlisted", icon: Sparkles, color: "text-[#1F3B75] dark:text-brand-400" },
+          { label: "Interviewing", value: baseFilteredApplications.filter(a => isInterviewStage(a)).length, status: "INTERVIEWING", icon: Activity, color: "text-amber-500" },
+          { label: "Offer", value: baseFilteredApplications.filter(a => isOfferedStage(a)).length, status: "OFFER", icon: UserCheck, color: "text-emerald-500" },
+          { label: "Hired", value: baseFilteredApplications.filter(a => isHiredStage(a)).length, status: "HIRED", icon: CheckCircle2, color: "text-green-600" },
           { label: "Rejected", value: baseFilteredApplications.filter(a => isRejectedStage(a)).length, status: "REJECTED", icon: XCircle, color: "text-rose-500" },
         ].map((card, idx) => {
           const CardIcon = card.icon;
@@ -1761,10 +1796,11 @@ export default function CandidatesView({
 
           // Map summary card to a valid target status for dragging/dropping
           let targetDropStatus: ApplicationStatus | null = null;
-          if (card.status === "New Applications" || card.status === "NEW") targetDropStatus = ApplicationStatus.APPLIED;
-          else if (card.status === "AI_SHORTLISTED" || card.status === "AI Shortlisted") targetDropStatus = ApplicationStatus.SHORTLISTED;
-          else if (card.status === "INTERVIEW") targetDropStatus = ApplicationStatus.INTERVIEWING;
-          else if (card.status === "OFFERED") targetDropStatus = ApplicationStatus.OFFERED;
+          if (card.status === "New Applications" || card.status === "NEW") targetDropStatus = ApplicationStatus.NEW;
+          else if (card.status === "Shortlisted") targetDropStatus = ApplicationStatus.SHORTLISTED;
+          else if (card.status === "INTERVIEWING") targetDropStatus = ApplicationStatus.INTERVIEWING;
+          else if (card.status === "OFFER") targetDropStatus = ApplicationStatus.OFFER;
+          else if (card.status === "HIRED") targetDropStatus = ApplicationStatus.HIRED;
           else if (card.status === "REJECTED") targetDropStatus = ApplicationStatus.REJECTED;
 
           return (
@@ -1786,9 +1822,9 @@ export default function CandidatesView({
                   handleDrop(e, targetDropStatus);
                 }
               }}
-              className={`p-4 rounded-xl border text-left transition-all cursor-pointer shadow-xs ${
+              className={`p-4 rounded-lg border text-left transition-all cursor-pointer shadow-xs ${
                 isSelected 
-                  ? "bg-indigo-600 border-indigo-600 text-white shadow-md scale-[1.01]" 
+                  ? "bg-indigo-600 border-indigo-600 text-white shadow-sm scale-[1.01]" 
                   : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 text-slate-800 dark:text-slate-100 hover:scale-[1.02]"
               } ${isDragging && targetDropStatus ? "ring-2 ring-indigo-500 ring-offset-2 dark:ring-offset-slate-950 border-indigo-400 bg-indigo-50/10" : ""}`}
             >
@@ -1809,14 +1845,14 @@ export default function CandidatesView({
       </div>
 
       {error && (
-        <div className="p-4 bg-rose-50 border border-rose-100 text-rose-700 text-sm rounded-xl flex items-center gap-2">
+        <div className="p-4 bg-rose-50 border border-rose-100 text-rose-700 text-sm rounded-lg flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 shrink-0" />
           <span>{error}</span>
         </div>
       )}
 
       {filterToday && (
-        <div className="p-4 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-150 dark:border-indigo-900 rounded-xl flex items-center justify-between gap-3 text-sm text-indigo-700 dark:text-indigo-300">
+        <div className="p-4 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-150 dark:border-indigo-900 rounded-lg flex items-center justify-between gap-3 text-sm text-indigo-700 dark:text-indigo-300">
           <div className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-indigo-500 shrink-0" />
             <span>Viewing candidates who applied <strong>Today</strong>.</span>
@@ -1834,7 +1870,7 @@ export default function CandidatesView({
       )}
 
       {/* Dynamic Search, Job Pipeline Filters & Sorting Control Hub */}
-      <div id="filters-container" className="bg-slate-50 dark:bg-slate-900 p-5 border border-slate-200 dark:border-slate-800 rounded-xl space-y-4 shadow-2xs transition-all">
+      <div id="filters-container" className="bg-slate-50 dark:bg-slate-900 p-5 border border-slate-200 dark:border-slate-800 rounded-lg space-y-4 shadow-2xs transition-all">
         {/* Row 1: Search bar and Sorting controls */}
         <div className="flex flex-col lg:flex-row gap-4 items-stretch lg:items-center justify-between">
           <div className="relative flex-1 min-w-0">
@@ -1894,21 +1930,21 @@ export default function CandidatesView({
                 <span>Job Position / Role</span>
               </label>
               <div className="relative">
-                <select
-                  value={filterJobId}
+                <SearchableSelect
+                  value={filterPosition}
                   onChange={(e) => {
-                    setFilterJobId(e.target.value);
-                    triggerToast(`Filtering by position: ${e.target.value === "all" ? "All Jobs" : jobs.find(j => j.id === e.target.value)?.title || "Selected Job"}`);
+                    setFilterPosition(e.target.value);
+                    triggerToast(`Filtering by position: ${e.target.value === "all" ? "All Positions" : positions.find(p => normalizePosition(p.title) === e.target.value)?.title || "Selected Position"}`);
                   }}
                   className="w-full bg-white dark:bg-slate-950 border border-slate-250 dark:border-slate-800 focus:border-indigo-500 rounded-lg px-3 py-2.5 text-xs focus:outline-hidden font-bold cursor-pointer text-slate-700 dark:text-slate-300 transition-all appearance-none pr-8"
                 >
                   <option value="all">All Positions</option>
-                  {jobs.map((j) => (
-                    <option key={j.id} value={j.id}>
-                      {j.title} ({formatJobId(j.id)} &middot; {j.department})
+                  {positions.map((p) => (
+                    <option key={p.title} value={normalizePosition(p.title)}>
+                      {p.title}
                     </option>
                   ))}
-                </select>
+                </SearchableSelect>
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
                   <Sliders className="h-3.5 w-3.5" />
                 </div>
@@ -1922,7 +1958,7 @@ export default function CandidatesView({
                 <span>Experience Level</span>
               </label>
               <div className="relative">
-                <select
+                <SearchableSelect
                   value={filterMinExperience}
                   onChange={(e) => {
                     setFilterMinExperience(e.target.value);
@@ -1933,9 +1969,9 @@ export default function CandidatesView({
                   <option value="all">All Experience Levels</option>
                   <option value="fresh">Fresher (0 - 1 Yrs)</option>
                   <option value="junior">Junior (1 - 2 Yrs)</option>
-                  <option value="mid">Mid-Level (3 - 5 Yrs)</option>
-                  <option value="senior">Senior-Level (6+ Yrs)</option>
-                </select>
+                  <option value="mid">Mid-Level (2 - 5 Yrs)</option>
+                  <option value="senior">Senior-Level (5+ Yrs)</option>
+                </SearchableSelect>
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
                   <Sliders className="h-3.5 w-3.5" />
                 </div>
@@ -1949,7 +1985,7 @@ export default function CandidatesView({
                 <span>Max Expected CTC</span>
               </label>
               <div className="relative">
-                <select
+                <SearchableSelect
                   value={filterMaxCTC}
                   onChange={(e) => {
                     setFilterMaxCTC(e.target.value);
@@ -1965,7 +2001,7 @@ export default function CandidatesView({
                   <option value="20">Up to 20 LPA</option>
                   <option value="30">Up to 30 LPA</option>
                   <option value="40">Up to 40 LPA</option>
-                </select>
+                </SearchableSelect>
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
                   <Sliders className="h-3.5 w-3.5" />
                 </div>
@@ -1975,7 +2011,7 @@ export default function CandidatesView({
           </div>
 
           {/* Active filters badges and clear all */}
-          {(filterJobId !== "all" || filterMinExperience !== "all" || filterMaxCTC !== "all" || filterApprovalStatus !== "all" || searchQuery !== "" || filterStatus !== "all") && (
+          {(filterPosition !== "all" || filterMinExperience !== "all" || filterMaxCTC !== "all" || filterApprovalStatus !== "all" || searchQuery !== "" || filterStatus !== "all") && (
             <div className="flex flex-wrap items-center justify-between gap-3 mt-4 pt-3 border-t border-dashed border-slate-200 dark:border-slate-800/80 animate-fade-in">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider font-mono">Active Filters:</span>
@@ -1991,10 +2027,10 @@ export default function CandidatesView({
                     <button onClick={() => setFilterStatus("all")} className="hover:text-sky-900 dark:hover:text-sky-200"><X className="h-3 w-3" /></button>
                   </span>
                 )}
-                {filterJobId !== "all" && (
+                {filterPosition !== "all" && (
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 text-[10px] font-bold rounded-lg border border-amber-100 dark:border-amber-900/30">
-                    <span>Job: {jobs.find(j => j.id === filterJobId)?.title || "Selected"}</span>
-                    <button onClick={() => setFilterJobId("all")} className="hover:text-amber-900 dark:hover:text-amber-200"><X className="h-3 w-3" /></button>
+                    <span>Position: {positions.find(p => normalizePosition(p.title) === filterPosition)?.title || filterPosition}</span>
+                    <button onClick={() => setFilterPosition("all")} className="hover:text-amber-900 dark:hover:text-amber-200"><X className="h-3 w-3" /></button>
                   </span>
                 )}
                 {filterMinExperience !== "all" && (
@@ -2026,7 +2062,7 @@ export default function CandidatesView({
               </div>
               <button
                 onClick={() => {
-                  setFilterJobId("all");
+                  setFilterPosition("all");
                   setFilterMinExperience("all");
                   setFilterMaxCTC("all");
                   setFilterApprovalStatus("all");
@@ -2044,7 +2080,7 @@ export default function CandidatesView({
       </div>
 
       {topN && (
-        <div className="p-3 bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/30 rounded-xl flex items-center justify-between text-xs text-indigo-800 dark:text-indigo-300 animate-fade-in">
+        <div className="p-3 bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/30 rounded-lg flex items-center justify-between text-xs text-indigo-800 dark:text-indigo-300 animate-fade-in">
           <div className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-indigo-600 shrink-0" />
             <span className="font-semibold">Currently filtering for the top {topN} candidates.</span>
@@ -2063,12 +2099,12 @@ export default function CandidatesView({
 
       {/* Primary Concise Candidates Table */}
       {boardViewMode === "table" ? (
-        <div className="overflow-hidden border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-900 shadow-xs transition-all">
+        <div className="overflow-hidden border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 shadow-xs transition-all">
         <div className="w-full overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs min-w-[1300px]">
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800">
-                <th className="px-4 py-3.5 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] min-w-[100px]">Candidate ID</th>
+                <th className="px-4 py-3.5 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] min-w-[100px]">S.No.</th>
                 <th className="px-4 py-3.5 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] min-w-[160px]">Candidate</th>
                 <th className="px-4 py-3.5 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] min-w-[170px]">Email ID</th>
                 <th className="px-4 py-3.5 font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] min-w-[120px]">Mobile Number</th>
@@ -2135,10 +2171,10 @@ export default function CandidatesView({
                       }}
                       className={`hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors duration-150 cursor-grab active:cursor-grabbing ${isSelected ? "bg-indigo-50/20 dark:bg-indigo-950/20" : ""} ${isHighFit ? "border-l-4 border-l-emerald-500 bg-emerald-50/5 dark:bg-emerald-950/5" : ""}`}
                     >
-                      {/* Candidate ID Column */}
+                      {/* S.No. Column */}
                       <td className={`${density === "compact" ? "px-4 py-1.5" : "px-6 py-4"}`}>
                         <span className="font-mono font-bold text-xs text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50 px-2 py-1 rounded">
-                          {appCand?.candidateId || app.candidateId || "C001"}
+                          {idx + 1}
                         </span>
                       </td>
 
@@ -2199,13 +2235,13 @@ export default function CandidatesView({
                       {/* Phone Column */}
                       <td className={`${density === "compact" ? "px-4 py-1.5" : "px-6 py-4"} whitespace-nowrap`}>
                         {appCand?.phone ? (
-                          <a 
-                            href={`tel:${appCand.phone}`} 
+                          <a
+                            href={`tel:${formatIndianMobile(appCand.phone)?.replace(/\s/g, "") ?? appCand.phone}`}
                             className="inline-flex items-center gap-1.5 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 font-semibold"
                             title="Click to call mobile"
                           >
                             <Phone className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500 shrink-0" />
-                            <span>{appCand.phone}</span>
+                            <span>{formatIndianMobile(appCand.phone) ?? appCand.phone}</span>
                           </a>
                         ) : (
                           <span className="text-slate-400 dark:text-slate-500">—</span>
@@ -2293,8 +2329,8 @@ export default function CandidatesView({
 
                       {/* AI Screening Score Column */}
                       <td className={`${density === "compact" ? "px-4 py-1.5" : "px-6 py-4"}`}>
-                        {score ? (
-                          <span className={`text-xs font-mono font-bold px-2 py-1 border rounded-lg ${getScoreColor(score)}`}>
+                        {typeof score === "number" ? (
+                          <span className={`text-xs font-mono font-bold px-2 py-1 border rounded-lg ${getTableScoreColor(score)}`}>
                             {score}% Match
                           </span>
                         ) : isRowScreening ? (
@@ -2303,37 +2339,38 @@ export default function CandidatesView({
                             <span>Screening...</span>
                           </span>
                         ) : (
-                          <button
-                            onClick={async (e) => {
-                              e.stopPropagation();
-                              setSelectedApp(app);
-                              await handleScreenResume(app);
-                            }}
-                            disabled={screening}
-                            className="inline-flex items-center gap-1 px-2 py-1 bg-indigo-50 dark:bg-indigo-950 hover:bg-indigo-100 dark:hover:bg-indigo-900 disabled:bg-slate-50 dark:disabled:bg-slate-800 border border-indigo-200 dark:border-indigo-900 rounded-lg font-bold text-indigo-700 dark:text-indigo-300 disabled:text-slate-400 transition-all cursor-pointer"
-                          >
-                            <Sparkles className="h-3 w-3 text-indigo-500 dark:text-indigo-400 shrink-0" />
-                            <span>Screen</span>
-                          </button>
+                          <span className="text-slate-400" title="No ATS score yet">&mdash;</span>
                         )}
                       </td>
 
                       {/* Status Column */}
                       <td className={`${density === "compact" ? "px-4 py-1.5" : "px-6 py-4"} whitespace-nowrap`}>
-                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/80">
+                        {(() => {
+                          const stageStyle = getTableStageStyle(app.status);
+                          return (
+                        <>
+                        <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${stageStyle ? stageStyle.pill : "bg-slate-100 dark:bg-slate-800/80 border-slate-200/80 dark:border-slate-700/80"}`}>
                           <span className={`h-2 w-2 rounded-full shrink-0 ${
-                            app.status === ApplicationStatus.APPLIED ? "bg-blue-500" :
-                            app.status === ApplicationStatus.SCREENING ? "bg-purple-500" :
+                            stageStyle ? stageStyle.dot :
+                            app.status === ApplicationStatus.NEW ? "bg-blue-500" :
                             app.status === ApplicationStatus.SHORTLISTED ? "bg-indigo-500" :
                             app.status === ApplicationStatus.INTERVIEWING ? "bg-amber-500" :
-                            app.status === ApplicationStatus.OFFERED ? "bg-emerald-500" :
-                            String(app.status || "").toUpperCase() === "HIRED" ? "bg-green-500" :
+                            app.status === ApplicationStatus.OFFER ? "bg-emerald-500" :
+                            app.status === ApplicationStatus.HIRED ? "bg-green-500" :
                             "bg-rose-500"
                           }`} />
-                          <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                            {app.status || "Applied"}
+                          <span className={`text-xs font-semibold ${stageStyle ? stageStyle.text : "text-slate-700 dark:text-slate-300"}`}>
+                            {app.status || "New"}
                           </span>
                         </div>
+                          {app.applicationState === "On Hold" && (
+                            <span title="The job is closed or in draft; this application resumes when the job is Open again" className="ml-1.5 inline-flex items-center px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-700 text-[10px] font-bold uppercase tracking-wide dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-400">
+                              On Hold
+                            </span>
+                          )}
+                        </>
+                          );
+                        })()}
                       </td>
 
                       {/* Actions Column */}
@@ -2425,12 +2462,22 @@ export default function CandidatesView({
       </div>
       ) : (
         /* Interactive Kanban Pipeline Board */
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-5 items-start animate-fade-in">
+        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-5 items-start animate-fade-in">
           {[
             {
-              id: "screening",
-              title: "Screening / Shortlisted",
-              statuses: [ApplicationStatus.APPLIED, ApplicationStatus.SCREENING, ApplicationStatus.SHORTLISTED],
+              id: "new",
+              title: "New",
+              statuses: [ApplicationStatus.NEW],
+              bgHeader: "bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-900/30",
+              textColor: "text-blue-700 dark:text-blue-300",
+              icon: Plus,
+              iconColor: "text-blue-500",
+              targetStatus: ApplicationStatus.NEW
+            },
+            {
+              id: "shortlisted",
+              title: "Shortlisted",
+              statuses: [ApplicationStatus.SHORTLISTED],
               bgHeader: "bg-indigo-50 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-900/30",
               textColor: "text-indigo-700 dark:text-indigo-300",
               icon: Sparkles,
@@ -2439,7 +2486,7 @@ export default function CandidatesView({
             },
             {
               id: "interviewing",
-              title: "Interview Phase",
+              title: "Interviewing",
               statuses: [ApplicationStatus.INTERVIEWING],
               bgHeader: "bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-900/30",
               textColor: "text-amber-700 dark:text-amber-300",
@@ -2448,18 +2495,28 @@ export default function CandidatesView({
               targetStatus: ApplicationStatus.INTERVIEWING
             },
             {
-              id: "offered",
-              title: "Offer Phase",
-              statuses: [ApplicationStatus.OFFERED],
+              id: "offer",
+              title: "Offer",
+              statuses: [ApplicationStatus.OFFER],
               bgHeader: "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900/30",
               textColor: "text-emerald-700 dark:text-emerald-300",
               icon: UserCheck,
               iconColor: "text-emerald-500",
-              targetStatus: ApplicationStatus.OFFERED
+              targetStatus: ApplicationStatus.OFFER
+            },
+            {
+              id: "hired",
+              title: "Hired",
+              statuses: [ApplicationStatus.HIRED],
+              bgHeader: "bg-green-50 dark:bg-green-950/40 border-green-200 dark:border-green-900/30",
+              textColor: "text-green-700 dark:text-green-300",
+              icon: CheckCircle2,
+              iconColor: "text-green-600",
+              targetStatus: ApplicationStatus.HIRED
             },
             {
               id: "rejected",
-              title: "Rejected Phase",
+              title: "Rejected",
               statuses: [ApplicationStatus.REJECTED],
               bgHeader: "bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900/30",
               textColor: "text-rose-700 dark:text-rose-300",
@@ -2469,14 +2526,20 @@ export default function CandidatesView({
             }
           ].map((column) => {
             const columnApps = filteredApplications.filter(app => {
-              if (column.id === "screening") {
-                return isNewCandidate(app) || isPendingEvaluation(app) || isAIShortlisted(app, matchThreshold);
+              if (column.id === "new") {
+                return isNewCandidate(app);
+              }
+              if (column.id === "shortlisted") {
+                return isShortlisted(app);
               }
               if (column.id === "interviewing") {
                 return isInterviewStage(app);
               }
-              if (column.id === "offered") {
-                return isOfferedStage(app) || isHiredStage(app);
+              if (column.id === "offer") {
+                return isOfferedStage(app);
+              }
+              if (column.id === "hired") {
+                return isHiredStage(app);
               }
               if (column.id === "rejected") {
                 return isRejectedStage(app);
@@ -2490,10 +2553,10 @@ export default function CandidatesView({
                 key={column.id}
                 onDragOver={handleDragOver}
                 onDrop={(e) => handleDrop(e, column.targetStatus)}
-                className="bg-slate-50 dark:bg-slate-900/40 border border-slate-250 dark:border-slate-800 rounded-2xl p-4 flex flex-col gap-4 min-h-[550px] transition-all hover:shadow-xs"
+                className="bg-slate-50 dark:bg-slate-900/40 border border-slate-250 dark:border-slate-800 rounded-lg p-4 flex flex-col gap-4 min-h-[550px] transition-all hover:shadow-xs"
               >
                 {/* Column Header */}
-                <div className={`p-3.5 rounded-xl border ${column.bgHeader} flex items-center justify-between`}>
+                <div className={`p-3.5 rounded-lg border ${column.bgHeader} flex items-center justify-between`}>
                   <div className="flex items-center gap-2.5">
                     <ColumnIcon className={`h-4.5 w-4.5 ${column.iconColor}`} />
                     <span className={`text-xs font-black uppercase tracking-wider ${column.textColor}`}>
@@ -2508,7 +2571,7 @@ export default function CandidatesView({
                 {/* Column Body (Scrollable List of Draggable Cards) */}
                 <div className="flex-1 overflow-y-auto space-y-3 max-h-[700px] pr-1 scrollbar-thin">
                   {columnApps.length === 0 ? (
-                    <div className="h-40 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl flex flex-col items-center justify-center p-4 text-center">
+                    <div className="h-40 border border-dashed border-slate-200 dark:border-slate-800 rounded-lg flex flex-col items-center justify-center p-4 text-center">
                       <p className="text-[11px] font-semibold text-slate-400 dark:text-slate-500">
                         Drag candidates here
                       </p>
@@ -2534,7 +2597,7 @@ export default function CandidatesView({
                               setSelectedApp(app);
                             }
                           }}
-                          className={`bg-white dark:bg-slate-900 border border-slate-250 dark:border-slate-800 rounded-xl p-4 shadow-3xs hover:shadow-md cursor-grab active:cursor-grabbing transition-all hover:-translate-y-0.5 group relative ${
+                          className={`bg-white dark:bg-slate-900 border border-slate-250 dark:border-slate-800 rounded-lg p-4 shadow-3xs hover:shadow-sm cursor-grab active:cursor-grabbing transition-all hover:-translate-y-0.5 group relative ${
                             isSelected ? "ring-2 ring-indigo-500/50" : ""
                           } ${
                             isHighFit ? "border-l-4 border-l-emerald-500 bg-emerald-50/5 dark:bg-emerald-950/5" : ""
@@ -2668,7 +2731,7 @@ export default function CandidatesView({
       {/* Hidden Custom Drag Image Element for Browser Drag Ghost */}
       <div 
         id="custom-drag-image" 
-        className="fixed bg-slate-900 border border-slate-700 text-white rounded-xl shadow-2xl px-4 py-3 flex items-center gap-3 w-64 pointer-events-none"
+        className="fixed bg-slate-900 border border-slate-700 text-white rounded-lg shadow-sm px-4 py-3 flex items-center gap-3 w-64 pointer-events-none"
         style={{ position: "fixed", top: "-1000px", left: "-1000px", zIndex: -100 }}
       >
         <div className="h-9 w-9 rounded-full bg-indigo-600 text-white font-black text-xs uppercase flex items-center justify-center shrink-0">
@@ -2701,7 +2764,7 @@ export default function CandidatesView({
             onDrop={handleDragEnd}
             className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-full max-w-4xl px-4 pointer-events-none"
           >
-            <div className="bg-slate-900/95 dark:bg-slate-950/95 border border-slate-800/80 shadow-[0_12px_45px_rgba(0,0,0,0.6)] rounded-2xl p-6 backdrop-blur-md flex flex-col items-center select-none pointer-events-auto">
+            <div className="bg-slate-900/95 dark:bg-slate-950/95 border border-slate-800/80 shadow-[0_12px_45px_rgba(0,0,0,0.6)] rounded-lg p-6 backdrop-blur-md flex flex-col items-center select-none pointer-events-auto">
               {/* Header inside floating bar */}
               <div className="text-center mb-4 flex items-center gap-3">
                 <span className="text-[10px] uppercase font-black tracking-widest text-indigo-400 bg-indigo-950/55 border border-indigo-900/40 px-2.5 py-0.5 rounded-full">
@@ -2723,12 +2786,12 @@ export default function CandidatesView({
                   onDragEnter={() => setActiveHoverTarget("interview")}
                   onDragLeave={() => setActiveHoverTarget(null)}
                   onDrop={(e) => handleDropAction(e, "interview")}
-                  className={`p-4 rounded-xl border transition-all duration-250 flex flex-col items-center justify-center text-center cursor-pointer relative h-[140px] select-none ${
+                  className={`p-4 rounded-lg border transition-all duration-250 flex flex-col items-center justify-center text-center cursor-pointer relative h-[140px] select-none ${
                     activeHoverTarget === "interview"
                       ? "border-amber-500 bg-amber-950/45 scale-[1.03] shadow-[0_0_25px_rgba(245,158,11,0.25)] ring-1 ring-amber-500/20"
                       : activeHoverTarget !== null
                       ? "border-slate-800/30 bg-slate-900/20 opacity-30 scale-[0.98] blur-[0.5px]"
-                      : "border-slate-800/80 bg-slate-900/80 hover:border-slate-700 shadow-md"
+                      : "border-slate-800/80 bg-slate-900/80 hover:border-slate-700 shadow-sm"
                   }`}
                 >
                   <Calendar className={`h-6 w-6 mb-2 transition-transform duration-200 ${
@@ -2759,12 +2822,12 @@ export default function CandidatesView({
                   onDragEnter={() => setActiveHoverTarget("offer")}
                   onDragLeave={() => setActiveHoverTarget(null)}
                   onDrop={(e) => handleDropAction(e, "offer")}
-                  className={`p-4 rounded-xl border transition-all duration-250 flex flex-col items-center justify-center text-center cursor-pointer relative h-[140px] select-none ${
+                  className={`p-4 rounded-lg border transition-all duration-250 flex flex-col items-center justify-center text-center cursor-pointer relative h-[140px] select-none ${
                     activeHoverTarget === "offer"
                       ? "border-emerald-500 bg-emerald-950/45 scale-[1.03] shadow-[0_0_25px_rgba(16,185,129,0.25)] ring-1 ring-emerald-500/20"
                       : activeHoverTarget !== null
                       ? "border-slate-800/30 bg-slate-900/20 opacity-30 scale-[0.98] blur-[0.5px]"
-                      : "border-slate-800/80 bg-slate-900/80 hover:border-slate-700 shadow-md"
+                      : "border-slate-800/80 bg-slate-900/80 hover:border-slate-700 shadow-sm"
                   }`}
                 >
                   <Award className={`h-6 w-6 mb-2 transition-transform duration-200 ${
@@ -2795,12 +2858,12 @@ export default function CandidatesView({
                   onDragEnter={() => setActiveHoverTarget("reject")}
                   onDragLeave={() => setActiveHoverTarget(null)}
                   onDrop={(e) => handleDropAction(e, "reject")}
-                  className={`p-4 rounded-xl border transition-all duration-250 flex flex-col items-center justify-center text-center cursor-pointer relative h-[140px] select-none ${
+                  className={`p-4 rounded-lg border transition-all duration-250 flex flex-col items-center justify-center text-center cursor-pointer relative h-[140px] select-none ${
                     activeHoverTarget === "reject"
                       ? "border-rose-500 bg-rose-950/45 scale-[1.03] shadow-[0_0_25px_rgba(239,68,68,0.25)] ring-1 ring-rose-500/20"
                       : activeHoverTarget !== null
                       ? "border-slate-800/30 bg-slate-900/20 opacity-30 scale-[0.98] blur-[0.5px]"
-                      : "border-slate-800/80 bg-slate-900/80 hover:border-slate-700 shadow-md"
+                      : "border-slate-800/80 bg-slate-900/80 hover:border-slate-700 shadow-sm"
                   }`}
                 >
                   <XCircle className={`h-6 w-6 mb-2 transition-transform duration-200 ${
@@ -2840,9 +2903,9 @@ export default function CandidatesView({
               initial={{ scale: 0.5, opacity: 0 }}
               animate={{ scale: 1, opacity: 1, transition: { type: "spring", stiffness: 300, damping: 20 } }}
               exit={{ scale: 0.8, opacity: 0 }}
-              className="bg-slate-900 border border-slate-800 rounded-3xl p-10 max-w-sm w-full text-center shadow-2xl flex flex-col items-center"
+              className="bg-slate-900 border border-slate-800 rounded-lg p-10 max-w-sm w-full text-center shadow-sm flex flex-col items-center"
             >
-              <div className={`h-20 w-20 rounded-full flex items-center justify-center mb-6 shadow-lg ${
+              <div className={`h-20 w-20 rounded-full flex items-center justify-center mb-6 shadow-sm ${
                 successAnimType === "Interview" ? "bg-amber-500/10 border border-amber-500/30 text-amber-500" :
                 successAnimType === "Offer" ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-500" :
                 "bg-rose-500/10 border border-rose-500/30 text-rose-500"
@@ -2875,11 +2938,11 @@ export default function CandidatesView({
       {/* 1. Interview Scheduler Modal */}
       {showDragSchedulerModal && dragTargetApp && (
         <div className="fixed inset-0 z-55 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden animate-scale-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg w-full max-w-lg shadow-sm overflow-hidden animate-scale-in">
             {/* Header */}
             <div className="bg-amber-500 p-6 text-slate-950 flex justify-between items-center">
               <div className="flex items-center gap-3">
-                <div className="bg-slate-950/10 p-2.5 rounded-xl">
+                <div className="bg-slate-950/10 p-2.5 rounded-lg">
                   <Calendar className="h-6 w-6" />
                 </div>
                 <div>
@@ -2904,7 +2967,7 @@ export default function CandidatesView({
                 <select 
                   value={schedulerRound}
                   onChange={(e) => setSchedulerRound(e.target.value)}
-                  className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-xl text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-bold cursor-pointer"
+                  className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-lg text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-bold cursor-pointer"
                 >
                   <option value="Technical Interview">Technical Interview</option>
                   <option value="Technical Interview 1">Technical Interview 1</option>
@@ -2920,7 +2983,7 @@ export default function CandidatesView({
                     type="date"
                     value={schedulerDate}
                     onChange={(e) => setSchedulerDate(e.target.value)}
-                    className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-xl text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-bold"
+                    className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-lg text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-bold"
                   />
                 </div>
                 <div>
@@ -2929,7 +2992,7 @@ export default function CandidatesView({
                     type="time"
                     value={schedulerTime}
                     onChange={(e) => setSchedulerTime(e.target.value)}
-                    className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-xl text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-bold"
+                    className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-lg text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-bold"
                   />
                 </div>
               </div>
@@ -2940,45 +3003,69 @@ export default function CandidatesView({
                   <select 
                     value={schedulerType}
                     onChange={(e) => setSchedulerType(e.target.value)}
-                    className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-xl text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-bold cursor-pointer"
+                    className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-lg text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-bold cursor-pointer"
                   >
                     <option value="Online">Online Video Call</option>
                     <option value="Offline">On-Site Interview</option>
                   </select>
                 </div>
-                <div>
-                  <label className="block text-[11px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Interviewer</label>
-                  <input 
-                    type="text"
-                    placeholder="e.g. John Doe"
-                    value={schedulerInterviewer}
-                    onChange={(e) => setSchedulerInterviewer(e.target.value)}
-                    className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-xl text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-bold"
-                  />
-                </div>
+                {schedulerType === "Online" ? (
+                  <div>
+                    <label className="block text-[11px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Platform</label>
+                    <input
+                      type="text"
+                      value={schedulerPlatform}
+                      onChange={(e) => setSchedulerPlatform(e.target.value)}
+                      className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-lg text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-bold"
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-[11px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Location</label>
+                    <input
+                      type="text"
+                      value={schedulerLocation}
+                      onChange={(e) => setSchedulerLocation(e.target.value)}
+                      className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-lg text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-bold"
+                    />
+                  </div>
+                )}
               </div>
 
-              {schedulerType === "Online" ? (
-                <div>
-                  <label className="block text-[11px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Platform</label>
-                  <input 
-                    type="text"
-                    value={schedulerPlatform}
-                    onChange={(e) => setSchedulerPlatform(e.target.value)}
-                    className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-xl text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-bold"
-                  />
-                </div>
-              ) : (
-                <div>
-                  <label className="block text-[11px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Location</label>
-                  <input 
-                    type="text"
-                    value={schedulerLocation}
-                    onChange={(e) => setSchedulerLocation(e.target.value)}
-                    className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-xl text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-bold"
-                  />
-                </div>
-              )}
+              <div>
+                <label className="block text-[11px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">
+                  Interviewers <span className="text-rose-500">*</span> <span className="normal-case tracking-normal font-semibold text-slate-400">(CC'd on the invitation)</span>
+                </label>
+                <PeopleMultiSelect
+                  aria-label="Interviewers"
+                  placeholder="Select one or more interviewers"
+                  options={directory.people}
+                  loading={directory.loading}
+                  error={directory.error}
+                  selected={schedulerInterviewers}
+                  onChange={setSchedulerInterviewers}
+                  excludeIds={schedulerBcc.map((p) => p.id)}
+                  invalid={schedulerInterviewers.length === 0}
+                  className="border border-slate-250 dark:border-slate-800 rounded-lg bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">
+                  BCC <span className="normal-case tracking-normal font-semibold text-slate-400">(optional, hidden from other recipients)</span>
+                </label>
+                <PeopleMultiSelect
+                  aria-label="BCC"
+                  placeholder="Select people to BCC"
+                  options={directory.people}
+                  loading={directory.loading}
+                  error={directory.error}
+                  selected={schedulerBcc}
+                  onChange={setSchedulerBcc}
+                  excludeIds={schedulerInterviewers.map((p) => p.id)}
+                  className="border border-slate-250 dark:border-slate-800 rounded-lg bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20"
+                />
+              </div>
 
               <div>
                 <label className="block text-[11px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Scheduler Notes & Agenda</label>
@@ -2986,7 +3073,7 @@ export default function CandidatesView({
                   rows={3}
                   value={schedulerNotes}
                   onChange={(e) => setSchedulerNotes(e.target.value)}
-                  className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-xl text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-bold resize-none"
+                  className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-lg text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-bold resize-none"
                 />
               </div>
             </div>
@@ -2995,14 +3082,14 @@ export default function CandidatesView({
             <div className="bg-slate-50 dark:bg-slate-950 p-4 border-t border-slate-100 dark:border-slate-800/80 flex justify-end gap-3">
               <button 
                 onClick={() => setShowDragSchedulerModal(false)}
-                className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-900 rounded-xl transition-all cursor-pointer"
+                className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-900 rounded-lg transition-all cursor-pointer"
               >
                 Cancel
               </button>
               <button 
                 onClick={handleConfirmScheduler}
-                disabled={statusUpdating || !schedulerInterviewer}
-                className="px-4 py-2 text-xs font-bold bg-amber-500 text-slate-950 rounded-xl hover:bg-amber-400 disabled:opacity-50 transition-all cursor-pointer flex items-center gap-1.5 font-sans"
+                disabled={statusUpdating || schedulerInterviewers.length === 0}
+                className="px-4 py-2 text-xs font-bold bg-amber-500 text-slate-950 rounded-lg hover:bg-amber-400 disabled:opacity-50 transition-all cursor-pointer flex items-center gap-1.5 font-sans"
               >
                 {statusUpdating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Calendar className="h-3.5 w-3.5" />}
                 <span>Schedule & Move Stage</span>
@@ -3015,11 +3102,11 @@ export default function CandidatesView({
       {/* 2. Offer Generation Modal */}
       {showDragOfferModal && dragTargetApp && (
         <div className="fixed inset-0 z-55 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden animate-scale-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg w-full max-w-lg shadow-sm overflow-hidden animate-scale-in">
             {/* Header */}
             <div className="bg-emerald-600 p-6 text-white flex justify-between items-center">
               <div className="flex items-center gap-3">
-                <div className="bg-slate-950/10 p-2.5 rounded-xl">
+                <div className="bg-slate-950/10 p-2.5 rounded-lg">
                   <Award className="h-6 w-6" />
                 </div>
                 <div>
@@ -3047,7 +3134,7 @@ export default function CandidatesView({
                       type="number"
                       value={offerSalary}
                       onChange={(e) => setOfferSalary(e.target.value)}
-                      className="w-full pl-8 pr-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-xl text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-bold"
+                      className="w-full pl-8 pr-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-lg text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-bold"
                     />
                     <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-bold">₹</span>
                   </div>
@@ -3057,7 +3144,7 @@ export default function CandidatesView({
                   <select 
                     value={offerNoticePeriod}
                     onChange={(e) => setOfferNoticePeriod(e.target.value)}
-                    className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-xl text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-bold cursor-pointer"
+                    className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-lg text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-bold cursor-pointer"
                   >
                     <option value="Immediate">Immediate Joiner</option>
                     <option value="15 Days">15 Days Notice</option>
@@ -3074,27 +3161,27 @@ export default function CandidatesView({
                     type="date"
                     value={offerJoiningDate}
                     onChange={(e) => setOfferJoiningDate(e.target.value)}
-                    className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-xl text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-bold"
+                    className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-lg text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-bold"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Expiry Date</label>
+                  <label className="block text-[11px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Offer Valid Till</label>
                   <input 
                     type="date"
                     value={offerExpiryDate}
                     onChange={(e) => setOfferExpiryDate(e.target.value)}
-                    className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-xl text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-bold"
+                    className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-lg text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-bold"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-[11px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Reporting Manager</label>
+                <label className="block text-[11px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Reporting Manager <span className="normal-case font-semibold">(optional)</span></label>
                 <input 
                   type="text"
                   value={offerManager}
                   onChange={(e) => setOfferManager(e.target.value)}
-                  className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-xl text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-bold"
+                  className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-lg text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-bold"
                 />
               </div>
 
@@ -3104,7 +3191,7 @@ export default function CandidatesView({
                   rows={3}
                   value={offerBenefits}
                   onChange={(e) => setOfferBenefits(e.target.value)}
-                  className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-xl text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-bold resize-none font-sans"
+                  className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-lg text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-bold resize-none font-sans"
                 />
               </div>
             </div>
@@ -3113,14 +3200,27 @@ export default function CandidatesView({
             <div className="bg-slate-50 dark:bg-slate-950 p-4 border-t border-slate-100 dark:border-slate-800/80 flex justify-end gap-3">
               <button 
                 onClick={() => setShowDragOfferModal(false)}
-                className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-900 rounded-xl transition-all cursor-pointer"
+                className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-900 rounded-lg transition-all cursor-pointer"
               >
                 Cancel
               </button>
+              {offerMissing.length > 0 && (
+                <span className="mr-auto self-center text-[11px] font-semibold text-rose-600">
+                  Fill in: {offerMissing.join(", ")}
+                </span>
+              )}
+              <button 
+                onClick={handlePreviewOfferLetter}
+                disabled={offerPreviewing || offerMissing.length > 0}
+                className="px-4 py-2 text-xs font-bold border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-900 rounded-lg disabled:opacity-50 transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                {offerPreviewing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                <span>Preview Letter</span>
+              </button>
               <button 
                 onClick={handleConfirmOffer}
-                disabled={statusUpdating || !offerSalary || !offerJoiningDate}
-                className="px-4 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl disabled:opacity-50 transition-all cursor-pointer flex items-center gap-1.5"
+                disabled={statusUpdating || offerMissing.length > 0}
+                className="px-4 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg disabled:opacity-50 transition-all cursor-pointer flex items-center gap-1.5"
               >
                 {statusUpdating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Award className="h-3.5 w-3.5" />}
                 <span>Generate & Move Stage</span>
@@ -3130,14 +3230,37 @@ export default function CandidatesView({
         </div>
       )}
 
+      {/* Offer letter PDF preview, opened from the Draft Offer Letter dialog */}
+      {offerLetterUrl && dragTargetApp && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/80" onClick={closeOfferLetterPreview}>
+          <div
+            className="bg-white dark:bg-slate-900 rounded-lg w-full max-w-3xl h-[90vh] flex flex-col overflow-hidden shadow-sm"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
+              <div>
+                <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
+                  Offer letter for {dragTargetApp.candidate?.firstName} {dragTargetApp.candidate?.lastName}
+                </p>
+                <p className="text-[11px] text-slate-500">This PDF is emailed to the candidate when you generate the offer.</p>
+              </div>
+              <button onClick={closeOfferLetterPreview} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer" aria-label="Close preview">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <iframe title="Offer letter preview" src={offerLetterUrl} className="flex-1 w-full" />
+          </div>
+        </div>
+      )}
+
       {/* 3. Reject Confirmation Modal */}
       {showDragRejectModal && dragTargetApp && (
         <div className="fixed inset-0 z-55 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden animate-scale-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg w-full max-w-lg shadow-sm overflow-hidden animate-scale-in">
             {/* Header */}
             <div className="bg-rose-600 p-6 text-white flex justify-between items-center">
               <div className="flex items-center gap-3">
-                <div className="bg-slate-950/10 p-2.5 rounded-xl">
+                <div className="bg-slate-950/10 p-2.5 rounded-lg">
                   <XCircle className="h-6 w-6" />
                 </div>
                 <div>
@@ -3157,7 +3280,7 @@ export default function CandidatesView({
 
             {/* Body */}
             <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-              <div className="p-4 bg-rose-50 dark:bg-rose-950/20 border border-rose-200/40 dark:border-rose-900/20 rounded-2xl flex gap-3 items-start">
+              <div className="p-4 bg-rose-50 dark:bg-rose-950/20 border border-rose-200/40 dark:border-rose-900/20 rounded-lg flex gap-3 items-start">
                 <ShieldAlert className="h-5 w-5 text-rose-500 shrink-0 mt-0.5" />
                 <div>
                   <span className="text-xs font-black text-rose-700 dark:text-rose-400 block mb-0.5">Application Archival</span>
@@ -3169,17 +3292,17 @@ export default function CandidatesView({
 
               <div>
                 <label className="block text-[11px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Primary Rejection Reason</label>
-                <select 
+                <SearchableSelect 
                   value={rejectReason}
                   onChange={(e) => setRejectReason(e.target.value)}
-                  className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-xl text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 font-bold cursor-pointer"
+                  className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-lg text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 font-bold cursor-pointer"
                 >
                   <option value="Skills Alignment">Technical Skills Mismatch</option>
                   <option value="Culture Alignment">Culture Fit Misalignment</option>
                   <option value="Compensation Alignment">Budget / Compensation Expectation</option>
                   <option value="Notice Period Constraint">Notice Period Constraint</option>
                   <option value="Position Closed">Position Filled / Closed</option>
-                </select>
+                </SearchableSelect>
               </div>
 
               <div>
@@ -3188,7 +3311,7 @@ export default function CandidatesView({
                   rows={3}
                   value={rejectNotes}
                   onChange={(e) => setRejectNotes(e.target.value)}
-                  className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-xl text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 font-bold resize-none"
+                  className="w-full px-3.5 py-2.5 border border-slate-250 dark:border-slate-800 rounded-lg text-sm bg-slate-50 dark:bg-slate-950 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 font-bold resize-none"
                 />
               </div>
 
@@ -3210,14 +3333,14 @@ export default function CandidatesView({
             <div className="bg-slate-50 dark:bg-slate-950 p-4 border-t border-slate-100 dark:border-slate-800/80 flex justify-end gap-3">
               <button 
                 onClick={() => setShowDragRejectModal(false)}
-                className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-900 rounded-xl transition-all cursor-pointer"
+                className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-900 rounded-lg transition-all cursor-pointer"
               >
                 Cancel
               </button>
               <button 
                 onClick={handleConfirmReject}
                 disabled={statusUpdating}
-                className="px-4 py-2 text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white rounded-xl disabled:opacity-50 transition-all cursor-pointer flex items-center gap-1.5"
+                className="px-4 py-2 text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white rounded-lg disabled:opacity-50 transition-all cursor-pointer flex items-center gap-1.5"
               >
                 {statusUpdating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <XCircle className="h-3.5 w-3.5" />}
                 <span>Reject Candidate & Archive</span>
@@ -3230,7 +3353,7 @@ export default function CandidatesView({
       {/* Edit Candidate Modal (Complete Manual Form, No CV Upload) */}
       {showEditModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/60 backdrop-blur-xs flex justify-center items-center p-4">
-          <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-xl shadow-2xl flex flex-col max-h-[90vh] animate-scale-in">
+          <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-lg shadow-sm flex flex-col max-h-[90vh] animate-scale-in">
             {/* Modal Header */}
             <div className="p-5 border-b border-slate-150 dark:border-slate-800 flex justify-between items-center bg-slate-900 text-white rounded-t-xl">
               <div>
@@ -3350,7 +3473,7 @@ export default function CandidatesView({
               <div className={`grid grid-cols-1 ${addExperienceLevel === "Experienced" ? "md:grid-cols-4" : "md:grid-cols-3"} gap-4`}>
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Target Job Pipeline</label>
-                  <select
+                  <SearchableSelect
                     value={selectedJobId}
                     onChange={(e) => setSelectedJobId(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
@@ -3358,7 +3481,7 @@ export default function CandidatesView({
                           {Array.isArray(jobs) && jobs.map((job) => (
                             <option key={job.id || job.jobId} value={job.jobId || job.id}>{formatJobId(job.jobId || job.id)} — {cleanJobTitle(job.title)}</option>
                           ))}
-                  </select>
+                  </SearchableSelect>
                 </div>
                 {addExperienceLevel === "Experienced" && (
                   <div className="space-y-1.5">
@@ -3375,7 +3498,7 @@ export default function CandidatesView({
                 )}
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Application Source</label>
-                  <select
+                  <SearchableSelect
                     value={source}
                     onChange={(e) => setSource(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
@@ -3385,7 +3508,7 @@ export default function CandidatesView({
                     <option value="Career Website">Career Website</option>
                     <option value="Referral">Referral</option>
                     <option value="External Link">External Link</option>
-                  </select>
+                  </SearchableSelect>
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Location</label>
@@ -3398,10 +3521,19 @@ export default function CandidatesView({
                     <option value="Remote">Remote</option>
                   </select>
                 </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Work Mode</label>
+                  <WorkModeSelect
+                    value={addWorkMode}
+                    onChange={setAddWorkMode}
+                    jobWorkMode={selectedJobWorkMode}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
+                  />
+                </div>
               </div>
 
               {/* 5. HR Tracker Parameters (CTC, Notes, Approval) */}
-              <div className="bg-slate-50 dark:bg-slate-950/40 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 space-y-4">
+              <div className="bg-slate-50 dark:bg-slate-950/40 p-4 rounded-lg border border-slate-200/80 dark:border-slate-800 space-y-4">
                 <div className="flex items-center gap-1.5 pb-2 border-b border-slate-200 dark:border-slate-800">
                   <Sliders className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
                   <h4 className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">HR Tracker Parameters</h4>
@@ -3467,7 +3599,7 @@ export default function CandidatesView({
               </div>
 
               {/* 7. Resume CV Info / View CV Link (No upload/dropzone in Edit mode) */}
-              <div className="p-3.5 bg-slate-100/70 dark:bg-slate-950/60 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <div className="p-3.5 bg-slate-100/70 dark:bg-slate-950/60 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <FileText className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
                   <div>
@@ -3501,7 +3633,7 @@ export default function CandidatesView({
                 type="button"
                 onClick={handleSaveEditCandidate}
                 disabled={updatingTracker}
-                className="px-5 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-indigo-600/20 disabled:opacity-50"
+                className="px-5 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shadow-sm shadow-indigo-600/20 disabled:opacity-50"
               >
                 {updatingTracker ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
                 <span>Save Changes</span>
@@ -3515,9 +3647,9 @@ export default function CandidatesView({
       {selectedApp && cand && (
         <div id="deep-dive-review" className="space-y-6 pt-4 border-t border-slate-200 dark:border-slate-800 animate-in fade-in slide-in-from-bottom-2 duration-250">
           
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900 text-white p-6 rounded-xl shadow-lg">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900 text-white p-6 rounded-lg shadow-sm">
             <div className="flex items-center gap-3">
-              <div className="h-12 w-12 rounded-xl bg-indigo-500/10 flex items-center justify-center border border-indigo-400/20 text-white font-black uppercase font-mono">
+              <div className="h-12 w-12 rounded-lg bg-indigo-500/10 flex items-center justify-center border border-indigo-400/20 text-white font-black uppercase font-mono">
                 {getInitials(cand.firstName, cand.lastName, cand.name)}
               </div>
               <div>
@@ -3531,7 +3663,10 @@ export default function CandidatesView({
                   Detailed Diagnostic: {cand.firstName} {cand.lastName}
                 </h3>
                 <p className="text-xs text-slate-300">
-                  {cand.currentRole} at {cand.currentCompany} • Pipeline: <span className="text-indigo-300 font-semibold">{job?.title}</span>
+                  {cand.currentRole && cand.currentRole !== "Not specified"
+                    ? `${cand.currentRole}${cand.currentCompany && cand.currentCompany !== "Not specified" && cand.currentCompany !== "None" ? ` at ${cand.currentCompany}` : ""} • `
+                    : ""}
+                  Pipeline: <span className="text-indigo-300 font-semibold">{job?.title}</span>
                 </p>
               </div>
             </div>
@@ -3545,7 +3680,7 @@ export default function CandidatesView({
           </div>
 
           {/* Candidate Form Submission Details Section */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-xs text-left space-y-6">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 shadow-xs text-left space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-150 dark:border-slate-800 pb-4">
               <div>
                 <h4 className="font-display font-extrabold text-slate-950 dark:text-white text-base flex items-center gap-2">
@@ -3564,13 +3699,13 @@ export default function CandidatesView({
                 }`}>
                   {cand.experienceLevel === "Fresher" || cand.candidateType === "fresher" ? "Academic Fresher" : "Experienced Professional"}
                 </span>
-                {cand.cvFileName && (
+                {(cand.cvFileName || cand.resumeFileName) && (
                   <button
                     onClick={() => setViewingResumeApp(selectedApp)}
                     className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-bold bg-slate-50 hover:bg-slate-100 dark:bg-slate-850 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded transition-all cursor-pointer"
                   >
                     <FileText className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                    <span>View CV ({cand.cvFileName})</span>
+                    <span>View CV ({cand.cvFileName || cand.resumeFileName})</span>
                   </button>
                 )}
               </div>
@@ -3616,6 +3751,22 @@ export default function CandidatesView({
                       <span className="font-semibold text-slate-800 dark:text-slate-200">{cand.location || cand.currentLocation || "—"}</span>
                     </div>
                   </div>
+                  <div className="flex items-start gap-2.5">
+                    <Globe className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="block text-slate-400 dark:text-slate-500 font-medium mb-0.5">Application Source</span>
+                      <span className="font-semibold text-slate-800 dark:text-slate-200">{cand.source || selectedApp.source || "—"}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-2.5">
+                    <Clock className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="block text-slate-400 dark:text-slate-500 font-medium mb-0.5">Applied On</span>
+                      <span className="font-semibold text-slate-800 dark:text-slate-200 font-mono">
+                        {(selectedApp.appliedAt || cand.createdAt || "").split("T")[0] || "—"}
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -3646,8 +3797,15 @@ export default function CandidatesView({
                           ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/30"
                           : "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-100 dark:border-amber-900/30"
                       }`}>
-                        {cand.relocateToPune || "Yes"}
+                        {cand.relocateToPune || "—"}
                       </span>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-2.5">
+                    <Briefcase className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="block text-slate-400 dark:text-slate-500 font-medium mb-0.5">Preferred Work Mode</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-200">{cand.preferredWorkMode || "Not specified"}</span>
                     </div>
                   </div>
                   <div className="flex items-start gap-2.5">
@@ -3663,7 +3821,7 @@ export default function CandidatesView({
                         )}
                         {cand.portfolioUrl && (
                           <a href={cand.portfolioUrl} target="_blank" rel="noreferrer" className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 font-bold">
-                            <span>Portfolio</span>
+                            <span>Portfolio / GitHub</span>
                             <ExternalLink className="h-3 w-3" />
                           </a>
                         )}
@@ -3715,7 +3873,7 @@ export default function CandidatesView({
                       <div className="flex items-start gap-2.5">
                         <DollarSign className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
                         <div>
-                          <span className="block text-slate-400 dark:text-slate-500 font-medium mb-0.5">in hand salary</span>
+                          <span className="block text-slate-400 dark:text-slate-500 font-medium mb-0.5">Average Monthly In-Hand Salary</span>
                           <span className="font-bold text-slate-800 dark:text-slate-200">
                             {cand.inHandSalary || "—"}
                           </span>
@@ -3730,6 +3888,47 @@ export default function CandidatesView({
                           </span>
                         </div>
                       </div>
+                      {/* Education details — only shown when submitted (some
+                          application sources collect them for experienced
+                          candidates too) */}
+                      {cand.highestEducation && (
+                        <div className="flex items-start gap-2.5">
+                          <GraduationCap className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="block text-slate-400 dark:text-slate-500 font-medium mb-0.5">Highest Education</span>
+                            <span className="font-bold text-slate-800 dark:text-slate-200">{cand.highestEducation}</span>
+                          </div>
+                        </div>
+                      )}
+                      {cand.specialization && (
+                        <div className="flex items-start gap-2.5">
+                          <GraduationCap className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="block text-slate-400 dark:text-slate-500 font-medium mb-0.5">Specialization / Stream</span>
+                            <span className="font-bold text-slate-800 dark:text-slate-200">{cand.specialization}</span>
+                          </div>
+                        </div>
+                      )}
+                      {cand.yearOfPassing && (
+                        <div className="flex items-start gap-2.5">
+                          <Clock className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="block text-slate-400 dark:text-slate-500 font-medium mb-0.5">Year of Passing</span>
+                            <span className="font-bold text-slate-800 dark:text-slate-200 font-mono">{cand.yearOfPassing}</span>
+                          </div>
+                        </div>
+                      )}
+                      {(cand.projectsWorkedOn || (cand as any).projectsDescription) && (
+                        <div className="flex items-start gap-2.5 col-span-2">
+                          <FileText className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
+                          <div className="w-full">
+                            <span className="block text-slate-400 dark:text-slate-500 font-medium mb-1">Projects Worked On</span>
+                            <p className="text-slate-700 dark:text-slate-300 font-medium leading-relaxed text-xs max-h-[100px] overflow-y-auto bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border border-slate-100 dark:border-slate-850">
+                              {cand.projectsWorkedOn || (cand as any).projectsDescription}
+                            </p>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </>
                 ) : (
@@ -3740,14 +3939,14 @@ export default function CandidatesView({
                         <GraduationCap className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
                         <div>
                           <span className="block text-slate-400 dark:text-slate-500 font-medium mb-0.5">Highest Education</span>
-                          <span className="font-bold text-slate-800 dark:text-slate-200">{cand.highestEducation || "Graduate / Post Graduate"}</span>
+                          <span className="font-bold text-slate-800 dark:text-slate-200">{cand.highestEducation || "—"}</span>
                         </div>
                       </div>
                       <div className="flex items-start gap-2.5">
                         <GraduationCap className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
                         <div>
                           <span className="block text-slate-400 dark:text-slate-500 font-medium mb-0.5">Specialization</span>
-                          <span className="font-bold text-slate-800 dark:text-slate-200">{cand.specialization || "Computer Science / General Engineering"}</span>
+                          <span className="font-bold text-slate-800 dark:text-slate-200">{cand.specialization || "—"}</span>
                         </div>
                       </div>
                       <div className="flex items-start gap-2.5">
@@ -3760,9 +3959,9 @@ export default function CandidatesView({
                       <div className="flex items-start gap-2.5 col-span-2">
                         <FileText className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
                         <div className="w-full">
-                          <span className="block text-slate-400 dark:text-slate-500 font-medium mb-1">Academic/Portfolio Projects Description</span>
-                          <p className="text-slate-700 dark:text-slate-300 font-medium leading-relaxed text-xs max-h-[100px] overflow-y-auto bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border border-slate-100 dark:border-slate-850">
-                            {cand.projectsWorkedOn || cand.projectsDescription || "No project specifications supplied."}
+                          <span className="block text-slate-400 dark:text-slate-500 font-medium mb-1">Projects Worked On</span>
+                          <p className="text-slate-700 dark:text-slate-300 font-medium leading-relaxed text-xs max-h-[160px] overflow-y-auto whitespace-pre-wrap bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border border-slate-100 dark:border-slate-850">
+                            {cand.projectsWorkedOn || (cand as any).projectsDescription || "—"}
                           </p>
                         </div>
                       </div>
@@ -3773,11 +3972,11 @@ export default function CandidatesView({
             </div>
 
             {/* Skills Badges Subsection */}
-            {cand.skills && (Array.isArray(cand.skills) ? cand.skills.length > 0 : String(cand.skills).trim().length > 0) && (
+            {submittedSkills.length > 0 && (
               <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
                 <h5 className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider font-mono mb-2">Submitted Key Skills</h5>
                 <div className="flex flex-wrap gap-1.5">
-                  {(Array.isArray(cand.skills) ? cand.skills : String(cand.skills).split(",")).map((skill: string, idx: number) => (
+                  {submittedSkills.map((skill: string, idx: number) => (
                     <span
                       key={`cand-skill-${idx}`}
                       className="px-2.5 py-1 bg-indigo-50/60 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold rounded-md border border-indigo-100/20"
@@ -3788,10 +3987,49 @@ export default function CandidatesView({
                 </div>
               </div>
             )}
+
+            {/* Everything else stored on the candidate record */}
+            <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-4">
+              <h5 className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider font-mono">Additional Details</h5>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs">
+                <div>
+                  <span className="block text-slate-400 dark:text-slate-500 font-medium mb-0.5">Resume File</span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-200 break-all">{cand.resumeFileName || cand.cvFileName || "—"}</span>
+                </div>
+                <div>
+                  <span className="block text-slate-400 dark:text-slate-500 font-medium mb-0.5">Resume Uploaded On</span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-200 font-mono">{(cand.resumeUploadedAt || "").split("T")[0] || "—"}</span>
+                </div>
+                <div>
+                  <span className="block text-slate-400 dark:text-slate-500 font-medium mb-0.5">HR Approval Status</span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-200 capitalize">{cand.hrApprovalStatus || "—"}</span>
+                </div>
+                <div>
+                  <span className="block text-slate-400 dark:text-slate-500 font-medium mb-0.5">Total Experience</span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">{cand.totalExperience || (cand.experienceYears ? `${cand.experienceYears} Years` : "—")}</span>
+                </div>
+              </div>
+              <div className="text-xs">
+                <span className="block text-slate-400 dark:text-slate-500 font-medium mb-1">HR Notes</span>
+                <p className="text-slate-700 dark:text-slate-300 font-medium leading-relaxed whitespace-pre-wrap bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border border-slate-100 dark:border-slate-850">
+                  {cand.hrNotes || "—"}
+                </p>
+              </div>
+              {Array.isArray(cand.customFields) && cand.customFields.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs">
+                  {cand.customFields.map((field: any, idx: number) => (
+                    <div key={`cand-custom-${idx}`}>
+                      <span className="block text-slate-400 dark:text-slate-500 font-medium mb-0.5">{field?.key}</span>
+                      <span className="font-semibold text-slate-800 dark:text-slate-200">{String(field?.value ?? "—")}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Candidate Applications & Applied Jobs Section (Retrieved via candidateId) */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-xs text-left space-y-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 shadow-xs text-left space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <div>
                 <h4 className="font-display font-extrabold text-slate-950 dark:text-white text-base flex items-center gap-2">
@@ -3865,7 +4103,7 @@ export default function CandidatesView({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             
             {/* AI Score Radial/Meter Box */}
-            <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs flex flex-col justify-between md:col-span-1">
+            <div className="bg-white border border-slate-200 rounded-lg p-6 shadow-xs flex flex-col justify-between md:col-span-1">
               <div className="space-y-1">
                 <h4 className="font-display font-semibold text-slate-900 text-sm flex items-center gap-2">
                   <Sparkles className="h-4 w-4 text-indigo-500 animate-pulse" />
@@ -3939,7 +4177,7 @@ export default function CandidatesView({
             </div>
 
             {/* Executive Summary Fit Box */}
-            <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs md:col-span-1 flex flex-col justify-between">
+            <div className="bg-white border border-slate-200 rounded-lg p-6 shadow-xs md:col-span-1 flex flex-col justify-between">
               <div className="space-y-1">
                 <h4 className="font-display font-semibold text-slate-900 text-sm flex items-center gap-2">
                   <Award className="h-4 w-4 text-indigo-500" />
@@ -3950,7 +4188,7 @@ export default function CandidatesView({
 
               {evalData ? (
                 <div className="my-4 space-y-3 flex-1 overflow-y-auto max-h-[160px]">
-                  <p className="text-slate-700 text-xs italic font-medium leading-relaxed bg-slate-50 p-3 rounded-xl border border-slate-150">
+                  <p className="text-slate-700 text-xs italic font-medium leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-150">
                     "{evalData.summary}"
                   </p>
                   <p className="text-slate-600 text-[11px] leading-relaxed">
@@ -3984,7 +4222,7 @@ export default function CandidatesView({
             <div 
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, ApplicationStatus.SHORTLISTED)}
-              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs md:col-span-1 flex flex-col justify-between transition-all"
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-5 shadow-xs md:col-span-1 flex flex-col justify-between transition-all"
             >
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
@@ -4000,7 +4238,7 @@ export default function CandidatesView({
               </div>
 
               <div className="my-3 flex-1 flex flex-col justify-center">
-                <div className="text-center p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 space-y-2">
+                <div className="text-center p-3.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 space-y-2">
                   <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">Current Stage</span>
                   <div className="flex justify-center">
                     {selectedApp.status === "Rejected" ? (
@@ -4008,10 +4246,15 @@ export default function CandidatesView({
                         <XCircle className="h-4 w-4 text-rose-500" />
                         <span>Rejected (AI & HR)</span>
                       </span>
-                    ) : selectedApp.status === "Offered" ? (
+                    ) : selectedApp.status === "Hired" ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-50 dark:bg-green-950/40 border border-green-200 dark:border-green-900/40 text-green-700 dark:text-green-300 text-xs font-black rounded-lg uppercase tracking-wider">
+                        <CheckCircle2 className="h-4 w-4 text-green-600" />
+                        <span>Hired</span>
+                      </span>
+                    ) : selectedApp.status === "Offer" ? (
                       <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-xs font-black rounded-lg uppercase tracking-wider">
                         <UserCheck className="h-4 w-4 text-emerald-500" />
-                        <span>Offered (AI & HR)</span>
+                        <span>Offer (AI & HR)</span>
                       </span>
                     ) : selectedApp.status === "Interviewing" ? (
                       <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/40 text-amber-700 dark:text-amber-300 text-xs font-black rounded-lg uppercase tracking-wider">
@@ -4020,20 +4263,22 @@ export default function CandidatesView({
                       </span>
                     ) : selectedApp.status === "Shortlisted" ? (
                       <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-50 dark:bg-brand-950/40 border border-brand-200 dark:border-brand-900/40 text-brand-700 dark:text-brand-300 text-xs font-black rounded-lg uppercase tracking-wider">
-                        <Sparkles className="h-4 w-4 text-brand-600" />
+                        <Sparkles className="h-4 w-4 text-[#1F3B75]" />
                         <span>Shortlisted (AI & HR)</span>
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900/40 text-indigo-700 dark:text-indigo-300 text-xs font-black rounded-lg uppercase tracking-wider">
                         <Clock className="h-4 w-4 text-indigo-500" />
-                        <span>{selectedApp.status || "Applied"} (AI & HR)</span>
+                        <span>{selectedApp.status || "New"} (AI & HR)</span>
                       </span>
                     )}
                   </div>
                   <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
                     {selectedApp.status === "Rejected" 
                       ? "Candidate is in the rejected stage. Rejection notification verified by AI & HR." 
-                      : selectedApp.status === "Offered" 
+                      : selectedApp.status === "Hired"
+                      ? "Offer accepted. The candidate is hired."
+                      : selectedApp.status === "Offer" 
                       ? "Offer extended! Active employment agreement ready for candidate review." 
                       : selectedApp.status === "Interviewing" 
                       ? "Technical & HR interviews scheduled and synchronized." 
@@ -4059,7 +4304,7 @@ export default function CandidatesView({
                         : "bg-white hover:bg-brand-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700"
                     }`}
                   >
-                    <Sparkles className="h-3 w-3 text-brand-600" />
+                    <Sparkles className="h-3 w-3 text-[#1F3B75]" />
                     <span>Shortlist (AI & HR)</span>
                   </button>
 
@@ -4077,10 +4322,10 @@ export default function CandidatesView({
                   </button>
 
                   <button
-                    onClick={() => handleUpdateStatus(ApplicationStatus.OFFERED, selectedApp)}
+                    onClick={() => handleUpdateStatus(ApplicationStatus.OFFER, selectedApp)}
                     disabled={statusUpdating}
                     className={`px-2 py-1.5 text-[10px] font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1 ${
-                      selectedApp.status === "Offered"
+                      selectedApp.status === "Offer"
                         ? "bg-emerald-100 text-emerald-800 border border-emerald-300 dark:bg-emerald-900/50 dark:text-emerald-200"
                         : "bg-white hover:bg-emerald-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700"
                     }`}
@@ -4104,11 +4349,11 @@ export default function CandidatesView({
                 </div>
 
                 <button
-                  onClick={() => handleUpdateStatus(ApplicationStatus.APPLIED, selectedApp)}
+                  onClick={() => handleUpdateStatus(ApplicationStatus.NEW, selectedApp)}
                   disabled={statusUpdating}
                   className="w-full mt-1 px-2 py-1 text-[9.5px] font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 border border-dashed border-slate-200 dark:border-slate-800 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer text-center"
                 >
-                  Reset Stage to Applied / Screening
+                  Reset Stage to New
                 </button>
               </div>
             </div>
@@ -4120,7 +4365,7 @@ export default function CandidatesView({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               
               {/* Strengths Grid */}
-              <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-4">
+              <div className="bg-white border border-slate-200 rounded-lg p-6 shadow-xs space-y-4">
                 <h4 className="font-display font-semibold text-slate-900 text-sm flex items-center gap-2">
                   <CheckCircle2 className="h-4 w-4 text-indigo-500" />
                   <span>Identified Core Strengths</span>
@@ -4136,7 +4381,7 @@ export default function CandidatesView({
               </div>
 
               {/* Gaps Grid */}
-              <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-4">
+              <div className="bg-white border border-slate-200 rounded-lg p-6 shadow-xs space-y-4">
                 <h4 className="font-display font-semibold text-slate-900 text-sm flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4 text-amber-500" />
                   <span>Potential Requirements Gaps</span>
@@ -4152,7 +4397,7 @@ export default function CandidatesView({
               </div>
 
               {/* Curated AI Interview Questions */}
-              <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-4 md:col-span-2">
+              <div className="bg-white border border-slate-200 rounded-lg p-6 shadow-xs space-y-4 md:col-span-2">
                 <h4 className="font-display font-semibold text-slate-900 text-sm flex items-center gap-2">
                   <ListTodo className="h-4 w-4 text-indigo-500" />
                   <span>Targeted AI Sourced Interview Questions</span>
@@ -4173,7 +4418,7 @@ export default function CandidatesView({
           )}
 
           {/* AI Copilot Active Action Hub */}
-          <div className="bg-slate-900 border border-slate-850 rounded-xl p-6 sm:p-8 shadow-2xl space-y-6 text-white animate-fade-in mt-6">
+          <div className="bg-slate-900 border border-slate-850 rounded-lg p-6 sm:p-8 shadow-sm space-y-6 text-white animate-fade-in mt-6">
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-2.5">
                     <Sparkles className="h-5 w-5 text-indigo-400 animate-pulse" />
@@ -4197,7 +4442,7 @@ export default function CandidatesView({
                     }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
                       activeActionTab === "email"
-                        ? "bg-indigo-600 text-white shadow-md"
+                        ? "bg-indigo-600 text-white shadow-sm"
                         : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
                     }`}
                   >
@@ -4212,7 +4457,7 @@ export default function CandidatesView({
                     }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
                       activeActionTab === "rubric"
-                        ? "bg-indigo-600 text-white shadow-md"
+                        ? "bg-indigo-600 text-white shadow-sm"
                         : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
                     }`}
                   >
@@ -4227,7 +4472,7 @@ export default function CandidatesView({
                     }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
                       activeActionTab === "timezone"
-                        ? "bg-indigo-600 text-white shadow-md"
+                        ? "bg-indigo-600 text-white shadow-sm"
                         : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
                     }`}
                   >
@@ -4243,7 +4488,7 @@ export default function CandidatesView({
                     }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
                       activeActionTab === "emailLogs"
-                        ? "bg-indigo-600 text-white shadow-md"
+                        ? "bg-indigo-600 text-white shadow-sm"
                         : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
                     }`}
                   >
@@ -4258,7 +4503,7 @@ export default function CandidatesView({
                     }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
                       activeActionTab === "tracker"
-                        ? "bg-indigo-600 text-white shadow-md"
+                        ? "bg-indigo-600 text-white shadow-sm"
                         : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
                     }`}
                   >
@@ -4271,7 +4516,7 @@ export default function CandidatesView({
                 <div className="space-y-4">
                   {activeActionTab === "email" && (
                     <div className="space-y-3.5 animate-fade-in">
-                      <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-slate-300 font-mono text-[11px] leading-relaxed relative">
+                      <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 text-slate-300 font-mono text-[11px] leading-relaxed relative">
                         <div className="absolute top-3.5 right-3.5 text-[9px] font-mono text-indigo-400 uppercase tracking-wider font-bold">
                           Personalized Outreach
                         </div>
@@ -4333,7 +4578,7 @@ export default function CandidatesView({
                   {activeActionTab === "rubric" && (
                     <div className="space-y-4 animate-fade-in">
                       {!evalData && (
-                        <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-300 flex items-start gap-2">
+                        <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-300 flex items-start gap-2">
                           <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-400" />
                           <div>
                             <span className="font-bold">Aura AI Evaluation Pending:</span> Screen the candidate's resume using the "Screen" or "Screen Resume" buttons above to compile specialized custom rubrics.
@@ -4445,14 +4690,14 @@ export default function CandidatesView({
                           <span className="text-xs">Fetching candidate email delivery logs...</span>
                         </div>
                       ) : (Array.isArray(emailLogs) && emailLogs.filter((log: any) => log.applicationId === selectedApp?.id).length === 0) ? (
-                        <div className="bg-slate-950 p-6 rounded-xl border border-slate-800 text-center space-y-3">
+                        <div className="bg-slate-950 p-6 rounded-lg border border-slate-800 text-center space-y-3">
                           <div className="h-10 w-10 bg-slate-900 rounded-full flex items-center justify-center text-slate-500 mx-auto">
                             <Mail className="h-5 w-5" />
                           </div>
                           <div>
                             <h6 className="font-bold text-xs text-white">No Automated Emails Dispatched Yet</h6>
                             <p className="text-[10px] text-slate-400 max-w-md mx-auto mt-1 leading-relaxed">
-                              Emails are sent automatically by Aura when you change the candidate's status to <span className="text-indigo-400 font-semibold">"Shortlisted"</span>, schedule an interview in the <span className="text-indigo-400 font-semibold">"Interviews"</span> tab, or move them to <span className="text-indigo-400 font-semibold">"Offered"</span> / <span className="text-indigo-400 font-semibold">"Rejected"</span>.
+                              Emails are sent automatically by Aura when you change the candidate's status to <span className="text-indigo-400 font-semibold">"Shortlisted"</span>, schedule an interview in the <span className="text-indigo-400 font-semibold">"Interviews"</span> tab, or move them to <span className="text-indigo-400 font-semibold">"Offer"</span> / <span className="text-indigo-400 font-semibold">"Rejected"</span>.
                             </p>
                           </div>
                           <div className="pt-2 flex justify-center gap-2">
@@ -4472,7 +4717,7 @@ export default function CandidatesView({
                             .map((log: any, idx: number) => {
                               const isExpanded = expandedEmailId === log.id;
                               return (
-                                <div key={log.id ? `${log.id}-${idx}` : `log-${idx}`} className="bg-slate-950 rounded-xl border border-slate-800 overflow-hidden transition-all duration-200">
+                                <div key={log.id ? `${log.id}-${idx}` : `log-${idx}`} className="bg-slate-950 rounded-lg border border-slate-800 overflow-hidden transition-all duration-200">
                                   {/* Header clickable bar */}
                                   <div 
                                     onClick={() => setExpandedEmailId(isExpanded ? null : log.id)}
@@ -4510,7 +4755,7 @@ export default function CandidatesView({
                                     <div className="flex items-center gap-2 justify-end self-end sm:self-center">
                                       {log.type === "offer" && (
                                         <a
-                                          href={`/api/emails/download-offer/${selectedApp?.id}`}
+                                          href={`${FASTAPI_BASE_URL}/api/emails/download-offer/${selectedApp?.id}`}
                                           target="_blank"
                                           rel="noreferrer"
                                           onClick={(e) => e.stopPropagation()}
@@ -4559,7 +4804,7 @@ export default function CandidatesView({
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         
                         {/* Financial Audit */}
-                        <div className="bg-slate-950 p-5 rounded-xl border border-slate-800 space-y-3 flex flex-col justify-between">
+                        <div className="bg-slate-950 p-5 rounded-lg border border-slate-800 space-y-3 flex flex-col justify-between">
                           <div className="space-y-3">
                             <h5 className="font-bold text-xs text-white uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
                               <DollarSign className="h-3.5 w-3.5" />
@@ -4625,7 +4870,7 @@ export default function CandidatesView({
                         </div>
 
                         {/* Approval State Action */}
-                        <div className="bg-slate-950 p-5 rounded-xl border border-slate-800 space-y-3">
+                        <div className="bg-slate-950 p-5 rounded-lg border border-slate-800 space-y-3">
                           <h5 className="font-bold text-xs text-white uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
                             <ShieldAlert className="h-3.5 w-3.5" />
                             <span>HR Verification Approval</span>
@@ -4683,7 +4928,7 @@ export default function CandidatesView({
                         </div>
 
                         {/* Internal HR Notes */}
-                        <div className="bg-slate-950 p-5 rounded-xl border border-slate-800 flex flex-col justify-between">
+                        <div className="bg-slate-950 p-5 rounded-lg border border-slate-800 flex flex-col justify-between">
                           <div className="space-y-3">
                             <h5 className="font-bold text-xs text-white uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
                               <FileText className="h-3.5 w-3.5" />
@@ -4709,7 +4954,7 @@ export default function CandidatesView({
                       </div>
 
                       {/* Custom Key-Value Attributes Engine */}
-                      <div className="bg-slate-950 p-6 rounded-xl border border-slate-800 space-y-4">
+                      <div className="bg-slate-950 p-6 rounded-lg border border-slate-800 space-y-4">
                         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-850">
                           <div className="space-y-0.5">
                             <h5 className="font-bold text-xs text-white flex items-center gap-2">
@@ -4778,7 +5023,7 @@ export default function CandidatesView({
                         </div>
 
                         {/* Add custom parameter input form */}
-                        <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-850/60 flex flex-col sm:flex-row items-end gap-3.5">
+                        <div className="bg-slate-900/40 p-4 rounded-lg border border-slate-850/60 flex flex-col sm:flex-row items-end gap-3.5">
                           <div className="flex-1 min-w-0 space-y-1">
                             <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Attribute Name / Key:</label>
                             <input
@@ -4831,7 +5076,7 @@ export default function CandidatesView({
               </div>
 
           {/* Process timeline history */}
-          <div className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 shadow-xs space-y-4">
+          <div className="bg-white border border-slate-200 rounded-lg p-6 sm:p-8 shadow-xs space-y-4">
             <h4 className="font-display font-semibold text-slate-900 text-base flex items-center gap-2">
               <Activity className="h-4.5 w-4.5 text-slate-400" />
               <span>Pipeline Activity Log</span>
@@ -4961,7 +5206,7 @@ export default function CandidatesView({
 
         return (
           <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex justify-center items-center p-4">
-            <div className="w-full max-w-4xl bg-white rounded-xl shadow-2xl flex flex-col h-[90vh] max-h-[90vh] animate-scale-in overflow-hidden">
+            <div className="w-full max-w-4xl bg-white rounded-lg shadow-sm flex flex-col h-[90vh] max-h-[90vh] animate-scale-in overflow-hidden">
               
               {/* Header / Info bar */}
               <div className="p-4 border-b border-slate-150 flex flex-col sm:flex-row justify-between sm:items-center gap-3 bg-slate-900 text-white">
@@ -5100,7 +5345,7 @@ export default function CandidatesView({
               <div className="flex-1 bg-slate-800 p-4 sm:p-6 overflow-auto flex flex-col justify-start items-center relative">
                 {!hasPhysicalResume ? (
                   /* Error State: No Resume Uploaded */
-                  <div className="w-full max-w-md bg-slate-900 text-slate-200 p-8 rounded-xl border border-slate-700 shadow-2xl text-center space-y-4 my-auto">
+                  <div className="w-full max-w-md bg-slate-900 text-slate-200 p-8 rounded-lg border border-slate-700 shadow-sm text-center space-y-4 my-auto">
                     <FileText className="h-12 w-12 text-slate-500 mx-auto" />
                     <div>
                       <h4 className="text-base font-bold text-white">No CV Uploaded</h4>
@@ -5111,7 +5356,7 @@ export default function CandidatesView({
                   isPdf && realResumeUrl ? (
                     /* Actual Inline PDF Rendering */
                     <div 
-                      className="w-full h-full min-h-[550px] bg-slate-900 rounded-lg overflow-hidden shadow-2xl border border-slate-700"
+                      className="w-full h-full min-h-[550px] bg-slate-900 rounded-lg overflow-hidden shadow-sm border border-slate-700"
                       style={{
                         transform: `scale(${pdfZoom / 100}) rotate(${pdfRotation}deg)`,
                         transformOrigin: "top center",
@@ -5125,8 +5370,8 @@ export default function CandidatesView({
                     </div>
                   ) : (
                     /* DOCX / DOC Attachment View */
-                    <div className="w-full max-w-2xl bg-white text-slate-800 p-8 rounded-xl shadow-2xl border border-slate-200 text-left space-y-6 my-auto">
-                      <div className="flex items-center gap-4 p-4 bg-indigo-50/60 rounded-xl border border-indigo-100">
+                    <div className="w-full max-w-2xl bg-white text-slate-800 p-8 rounded-lg shadow-sm border border-slate-200 text-left space-y-6 my-auto">
+                      <div className="flex items-center gap-4 p-4 bg-indigo-50/60 rounded-lg border border-indigo-100">
                         <FileText className="h-10 w-10 text-indigo-600 shrink-0" />
                         <div className="flex-1 min-w-0">
                           <h4 className="font-bold text-slate-900 text-base truncate">{fileName}</h4>
@@ -5157,7 +5402,7 @@ export default function CandidatesView({
                   )
                 ) : (
                   /* Real Parsed Text Mode */
-                  <div className="w-full max-w-3xl bg-slate-900 text-slate-100 p-6 sm:p-8 rounded-xl border border-slate-700 shadow-2xl font-mono text-xs max-h-[70vh] overflow-y-auto relative text-left my-auto">
+                  <div className="w-full max-w-3xl bg-slate-900 text-slate-100 p-6 sm:p-8 rounded-lg border border-slate-700 shadow-sm font-mono text-xs max-h-[70vh] overflow-y-auto relative text-left my-auto">
                     <div className="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
                       <h3 className="text-indigo-400 font-bold text-sm uppercase flex items-center gap-2">
                         <ListTodo className="h-4 w-4 text-indigo-400" />
@@ -5214,7 +5459,7 @@ export default function CandidatesView({
       {/* Add Candidate Profile & Application Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 overflow-hidden bg-slate-950/60 backdrop-blur-xs flex justify-center items-center p-4">
-          <div className="w-full max-w-2xl bg-white rounded-xl shadow-2xl flex flex-col max-h-[90vh] animate-scale-in">
+          <div className="w-full max-w-2xl bg-white rounded-lg shadow-sm flex flex-col max-h-[90vh] animate-scale-in">
             {/* Modal Header */}
             <div className="p-5 border-b border-slate-150 flex justify-between items-center bg-slate-900 text-white rounded-t-xl">
               <div>
@@ -5283,7 +5528,7 @@ export default function CandidatesView({
             {/* Scrollable Modal Body */}
             <div className="flex-1 overflow-y-auto p-6">
               {draftExists && (
-                <div className="mb-5 p-3.5 bg-indigo-50 border border-indigo-200 text-indigo-800 rounded-xl flex items-center justify-between gap-3 text-xs font-semibold animate-pulse">
+                <div className="mb-5 p-3.5 bg-indigo-50 border border-indigo-200 text-indigo-800 rounded-lg flex items-center justify-between gap-3 text-xs font-semibold animate-pulse">
                   <div className="flex items-center gap-2.5">
                     <FileText className="h-4.5 w-4.5 text-indigo-600 bg-indigo-100 rounded-lg p-1 shrink-0" />
                     <div>
@@ -5310,12 +5555,28 @@ export default function CandidatesView({
                 </div>
               )}
               
+              {/* Application Source: chosen first, once, for both the Upload CV and the Manual Form Entry tabs */}
+              <div className="mb-5 space-y-1.5 text-left bg-slate-50/50 p-3 rounded-lg border border-slate-150">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Application Source</label>
+                <SearchableSelect
+                  value={source}
+                  onChange={(e) => setSource(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-xs font-medium transition-all bg-white"
+                >
+                  <option value="LinkedIn">LinkedIn</option>
+                  <option value="Naukri">Naukri</option>
+                  <option value="Career Website">Career Website</option>
+                  <option value="Referral">Referral</option>
+                  <option value="External Link">External Link</option>
+                </SearchableSelect>
+              </div>
+
               {uploadOption === "ai" && (
                 <div className="space-y-6">
                   {/* AI Upload Area */}
                   {!isParsing && !parsedSuccess && (
                     <div className="space-y-4">
-                      <div className="text-center p-8 border-2 border-dashed border-indigo-200 bg-indigo-50/10 rounded-xl flex flex-col items-center justify-center space-y-3 hover:border-indigo-500 transition-colors">
+                      <div className="text-center p-8 border-2 border-dashed border-indigo-200 bg-indigo-50/10 rounded-lg flex flex-col items-center justify-center space-y-3 hover:border-indigo-500 transition-colors">
                         <div className="h-12 w-12 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 animate-pulse">
                           <Upload className="h-6 w-6" />
                         </div>
@@ -5332,16 +5593,15 @@ export default function CandidatesView({
                             onChange={async (e) => {
                               if (e.target.files && e.target.files.length > 0) {
                                 const file = e.target.files[0];
+                                // Held as-is and uploaded on submit; the
+                                // browser never reads or encodes it.
                                 setManualCvFile(file);
-                                const reader = new FileReader();
-                                reader.onloadend = () => {
-                                  setManualCvBase64(reader.result as string);
-                                };
-                                reader.readAsDataURL(file);
 
                                 setIsParsing(true);
                                 try {
-                                  const parsedData = await simulateResumeExtraction(file);
+                                  // Every field below is computed server-side and
+                                  // assigned as-is. Do not derive values here.
+                                  const parsedData = await parseResume(file);
                                   setFirstName(parsedData.firstName);
                                   setLastName(parsedData.lastName);
                                   setEmail(parsedData.email);
@@ -5351,15 +5611,17 @@ export default function CandidatesView({
                                   setSkillsText(parsedData.skills);
                                   setResumeText(parsedData.resumeText);
                                   setCandidateLocation(parsedData.location);
-                                  setSource(parsedData.source);
-                                  setExperienceYears(typeof parsedData.experienceYears === 'number' ? parsedData.experienceYears : 0);
-                                  if (typeof parsedData.experienceYears === 'number' && parsedData.experienceYears === 0) {
+                                  setExperienceYears(parsedData.experienceYears);
+                                  if (parsedData.isFresher) {
                                     setAddExperienceLevel("Fresher");
                                   }
                                   setParsedSuccess(true);
                                   triggerToast(`🎉 Successfully parsed uploaded document: ${file.name}`);
-                                } catch (error) {
-                                  triggerToast("❌ Failed to parse document.");
+                                } catch (error: any) {
+                                  const detail =
+                                    error?.response?.data?.detail ||
+                                    "Failed to parse document.";
+                                  triggerToast(`❌ ${detail}`);
                                 } finally {
                                   setIsParsing(false);
                                 }
@@ -5392,7 +5654,6 @@ export default function CandidatesView({
                                   setExperienceYears(resume.experience);
                                   setResumeText(resume.resumeText);
                                   setCandidateLocation(resume.location);
-                                  setSource("Website");
                                   setEducation(resume.education || "");
                                   setIsParsing(false);
                                   setParsedSuccess(true);
@@ -5415,7 +5676,7 @@ export default function CandidatesView({
 
                   {/* AI Extracting Loader */}
                   {isParsing && (
-                    <div className="py-12 flex flex-col items-center justify-center space-y-4 bg-slate-50 border border-slate-150 rounded-xl animate-pulse">
+                    <div className="py-12 flex flex-col items-center justify-center space-y-4 bg-slate-50 border border-slate-150 rounded-lg animate-pulse">
                       <Loader2 className="h-8 w-8 text-indigo-600 animate-spin" />
                       <div className="text-center">
                         <h4 className="font-bold text-xs text-slate-800">Aura AI Agent Core is active...</h4>
@@ -5430,7 +5691,7 @@ export default function CandidatesView({
                   {/* AI Success Feedback & Verification Card */}
                   {parsedSuccess && (
                     <div className="space-y-4 animate-fade-in text-left">
-                      <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl flex items-center justify-between gap-3 text-xs font-semibold">
+                      <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg flex items-center justify-between gap-3 text-xs font-semibold">
                         <div className="flex items-center gap-2.5">
                           <Check className="h-4.5 w-4.5 text-emerald-600 bg-emerald-100 rounded-full p-0.5" />
                           <div>
@@ -5448,11 +5709,11 @@ export default function CandidatesView({
                       </div>
 
                       {/* Target Job Pipeline Selection */}
-                      <div className="bg-indigo-50/60 p-4 rounded-xl border border-indigo-150 space-y-2">
+                      <div className="bg-indigo-50/60 p-4 rounded-lg border border-indigo-150 space-y-2">
                         <label className="text-[11px] font-bold text-indigo-900 uppercase tracking-wider block">
                           Select Target Job Pipeline
                         </label>
-                        <select
+                        <SearchableSelect
                           value={selectedJobId}
                           onChange={(e) => setSelectedJobId(e.target.value)}
                           className="w-full px-3 py-2 rounded-lg border border-indigo-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 text-xs font-semibold bg-white cursor-pointer"
@@ -5460,11 +5721,11 @@ export default function CandidatesView({
                           {Array.isArray(jobs) && jobs.map((job) => (
                             <option key={job.id || job.jobId} value={job.jobId || job.id}>{formatJobId(job.jobId || job.id)} — {cleanJobTitle(job.title)}</option>
                           ))}
-                        </select>
+                        </SearchableSelect>
                       </div>
 
                       {/* Verified Profile Card */}
-                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                      <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2.5">
                             <div className="h-9 w-9 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-xs">
@@ -5501,6 +5762,15 @@ export default function CandidatesView({
                               className="w-full px-2.5 py-1 rounded-md border border-slate-200 text-xs font-semibold text-slate-800 bg-white focus:ring-2 focus:ring-indigo-500/20"
                             />
                           </div>
+                          <div className="space-y-1">
+                            <label className="text-slate-400 font-medium block text-[10px] uppercase">Work Mode</label>
+                            <WorkModeSelect
+                              value={addWorkMode}
+                              onChange={setAddWorkMode}
+                              jobWorkMode={selectedJobWorkMode}
+                              className="w-full px-2.5 py-1 rounded-md border border-slate-200 text-xs font-semibold text-slate-800 bg-white focus:ring-2 focus:ring-indigo-500/20"
+                            />
+                          </div>
                           <div><span className="text-slate-400 font-medium">Location:</span> <span className="font-semibold text-slate-700">{candidateLocation || "Remote"}</span></div>
                           <div><span className="text-slate-400 font-medium">Experience:</span> <span className="font-semibold text-slate-700">{experienceYears} Years</span></div>
                         </div>
@@ -5534,7 +5804,7 @@ export default function CandidatesView({
                           type="button"
                           disabled={isSubmitting}
                           onClick={() => handleAddCandidateSubmit()}
-                          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-indigo-500/20 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm hover:shadow-indigo-500/20 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
                         >
                           {isSubmitting ? (
                             <>
@@ -5673,7 +5943,7 @@ export default function CandidatesView({
                   <div className={`grid grid-cols-1 ${addExperienceLevel === "Experienced" ? "md:grid-cols-4" : "md:grid-cols-3"} gap-4`}>
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Target Job Pipeline</label>
-                      <select
+                      <SearchableSelect
                         value={selectedJobId}
                         onChange={(e) => setSelectedJobId(e.target.value)}
                         className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-xs font-medium transition-all bg-white"
@@ -5681,7 +5951,7 @@ export default function CandidatesView({
                         {Array.isArray(jobs) && jobs.map((job) => (
                           <option key={job.id} value={job.id}>{job.title} ({formatJobId(job.id)})</option>
                         ))}
-                      </select>
+                      </SearchableSelect>
                     </div>
                     {addExperienceLevel === "Experienced" && (
                       <div className="space-y-1.5 animate-fade-in">
@@ -5697,20 +5967,6 @@ export default function CandidatesView({
                       </div>
                     )}
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Application Source</label>
-                      <select
-                        value={source}
-                        onChange={(e) => setSource(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-xs font-medium transition-all bg-white"
-                      >
-                        <option value="LinkedIn">LinkedIn</option>
-                        <option value="Naukri">Naukri</option>
-                        <option value="Career Website">Career Website</option>
-                        <option value="Referral">Referral</option>
-                        <option value="External Link">External Link</option>
-                      </select>
-                    </div>
-                    <div className="space-y-1.5">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Location</label>
                       <select
                         value={candidateLocation || "Pune, India"}
@@ -5721,11 +5977,20 @@ export default function CandidatesView({
                         <option value="Remote">Remote</option>
                       </select>
                     </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Work Mode</label>
+                      <WorkModeSelect
+                        value={addWorkMode}
+                        onChange={setAddWorkMode}
+                        jobWorkMode={selectedJobWorkMode}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-xs font-medium transition-all bg-white cursor-pointer"
+                      />
+                    </div>
                   </div>
 
                   {/* Financial & Verification Data (Candidate Tracker Fields) - Only visible if Experienced */}
                   {addExperienceLevel === "Experienced" && (
-                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-4 text-left animate-fade-in">
+                    <div className="bg-slate-50 p-4 rounded-lg border border-slate-200/80 space-y-4 text-left animate-fade-in">
                       <div className="flex items-center gap-1.5 pb-2 border-b border-slate-200">
                         <Sliders className="h-4 w-4 text-indigo-600" />
                         <h4 className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">HR Tracker Parameters</h4>
@@ -5792,7 +6057,7 @@ export default function CandidatesView({
 
                   {/* Education visible only if Fresher */}
                   {addExperienceLevel === "Fresher" && (
-                    <div className="bg-slate-50/50 p-4 rounded-xl border border-slate-200/80 space-y-4 text-left animate-fade-in">
+                    <div className="bg-slate-50/50 p-4 rounded-lg border border-slate-200/80 space-y-4 text-left animate-fade-in">
                       <div className="flex items-center gap-1.5 pb-2 border-b border-slate-150">
                         <GraduationCap className="h-4 w-4 text-indigo-600" />
                         <h4 className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Academic & Link Details (Fresher)</h4>
@@ -5860,7 +6125,7 @@ export default function CandidatesView({
                   )}
 
                   {/* Upload CV/Resume Option at the very last */}
-                  <div className="space-y-1.5 text-left bg-slate-50/50 p-4 rounded-xl border border-slate-200 border-dashed">
+                  <div className="space-y-1.5 text-left bg-slate-50/50 p-4 rounded-lg border border-slate-200 border-dashed">
                     <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex justify-between">
                       <span>Upload CV / Resume Document (PDF only)</span>
                       <span className="text-[9px] text-slate-400 font-normal">Optional Attachment</span>
@@ -5879,12 +6144,8 @@ export default function CandidatesView({
                               triggerToast("❌ Supported document formats: PDF, DOCX, DOC.");
                               return;
                             }
+                            // Held as-is and uploaded on submit.
                             setManualCvFile(file);
-                            const reader = new FileReader();
-                            reader.onloadend = () => {
-                              setManualCvBase64(reader.result as string);
-                            };
-                            reader.readAsDataURL(file);
                             triggerToast(`📎 Attached CV: ${file.name}`);
                           }
                         }}
@@ -5904,7 +6165,6 @@ export default function CandidatesView({
                             type="button"
                             onClick={() => {
                               setManualCvFile(null);
-                              setManualCvBase64("");
                             }}
                             className="text-slate-400 hover:text-slate-600 focus:outline-hidden"
                           >
@@ -5931,9 +6191,17 @@ export default function CandidatesView({
                     </button>
                     <button
                       type="submit"
-                      className="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg transition-colors cursor-pointer shadow-xs"
+                      disabled={isSubmitting}
+                      className="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg transition-colors cursor-pointer shadow-xs flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
                     >
-                      Create Profile & Sync ATS
+                      {isSubmitting ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span>Creating Candidate & Running AI Screening...</span>
+                        </>
+                      ) : (
+                        <span>Create Profile & Sync ATS</span>
+                      )}
                     </button>
                   </div>
 
@@ -5942,6 +6210,13 @@ export default function CandidatesView({
 
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Toast: sits above the Add Candidate modal (z-50) so errors are visible while it is open */}
+      {toast && (
+        <div role="status" className="fixed bottom-5 right-5 z-[60] max-w-sm flex items-start gap-2.5 bg-slate-900 border border-slate-800 text-white px-4 py-3 rounded-lg shadow-lg animate-fade-in text-xs font-bold">
+          <span className="leading-relaxed">{toast}</span>
         </div>
       )}
     </div>

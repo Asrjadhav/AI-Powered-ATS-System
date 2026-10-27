@@ -5,7 +5,7 @@
 
 import axios from "axios";
 
-const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || (import.meta as any).env?.VITE_API_URL || "https://ats-fastapi-backend.onrender.com";
+const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || (import.meta as any).env?.VITE_API_URL || "http://127.0.0.1:8000";
 
 const apiConfig = {
   headers: {
@@ -99,15 +99,13 @@ export const NotificationRepository = {
       console.error("NotificationRepository.delete error:", err?.response?.data || err.message);
       throw new Error(err?.response?.data?.detail || "Failed to delete notification.");
     }
-  },
-
-  async simulate(): Promise<any> {
-    const alerts = [
-      { title: "Smart Candidate Match", message: "A new Lead Android Developer matching 94% skills applied.", type: "ai_screening_completed" },
-      { title: "Interview Feedback Pending", message: "Technical round completed. Feedback is pending.", type: "interview_reminder" },
-      { title: "Offer Letter Generated", message: "Draft Offer Letter generated.", type: "offer_accepted" }
-    ];
-    const picked = alerts[Math.floor(Math.random() * alerts.length)];
-    return this.create(picked);
   }
+
+  // simulate() previously inserted one of three hardcoded fake alerts
+  // ("A new Lead Android Developer matching 94% skills applied", etc.) into
+  // this.create(). While notifications were localStorage-only that meant
+  // fabricated data in one browser tab; now that create() reaches the real
+  // Postgres table, the same call would write fake notifications visible to
+  // every user. Removed rather than ported — this was already flagged as a
+  // demo-only feature that shouldn't have a production backend at all.
 };

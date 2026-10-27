@@ -7,17 +7,19 @@
 import React, { useState, useEffect } from "react";
 import { useTranslation } from "../utils/i18n";
 import { LocalStorageService } from "../services/localStorageService";
-import { 
-  CandidateRepository, 
-  JobRepository, 
+import {
+  ApplicationRepository,
+  InterviewRepository,
   StatsRepository
 } from "../repositories";
 import { 
   PageContainer,
   PageHeader,
   StatCard,
-  CompactActivityCard,
-  StatusBadge
+  StatusBadge,
+  DataTable,
+  ScoreBadge,
+  Avatar
 } from "./common/UIPrimitives";
 import { 
   Briefcase, 
@@ -69,37 +71,55 @@ export default function DashboardView({ onNavigate, onSelectApplication }: Dashb
   const [offersTotal, setOffersTotal] = useState(0);
   const [newApplications, setNewApplications] = useState(0);
   const [aiShortlisted, setAiShortlisted] = useState(0);
+  const [interviewStageCount, setInterviewStageCount] = useState(0);
+  const [offerCount, setOfferCount] = useState(0);
+  const [hiredCount, setHiredCount] = useState(0);
   const [activeVacancies, setActiveVacancies] = useState(0);
-  const [interviewsToday, setInterviewsToday] = useState(4);
-  const [interviewCompleted, setInterviewCompleted] = useState(12);
-  const [pendingOffers, setPendingOffers] = useState(3);
+  const [interviewsToday, setInterviewsToday] = useState(0);
+  const [interviewCompleted, setInterviewCompleted] = useState(0);
+  const [pendingOffers, setPendingOffers] = useState(0);
   const [talentPoolTotal, setTalentPoolTotal] = useState(0);
 
   const [recentApps, setRecentApps] = useState<any[]>([]);
   const [allApplications, setAllApplications] = useState<any[]>([]);
+  const [upcomingInterviews, setUpcomingInterviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const loadDashboardStats = async () => {
     try {
       setLoading(true);
-      const [stats, allAppsList] = await Promise.all([
+      // Counts come from /api/stats, already aggregated in the database.
+      // Applications and interviews are still fetched because the panels below
+      // list individual records, not just totals.
+      const [stats, applicationsList, interviewsList] = await Promise.all([
         StatsRepository.getDashboardStats(),
-        CandidateRepository.getAll()
+        ApplicationRepository.getAll(),
+        InterviewRepository.getAll()
       ]);
 
       setTotalCandidates(stats.activeCandidates);
-      setInterviewsTotal(stats.totalInterviews !== undefined ? stats.totalInterviews : (stats.upcomingInterviews + stats.completedInterviews + stats.cancelledInterviews + (stats.pendingFeedback || 0)));
-      setOffersTotal(stats.totalOffers !== undefined ? stats.totalOffers : (stats.offeredCount + stats.pendingOffers));
-      setNewApplications(stats.newApplicationsCount !== undefined ? stats.newApplicationsCount : stats.appsTodayCount);
+      setInterviewsTotal(stats.totalInterviews);
+      setOffersTotal(stats.totalOffers);
+      setNewApplications(stats.newApplicationsCount);
       setAiShortlisted(stats.aiShortlistedCount);
+      setInterviewStageCount(stats.interviewStageCount);
+      setOfferCount(stats.offerCount);
+      setHiredCount(stats.hiredCount);
       setActiveVacancies(stats.totalJobs);
       setTalentPoolTotal(stats.talentPoolCount);
+      setInterviewsToday(stats.todayInterviews);
+      setInterviewCompleted(stats.completedInterviews);
+      setPendingOffers(stats.pendingOffers);
+      setUpcomingInterviews(interviewsList.filter((interview: any) => {
+        const status = String(interview.status || "").toLowerCase();
+        return interview.date >= new Date().toISOString().split("T")[0] && !["cancelled", "canceled", "completed"].includes(status);
+      }).slice(0, 5));
 
-      setAllApplications(allAppsList || []);
+      setAllApplications(applicationsList || []);
 
       // Sort recent applications
-      if (allAppsList && allAppsList.length > 0) {
+      if (applicationsList && applicationsList.length > 0) {
         const getAppTime = (app: any) => {
           const dateStr = app.appliedAt || app.appliedDate || app.createdAt || app.candidate?.createdAt;
           if (dateStr) return new Date(dateStr).getTime();
@@ -108,7 +128,7 @@ export default function DashboardView({ onNavigate, onSelectApplication }: Dashb
           }
           return 0;
         };
-        const sortedApps = [...allAppsList]
+        const sortedApps = [...applicationsList]
           .sort((a: any, b: any) => getAppTime(b) - getAppTime(a))
           .slice(0, 5);
         setRecentApps(sortedApps);
@@ -151,9 +171,7 @@ export default function DashboardView({ onNavigate, onSelectApplication }: Dashb
   // Dynamic weekly applications chart data computed from allApplications
   const weeklyApplicationsData = React.useMemo(() => {
     const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-    const counts: Record<string, number> = {
-      "Mon": 14, "Tue": 28, "Wed": 42, "Thu": 35, "Fri": 50, "Sat": 18, "Sun": 12
-    };
+    const counts: Record<string, number> = { "Mon": 0, "Tue": 0, "Wed": 0, "Thu": 0, "Fri": 0, "Sat": 0, "Sun": 0 };
     (allApplications || []).forEach(app => {
       const dateStr = app.appliedAt || app.appliedDate || app.createdAt;
       if (dateStr) {
@@ -175,30 +193,23 @@ export default function DashboardView({ onNavigate, onSelectApplication }: Dashb
 
   // Dynamic pipeline funnel chart data
   const pipelineFunnelData = React.useMemo(() => {
-    const total = totalCandidates || 1482;
+    const total = totalCandidates;
     return [
-      { stage: "Applied", count: total, color: "#1F3B75" },
-      { stage: "AI Shortlisted", count: Math.round(total * 0.61), color: "#2E549B" },
-      { stage: "Interviewing", count: Math.round(total * 0.24), color: "#557DBF" },
-      { stage: "Offered", count: Math.round(total * 0.08), color: "#f59e0b" },
-      { stage: "Hired", count: Math.round(total * 0.035), color: "#10b981" }
+      { stage: "Applications", count: total, color: "#1F3B75" },
+      { stage: "Shortlisted", count: aiShortlisted, color: "#2E549B" },
+      { stage: "Interviewing", count: interviewStageCount, color: "#557DBF" },
+      { stage: "Offer", count: offerCount, color: "#f59e0b" },
+      { stage: "Hired", count: hiredCount, color: "#10b981" }
     ];
-  }, [totalCandidates]);
+  }, [totalCandidates, aiShortlisted, interviewStageCount, offerCount, hiredCount]);
 
-  // Upcoming Interviews List
-  const upcomingInterviewsList = [
-    { id: "int-1", candidate: "Sneha Patel", role: "Lead UX Designer", time: "10:30 AM", interviewer: "David Kemp" },
-    { id: "int-2", candidate: "Vikram Malhotra", role: "Senior React Engineer", time: "02:00 PM", interviewer: "Elena Rostova" },
-    { id: "int-3", candidate: "Ananya Roy", role: "Product Manager", time: "04:30 PM", interviewer: "Sophia Patel" }
-  ];
-
-  // Recent Activity Feed
-  const recentActivities = [
-    { id: "act-1", text: "Sneha Patel scored 94% on AI resume screening", time: "15m ago" },
-    { id: "act-2", text: "Offer letter generated for Vikram Malhotra (Senior React Engineer)", time: "1h ago" },
-    { id: "act-3", text: "Technical interview completed for Ananya Roy", time: "3h ago" },
-    { id: "act-4", text: "New application received from Rajesh Verma for AI Engineer", time: "5h ago" }
-  ];
+  const upcomingInterviewsList = upcomingInterviews.map((interview: any) => ({
+    id: interview.id,
+    candidate: interview.candidateName || "Candidate",
+    role: interview.jobTitle || "Role not specified",
+    time: interview.time || "Time not specified",
+    interviewer: interview.interviewer || "Interviewer not specified"
+  }));
 
   if (loading) {
     return (
@@ -206,7 +217,7 @@ export default function DashboardView({ onNavigate, onSelectApplication }: Dashb
         <div className="h-10 w-64 bg-slate-200 dark:bg-slate-800 rounded-lg" />
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3.5">
           {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="h-[108px] bg-slate-200 dark:bg-slate-800 rounded-xl" />
+            <div key={i} className="h-[108px] bg-slate-200 dark:bg-slate-800 rounded-lg" />
           ))}
         </div>
       </PageContainer>
@@ -215,14 +226,14 @@ export default function DashboardView({ onNavigate, onSelectApplication }: Dashb
 
   if (error) {
     return (
-      <div className="max-w-2xl mx-auto mt-12 p-8 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-4">
+      <div className="max-w-2xl mx-auto mt-12 p-8 bg-rose-50 border border-rose-200 rounded-lg flex items-start gap-4">
         <AlertCircle className="h-6 w-6 text-rose-600 shrink-0 mt-0.5" />
         <div>
           <h3 className="font-display font-semibold text-rose-900 text-lg">System Dashboard Error</h3>
           <p className="text-sm text-rose-700 mt-1">{error}</p>
           <button 
             onClick={() => window.location.reload()}
-            className="mt-4 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-medium text-xs rounded-xl transition-all"
+            className="mt-4 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-medium text-xs rounded-lg transition-all"
           >
             Retry Connection
           </button>
@@ -231,159 +242,197 @@ export default function DashboardView({ onNavigate, onSelectApplication }: Dashb
     );
   }
 
+  const recentAppsColumns = [
+    { header: "Candidate", render: (row: any) => {
+        const name = row.candidate?.name || row.candidateName || `${row.firstName || ''} ${row.lastName || ''}`.trim() || `Candidate`;
+        return (
+          <div className="flex items-center gap-3">
+            <Avatar name={name} size="sm" />
+            <span className="font-medium text-slate-900">{name}</span>
+          </div>
+        );
+      }
+    },
+    { header: "Applied Role", render: (row: any) => <span className="text-slate-500">{row.jobTitle || row.job?.title || row.position || "Software Role"}</span> },
+    { header: "Match Score", render: (row: any) => <ScoreBadge score={Number(row.aiScore ?? row.matchScore ?? row.candidate?.aiScore ?? 0)} /> },
+    { header: "Status", render: (row: any) => <StatusBadge status={row.status || "New"} /> }
+  ];
+
   return (
     <PageContainer>
-      
-      {/* 1. PAGE HEADER (70–80px height) */}
       <PageHeader 
-        title="Home"
-        subtitle="Overview of your recruitment pipeline and hiring activity."
+        title="Dashboard"
+        subtitle="Overview of your recruitment pipeline and hiring activity"
         actions={
-          <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
-            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span>Live Sync Active</span>
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-md shadow-sm text-xs font-medium text-slate-600">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            Live Sync
           </div>
         }
       />
 
-      {/* 2. TOP KPI ROW (5 CARDS - 100–115px HEIGHT) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-3.5">
+      {/* Primary Metrics */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <StatCard 
           title="Active Vacancies"
           value={activeVacancies}
           icon={Briefcase}
-          badgeColor="brand"
-          subtitle="Open requisitions →"
+          subtitle="Open requisitions"
           onClick={() => onNavigate("jobs")}
         />
         <StatCard 
-          title="Total Candidates"
-          value={totalCandidates}
+          title="Total Applications"
+          value={allApplications.length}
           icon={Users}
-          badgeColor="blue"
-          subtitle="Active pipeline →"
-          onClick={() => onNavigate("candidates")}
-        />
-        <StatCard 
-          title="Talent Pool"
-          value={talentPoolTotal}
-          icon={Database}
-          badgeColor="emerald"
-          subtitle="Sourced candidates →"
-          onClick={() => onNavigate("talent_pool")}
+          subtitle="Total applications"
+          onClick={() => onNavigate("applications")}
         />
         <StatCard 
           title="Interviews"
           value={interviewsTotal}
           icon={Calendar}
-          badgeColor="amber"
-          subtitle="Total scheduled →"
+          subtitle="Scheduled & completed"
           onClick={() => onNavigate("interviews")}
         />
         <StatCard 
-          title="Offers"
-          value={offersTotal}
-          icon={Award}
-          badgeColor="brand"
-          subtitle="Extended offers →"
-          onClick={() => onNavigate("offers")}
-        />
-      </div>
-
-      {/* 3. SECONDARY OPERATIONAL KPI ROW (60–70px HEIGHT CARDS) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <CompactActivityCard 
           title="New Applications"
           value={newApplications}
-          badgeText="Unscreened"
-          badgeColor="blue"
-          onClick={() => onNavigate("candidates", { candidatesFilterStatus: "New Applications" })}
-        />
-        <CompactActivityCard 
-          title="AI Shortlisted"
-          value={aiShortlisted}
-          badgeText="Top Match"
-          badgeColor="brand"
-          onClick={() => onNavigate("candidates", { candidatesFilterStatus: "AI Shortlisted" })}
-        />
-        <CompactActivityCard 
-          title="Interviews Today"
-          value={interviewsToday}
-          badgeText="Scheduled"
-          badgeColor="amber"
-          onClick={() => onNavigate("interviews", { interviewsFilter: "today" })}
-        />
-        <CompactActivityCard 
-          title="Interviews Completed"
-          value={interviewCompleted}
-          badgeText="Evaluated"
-          badgeColor="emerald"
-          onClick={() => onNavigate("interviews", { interviewsFilter: "completed" })}
-        />
-        <CompactActivityCard 
-          title="Pending Offers"
-          value={pendingOffers}
-          badgeText="Action Needed"
-          badgeColor="rose"
-          onClick={() => onNavigate("offers", { offersFilterStatus: "Pending" })}
+          icon={Plus}
+          subtitle="Today"
+          onClick={() => onNavigate("applications")}
         />
       </div>
 
-      {/* 4. CHART SECTION (70% / 30% GRID, 260–300px HEIGHT) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        
-        {/* LEFT 70%: APPLICATION INFLOW TRENDS */}
-        <div className="lg:col-span-7 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs space-y-2">
-          <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-2.5">
-            <div>
-              <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
-                <TrendingUp className="h-4 w-4 text-brand-600" />
-                <span>Application Inflow Trends</span>
-              </h3>
-              <p className="text-[11px] text-slate-400">Weekly candidate submission volume across active jobs.</p>
+      {/* Secondary Metrics */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+        <button
+          type="button"
+          onClick={() => onNavigate("applications")}
+          className="w-full text-left bg-white border border-slate-200 rounded-lg p-4 shadow-sm hover:border-[#1F3B75]/30 hover:shadow-md transition-all duration-200"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-violet-200 bg-violet-50 text-violet-700">
+              <Sparkles className="h-4 w-4" />
             </div>
-            <span className="text-[10.5px] font-mono font-bold text-brand-600 bg-brand-50 px-2 py-0.5 rounded border border-brand-200">
-              +{weeklyApplicationsData.reduce((acc, curr) => acc + curr.count, 0)} Applications
+            <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-slate-400">AI</span>
+          </div>
+          <div className="mt-4">
+            <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">AI Shortlisted</p>
+            <div className="mt-2 flex items-end justify-between gap-3">
+              <span className="text-2xl font-semibold leading-none text-slate-900">{aiShortlisted}</span>
+              <span className="text-[10px] font-medium text-slate-500">Pending Review</span>
+            </div>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onNavigate("talent_pool")}
+          className="w-full text-left bg-white border border-slate-200 rounded-lg p-4 shadow-sm hover:border-[#1F3B75]/30 hover:shadow-md transition-all duration-200"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700">
+              <Database className="h-4 w-4" />
+            </div>
+            <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-slate-400">Pool</span>
+          </div>
+          <div className="mt-4">
+            <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">Talent Pool</p>
+            <div className="mt-2 flex items-end justify-between gap-3">
+              <span className="text-2xl font-semibold leading-none text-slate-900">{talentPoolTotal}</span>
+              <span className="text-[10px] font-medium text-slate-500">Sourced</span>
+            </div>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onNavigate("interviews")}
+          className="w-full text-left bg-white border border-slate-200 rounded-lg p-4 shadow-sm hover:border-[#1F3B75]/30 hover:shadow-md transition-all duration-200"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-amber-200 bg-amber-50 text-amber-700">
+              <Calendar className="h-4 w-4" />
+            </div>
+            <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-slate-400">Today</span>
+          </div>
+          <div className="mt-4">
+            <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">Interviews Today</p>
+            <div className="mt-2 flex items-end justify-between gap-3">
+              <span className="text-2xl font-semibold leading-none text-slate-900">{interviewsToday}</span>
+              <span className="text-[10px] font-medium text-slate-500">Scheduled</span>
+            </div>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onNavigate("offers")}
+          className="w-full text-left bg-white border border-slate-200 rounded-lg p-4 shadow-sm hover:border-[#1F3B75]/30 hover:shadow-md transition-all duration-200"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-rose-200 bg-rose-50 text-rose-700">
+              <Award className="h-4 w-4" />
+            </div>
+            <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-slate-400">Offers</span>
+          </div>
+          <div className="mt-4">
+            <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">Pending Offers</p>
+            <div className="mt-2 flex items-end justify-between gap-3">
+              <span className="text-2xl font-semibold leading-none text-slate-900">{pendingOffers}</span>
+              <span className="text-[10px] font-medium text-slate-500">Awaiting</span>
+            </div>
+          </div>
+        </button>
+      </div>
+
+      {/* Charts Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white border border-slate-200 rounded-lg shadow-sm p-5 flex flex-col h-[320px]">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="font-semibold text-slate-900">Application Inflow</h3>
+              <p className="text-xs text-slate-500">Weekly volume across active jobs</p>
+            </div>
+            <span className="text-xs font-medium text-[#1F3B75] bg-slate-50 px-2 py-1 rounded border border-slate-200">
+              +{weeklyApplicationsData.reduce((a, c) => a + c.count, 0)} This Week
             </span>
           </div>
-
-          <div className="h-[250px] w-full pt-1">
+          <div className="flex-1 min-h-0">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={weeklyApplicationsData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+              <AreaChart data={weeklyApplicationsData} margin={{ top: 5, right: 0, left: -25, bottom: 0 }}>
                 <defs>
                   <linearGradient id="brandInflowGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#1F3B75" stopOpacity={0.25} />
+                    <stop offset="5%" stopColor="#1F3B75" stopOpacity={0.15} />
                     <stop offset="95%" stopColor="#1F3B75" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" opacity={0.5} />
-                <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderRadius: '8px', color: '#fff', fontSize: '12px' }} />
-                <Area type="monotone" dataKey="count" stroke="#1F3B75" strokeWidth={2.5} fillOpacity={1} fill="url(#brandInflowGrad)" />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                <Tooltip contentStyle={{ backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #e2e8f0', boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)' }} itemStyle={{ color: '#0f172a', fontWeight: 500 }} />
+                <Area type="monotone" dataKey="count" stroke="#1F3B75" strokeWidth={2} fill="url(#brandInflowGrad)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        {/* RIGHT 30%: CANDIDATE PIPELINE FUNNEL */}
-        <div className="lg:col-span-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs space-y-2">
-          <div className="border-b border-slate-100 dark:border-slate-800 pb-2.5">
-            <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
-              <Activity className="h-4 w-4 text-brand-600" />
-              <span>Candidate Pipeline / Funnel</span>
-            </h3>
-            <p className="text-[11px] text-slate-400">Current stage progression volume.</p>
+        <div className="bg-white border border-slate-200 rounded-lg shadow-sm p-5 flex flex-col h-[320px]">
+          <div className="mb-4">
+            <h3 className="font-semibold text-slate-900">Candidate Pipeline</h3>
+            <p className="text-xs text-slate-500">Current stage progression</p>
           </div>
-
-          <div className="h-[250px] w-full pt-1">
+          <div className="flex-1 min-h-0">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={pipelineFunnelData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" opacity={0.5} />
-                <XAxis dataKey="stage" tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderRadius: '8px', color: '#fff', fontSize: '12px' }} />
-                <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+              <BarChart data={pipelineFunnelData} layout="vertical" margin={{ top: 5, right: 20, left: 20, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                <XAxis type="number" hide />
+                <YAxis dataKey="stage" type="category" tick={{ fontSize: 12, fill: '#475569' }} axisLine={false} tickLine={false} />
+                <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{ backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #e2e8f0' }} />
+                <Bar dataKey="count" radius={[0, 4, 4, 0]} barSize={24}>
                   {pipelineFunnelData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
@@ -392,121 +441,50 @@ export default function DashboardView({ onNavigate, onSelectApplication }: Dashb
             </ResponsiveContainer>
           </div>
         </div>
-
       </div>
 
-      {/* 5. RECENT CANDIDATES + UPCOMING INTERVIEWS (65-70% / 30-35% GRID) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        
-        {/* LEFT 65-70%: RECENT CANDIDATE APPLICATIONS (CONTENT-DRIVEN HEIGHT, NO GIANT WHITE SPACE) */}
-        <div className="lg:col-span-7 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs space-y-3">
-          <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-2.5">
+      {/* Bottom Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 flex flex-col gap-4">
+          <div className="flex items-center justify-between">
             <div>
-              <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
-                <Users className="h-4 w-4 text-brand-600" />
-                <span>Recent Candidate Applications</span>
-              </h3>
-              <p className="text-[11px] text-slate-400">Latest applicants indexed across active job requisitions.</p>
+              <h3 className="font-semibold text-slate-900">Recent Applications</h3>
+              <p className="text-xs text-slate-500">Latest candidates requiring review</p>
             </div>
-            <button 
-              onClick={() => onNavigate("candidates")} 
-              className="text-xs font-bold text-brand-600 hover:text-brand-700 flex items-center gap-1 cursor-pointer"
-            >
-              <span>View All</span>
-              <ChevronRight className="h-3.5 w-3.5" />
+            <button onClick={() => onNavigate("applications")} className="text-sm font-medium text-[#1F3B75] hover:text-[#152a55] flex items-center gap-1">
+              View All <ChevronRight className="h-4 w-4" />
             </button>
           </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950">
-                  <th className="py-2.5 px-3">Candidate</th>
-                  <th className="py-2.5 px-3">Applied Role</th>
-                  <th className="py-2.5 px-3 text-right">ATS Score</th>
-                  <th className="py-2.5 px-3 text-center">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
-                {recentApps.slice(0, 5).map((app, idx) => {
-                  const name = app.candidate?.name || app.candidateName || `${app.firstName || ''} ${app.lastName || ''}`.trim() || `Candidate #${idx + 1}`;
-                  const jobTitle = app.jobTitle || app.job?.title || app.position || "Software Role";
-                  const score = app.aiScore || app.matchScore || app.candidate?.aiScore || 85;
-                  const status = app.status || "Applied";
-                  return (
-                    <tr 
-                      key={app.id || idx}
-                      onClick={() => onSelectApplication(app)}
-                      className="hover:bg-slate-50 dark:hover:bg-slate-850 cursor-pointer h-12"
-                    >
-                      <td className="py-2.5 px-3 font-bold text-slate-900 dark:text-white truncate">{name}</td>
-                      <td className="py-2.5 px-3 text-slate-500 truncate">{jobTitle}</td>
-                      <td className="py-2.5 px-3 text-right font-mono font-bold text-brand-600">{score}%</td>
-                      <td className="py-2.5 px-3 text-center">
-                        <StatusBadge status={status} variant="brand" />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <DataTable 
+            columns={recentAppsColumns} 
+            data={recentApps.slice(0, 5)} 
+            onRowClick={(row: any) => onSelectApplication(row)} 
+          />
         </div>
 
-        {/* RIGHT 30-35%: UPCOMING INTERVIEWS + RECENT RECRUITMENT ACTIVITY */}
-        <div className="lg:col-span-5 space-y-5">
-          
-          {/* UPCOMING INTERVIEWS */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs space-y-2.5">
-            <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-2.5">
-              <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
-                <Calendar className="h-4 w-4 text-amber-500" />
-                <span>Upcoming Interviews</span>
-              </h3>
-              <button onClick={() => onNavigate("interviews")} className="text-xs font-bold text-brand-600 hover:text-brand-700 cursor-pointer">
-                Schedule
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              {upcomingInterviewsList.map((int) => (
-                <div key={int.id} className="p-2.5 bg-slate-50/70 dark:bg-slate-950 border border-slate-200/70 dark:border-slate-800 rounded-lg text-xs space-y-0.5">
-                  <div className="flex justify-between items-start font-bold">
-                    <span className="text-slate-900 dark:text-white">{int.candidate}</span>
-                    <span className="font-mono text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded text-[10px]">{int.time}</span>
-                  </div>
-                  <p className="text-[11px] text-slate-500">{int.role} • {int.interviewer}</p>
-                </div>
-              ))}
-            </div>
+        <div className="flex flex-col gap-4">
+          <div>
+            <h3 className="font-semibold text-slate-900">Upcoming Interviews</h3>
+            <p className="text-xs text-slate-500">Today's schedule</p>
           </div>
-
-          {/* RECENT RECRUITMENT ACTIVITY */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs space-y-2.5">
-            <div className="border-b border-slate-100 dark:border-slate-800 pb-2.5">
-              <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
-                <Clock className="h-4 w-4 text-brand-600" />
-                <span>Recent Recruitment Activity</span>
-              </h3>
-            </div>
-
-            <div className="space-y-2.5 pt-0.5">
-              {recentActivities.map((act) => (
-                <div key={act.id} className="flex items-start gap-2 text-xs">
-                  <span className="h-2 w-2 rounded-full bg-brand-600 mt-1 shrink-0" />
-                  <div className="flex-1 space-y-0.5">
-                    <p className="text-slate-700 dark:text-slate-300 font-medium leading-tight">{act.text}</p>
-                    <span className="text-[10px] text-slate-400 font-mono block">{act.time}</span>
-                  </div>
+          <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden divide-y divide-slate-100">
+            {upcomingInterviewsList.map((int) => (
+              <div key={int.id} className="p-4 hover:bg-slate-50 transition-colors">
+                <div className="flex justify-between items-start mb-1">
+                  <span className="font-medium text-slate-900 text-sm">{int.candidate}</span>
+                  <span className="text-xs font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">{int.time}</span>
                 </div>
-              ))}
-            </div>
+                <div className="flex items-center text-xs text-slate-500 gap-2 mt-2">
+                  <Briefcase className="h-3.5 w-3.5" /> <span className="truncate">{int.role}</span>
+                </div>
+                <div className="flex items-center text-xs text-slate-500 gap-2 mt-1">
+                  <UserCheck className="h-3.5 w-3.5" /> <span>{int.interviewer}</span>
+                </div>
+              </div>
+            ))}
           </div>
-
         </div>
-
       </div>
-
     </PageContainer>
   );
 }

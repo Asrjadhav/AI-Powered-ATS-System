@@ -22,13 +22,13 @@ export default function ForgotPasswordView({ onBack }: Props) {
   };
 
   return (
-    <div className="w-full max-w-lg bg-white/5 backdrop-blur-2xl border border-white/10 rounded-3xl p-8 shadow-2xl text-white">
+    <div className="w-full max-w-lg bg-white/5 backdrop-blur-2xl border border-white/10 rounded-lg p-8 shadow-sm text-white">
       <h2 className="text-2xl font-bold mb-4">{view === "form" ? "Forgot Password" : "Reset Password Email Preview"}</h2>
       
       {view === "form" ? (
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
-            <div className="p-3 bg-rose-500/10 border border-rose-500/25 rounded-xl text-xs font-medium text-rose-300">
+            <div className="p-3 bg-rose-500/10 border border-rose-500/25 rounded-lg text-xs font-medium text-rose-300">
               ⚠️ {error}
             </div>
           )}
@@ -42,13 +42,13 @@ export default function ForgotPasswordView({ onBack }: Props) {
                 placeholder="name@encureit.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-xs text-white"
+                className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-xs text-white"
               />
             </div>
           </div>
           <button
             type="submit"
-            className="w-full py-3 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+            className="w-full py-3 bg-[#1F3B75] hover:bg-brand-700 text-white font-bold rounded-lg flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
           >
             Send Reset Link <ArrowRight className="h-4 w-4" />
           </button>
@@ -66,7 +66,7 @@ export default function ForgotPasswordView({ onBack }: Props) {
             <ResetPasswordEmailTemplate name="Jane Doe" />
             <button
                 onClick={onBack}
-                className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl"
+                className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-lg"
             >
                 Back to Login
             </button>

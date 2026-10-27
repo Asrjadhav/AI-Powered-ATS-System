@@ -24,24 +24,19 @@ export function isTodayCandidate(cand: any): boolean {
   if (!dateStr) return false;
   const cleanDate = dateStr.split("T")[0];
   const todayStr = new Date().toISOString().split("T")[0];
-  // Include standard mock dates for demo data consistency
   return cleanDate === todayStr || cleanDate === "2026-07-20" || cleanDate === "2026-07-21" || cleanDate === "2026-07-01" || cleanDate === "2026-07-17";
 }
 
 export function normalizeCandidateStatus(status?: string): string {
-  if (!status) return "New";
-  const s = String(status).trim().toLowerCase();
-  if (s === "new" || s === "applied") return "New";
-  if (s === "pending evaluation" || s === "pending_evaluation" || s === "screening" || s === "under review") return "Pending Evaluation";
-  if (s === "ai shortlisted" || s === "ai_shortlisted" || s === "shortlisted") return "Shortlisted";
-  if (s === "interview scheduled" || s === "interview_scheduled" || s === "interviewing" || s === "scheduled" || s === "interview") return "Interviewing";
-  if (s === "interview completed" || s === "interview_completed" || s === "interview complete" || s === "completed") return "Interviewing";
-  if (s === "offer sent" || s === "offer_sent" || s === "offered" || s === "pending offer") return "Offered";
-  if (s === "hired" || s === "accepted") return "Hired";
-  if (s === "rejected") return "Rejected";
-  if (s === "interview cancelled" || s === "cancelled") return "Interview Cancelled";
-  if (s === "talent pool" || s === "talent_pool") return "Talent Pool";
-  return status;
+  if (!status) return "NEW";
+  const s = String(status).trim().toUpperCase();
+  if (s === "NEW") return "NEW";
+  if (s === "SHORTLISTED") return "SHORTLISTED";
+  if (s === "INTERVIEWING") return "INTERVIEWING";
+  if (s === "OFFER") return "OFFER";
+  if (s === "HIRED") return "HIRED";
+  if (s === "REJECTED") return "REJECTED";
+  return "NEW";
 }
 
 export function getCandidateAIScore(cand: any): number {
@@ -55,105 +50,70 @@ export function getCandidateAIScore(cand: any): number {
 
 export function isNewCandidate(cand: any): boolean {
   if (!cand) return false;
-  const norm = normalizeCandidateStatus(cand.status || cand.candidate?.status).toLowerCase();
-  return norm === "new" || norm === "applied";
+  const norm = normalizeCandidateStatus(cand.status || cand.candidate?.status);
+  return norm === "NEW";
 }
 
-export function isPendingEvaluation(cand: any): boolean {
+export function isShortlisted(cand: any): boolean {
   if (!cand) return false;
-  const norm = normalizeCandidateStatus(cand.status || cand.candidate?.status).toLowerCase();
-  return norm === "pending evaluation";
-}
-
-export function isAIShortlisted(cand: any, matchThreshold = DEFAULT_MATCH_THRESHOLD): boolean {
-  if (!cand) return false;
-  const norm = normalizeCandidateStatus(cand.status || cand.candidate?.status).toLowerCase();
-  
-  // Candidates in New, Applied, Pending Evaluation, Interview, Offered, Hired, or Rejected stage are not AI Shortlisted
-  if (
-    norm === "new" ||
-    norm === "applied" ||
-    norm === "pending evaluation" ||
-    norm.includes("interview") || 
-    norm === "offered" || 
-    norm === "hired" || 
-    norm === "rejected"
-  ) {
-    return false;
-  }
-  
-  if (norm === "shortlisted" || norm === "ai shortlisted") {
-    return true;
-  }
-
-  const hasEvaluatedScore = 
-    typeof cand.aiEvaluation?.score === "number" ||
-    typeof cand.aiScore === "number" ||
-    typeof cand.aiMatchScore === "number" ||
-    typeof cand.atsScore === "number" ||
-    typeof cand.candidate?.aiScore === "number";
-
-  const score = getCandidateAIScore(cand);
-  return hasEvaluatedScore && score >= matchThreshold;
+  const norm = normalizeCandidateStatus(cand.status || cand.candidate?.status);
+  return norm === "SHORTLISTED";
 }
 
 export function isInterviewStage(cand: any): boolean {
   if (!cand) return false;
-  const rawSt = String(cand.status || cand.candidate?.status || cand.applicationStatus || "").trim().toLowerCase();
-  const norm = normalizeCandidateStatus(rawSt).toLowerCase();
+  const rawSt = String(cand.status || cand.candidate?.status || cand.applicationStatus || "").trim().toUpperCase();
+  const norm = normalizeCandidateStatus(rawSt);
   return (
-    norm.includes("interview") || 
-    norm === "interviewing" || 
-    rawSt.includes("interview") || 
-    rawSt === "interviewing" ||
+    norm.includes("INTERVIEW") || 
+    norm === "INTERVIEWING" || 
+    rawSt.includes("INTERVIEW") || 
+    rawSt === "INTERVIEWING" ||
     Boolean(cand.hasActiveInterview)
   );
 }
 
 export function isOfferedStage(cand: any): boolean {
   if (!cand) return false;
-  const norm = normalizeCandidateStatus(cand.status || cand.candidate?.status).toLowerCase();
-  return norm === "offered" || norm === "offer sent";
+  const norm = normalizeCandidateStatus(cand.status || cand.candidate?.status);
+  return norm === "OFFER";
 }
 
 export function isHiredStage(cand: any): boolean {
   if (!cand) return false;
-  const norm = normalizeCandidateStatus(cand.status || cand.candidate?.status).toLowerCase();
-  return norm === "hired" || norm === "accepted";
+  const norm = normalizeCandidateStatus(cand.status || cand.candidate?.status);
+  return norm === "HIRED";
 }
 
 export function isRejectedStage(cand: any): boolean {
   if (!cand) return false;
-  const norm = normalizeCandidateStatus(cand.status || cand.candidate?.status).toLowerCase();
-  return norm === "rejected" || norm === "interview cancelled" || norm === "cancelled";
+  const norm = normalizeCandidateStatus(cand.status || cand.candidate?.status);
+  return norm === "REJECTED";
 }
 
 export function filterCandidatesByStage(candidates: any[], filterStatus: string, filterToday = false, matchThreshold = DEFAULT_MATCH_THRESHOLD): any[] {
   if (!Array.isArray(candidates)) return [];
 
   return candidates.filter((c) => {
-    // 1. Today filter
     if (filterToday && !isTodayCandidate(c)) {
       return false;
     }
 
-    // 2. Stage filter
     if (!filterStatus || filterStatus === "all") {
       return true;
     }
 
-    const normFilter = filterStatus.toLowerCase();
+    const normFilter = filterStatus.toUpperCase();
 
-    if (normFilter === "all") return true;
-    if (normFilter === "new applications" || normFilter === "new" || normFilter === "applied" || normFilter === "new_applications") return isNewCandidate(c);
-    if (normFilter === "pending evaluation" || normFilter === "pending_evaluation" || normFilter === "pending") return isPendingEvaluation(c);
-    if (normFilter === "ai_shortlisted" || normFilter === "ai shortlisted") return isAIShortlisted(c, matchThreshold);
-    if (normFilter === "interview" || normFilter === "interviews" || normFilter === "interview scheduled" || normFilter === "interview completed") return isInterviewStage(c);
-    if (normFilter === "offered" || normFilter === "offer sent") return isOfferedStage(c);
-    if (normFilter === "hired") return isHiredStage(c);
-    if (normFilter === "rejected") return isRejectedStage(c);
+    if (normFilter === "ALL") return true;
+    if (normFilter === "NEW APPLICATIONS" || normFilter === "NEW" || normFilter === "APPLIED" || normFilter === "NEW_APPLICATIONS") return isNewCandidate(c);
+    if (normFilter === "AI_SHORTLISTED" || normFilter === "AI SHORTLISTED" || normFilter === "SHORTLISTED") return isShortlisted(c);
+    if (normFilter === "INTERVIEW" || normFilter === "INTERVIEWS" || normFilter === "INTERVIEW SCHEDULED" || normFilter === "INTERVIEW COMPLETED" || normFilter === "INTERVIEWING") return isInterviewStage(c);
+    if (normFilter === "OFFERED" || normFilter === "OFFER SENT" || normFilter === "OFFER") return isOfferedStage(c);
+    if (normFilter === "REJECTED") return isRejectedStage(c);
+    if (normFilter === "HIRED") return isHiredStage(c);
 
-    const normCandStatus = normalizeCandidateStatus(c.status || c.candidate?.status).toLowerCase();
+    const normCandStatus = normalizeCandidateStatus(c.status || c.candidate?.status);
     return normCandStatus === normFilter;
   });
 }

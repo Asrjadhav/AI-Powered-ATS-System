@@ -34,3 +34,7 @@ google_oauth_token.json
 backend/uploads/
 backend/uploads/resumes/
 scratch/
+
+
+# Secret file for Gmeet 
+backend/security/*.json

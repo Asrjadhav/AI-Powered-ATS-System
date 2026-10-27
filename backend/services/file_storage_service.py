@@ -1,8 +1,11 @@
 import os
 import uuid
 import re
+import logging
 from typing import Optional
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
@@ -41,6 +44,7 @@ def save_resume(candidate_id: str, file_bytes: bytes, original_filename: str) ->
         f.write(file_bytes)
 
     relative_key = f"resumes/{safe_cand_id}/{unique_filename}"
+    logger.info("Resume file saved: %s (%d bytes)", relative_key, len(file_bytes))
     return relative_key
 
 def get_resume_path(storage_key: str) -> Optional[str]:
@@ -89,7 +93,7 @@ def find_latest_valid_resume_file(candidate_id: str) -> Optional[str]:
                     mtime = os.path.getmtime(fpath)
                     candidates_files.append((mtime, fname))
     except Exception as err:
-        print(f"Error scanning candidate resume directory for {candidate_id}: {err}")
+        logger.error("Could not scan the resume folder of candidate %s: %s", candidate_id, err)
         return None
 
     if not candidates_files:
@@ -115,7 +119,7 @@ def is_storage_key_referenced(db: Session, storage_key: str, exclude_candidate_i
             query = query.filter(~CandidateModel.id.in_(c_ids))
         return query.first() is not None
     except Exception as err:
-        print(f"Error checking storage key references: {err}")
+        logger.error("Could not check whether resume %s is still referenced (keeping it): %s", storage_key, err)
         return True # Erring on the side of caution
 
 def delete_resume(storage_key: str) -> bool:
@@ -126,9 +130,10 @@ def delete_resume(storage_key: str) -> bool:
     if path and os.path.exists(path):
         try:
             os.remove(path)
+            logger.info("Resume file deleted: %s", storage_key)
             return True
         except Exception as e:
-            print(f"Error removing physical resume file at {path}: {e}")
+            logger.error("Could not delete resume file %s: %s", path, e)
             return False
     return False
 
@@ -144,10 +149,10 @@ def delete_candidate_folder(candidate_id: str) -> bool:
         try:
             import shutil
             shutil.rmtree(candidate_folder)
-            print(f"Successfully deleted candidate resume directory: {candidate_folder}")
+            logger.info("Resume folder deleted: %s", candidate_folder)
             return True
         except Exception as err:
-            print(f"Error removing candidate folder {candidate_folder}: {err}")
+            logger.error("Could not delete resume folder %s: %s", candidate_folder, err)
             raise err
     return False
 
@@ -173,7 +178,8 @@ def cleanup_obsolete_files_in_folder(candidate_id: str, active_storage_key: str,
                 if os.path.isfile(fpath):
                     try:
                         os.remove(fpath)
+                        logger.info("Obsolete resume file removed: %s", rel_key)
                     except Exception as rm_err:
-                        print(f"Obsolete resume file removal note for {fpath}: {rm_err}")
+                        logger.warning("Could not remove obsolete resume file %s: %s", fpath, rm_err)
     except Exception as err:
-        print(f"Error during obsolete file cleanup for candidate {candidate_id}: {err}")
+        logger.error("Obsolete resume file cleanup failed for candidate %s: %s", candidate_id, err)

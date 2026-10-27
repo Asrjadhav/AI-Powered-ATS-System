@@ -2,7 +2,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
-from schemas.talent_pool import TalentPoolCreate, TalentPoolUpdate, TalentPoolResponse
+from schemas.talent_pool import TalentPoolCreate, TalentPoolUpdate, TalentPoolResponse, TalentPoolStats
 from services import talent_pool_service
 
 router = APIRouter(tags=["Talent Pool"])
@@ -13,6 +13,13 @@ def list_talent_pool(db: Session = Depends(get_db)):
     List all candidates in the Talent Pool database.
     """
     return talent_pool_service.list_talent_pool(db)
+
+# Registered before /talent-pool/{id} so "stats" is matched literally and
+# never captured as an id.
+@router.get("/talent-pool/stats", response_model=TalentPoolStats)
+def read_talent_pool_stats(db: Session = Depends(get_db)):
+    """KPI figures for the Talent Pool screen."""
+    return talent_pool_service.get_talent_pool_stats(db)
 
 @router.get("/talent-pool/{id}", response_model=TalentPoolResponse)
 def get_talent_pool_item(id: str, db: Session = Depends(get_db)):

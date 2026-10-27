@@ -28,6 +28,7 @@ import ForgotPasswordView from "./components/ForgotPasswordView";
 import ResetPasswordView from "./components/ResetPasswordView";
 import ChangePasswordView from "./components/ChangePasswordView";
 import TalentPoolView from "./components/TalentPoolView";
+import { apiUrl } from "./lib/api";
 
 function playAcousticChime() {
   const isEnabled = LocalStorageService.get<string>("setting_sound_alerts", "true") !== "false";
@@ -118,7 +119,7 @@ export default function App() {
     try {
       const storedToken = sessionStorage.getItem("talent_ai_token");
       if (storedToken) {
-        await axios.post("/api/auth/logout", {}, {
+        await axios.post(apiUrl("/api/auth/logout"), {}, {
           headers: { Authorization: `Bearer ${storedToken}` }
         });
       }
@@ -162,6 +163,7 @@ export default function App() {
   }, []);
 
   const normalizeTab = (tab: string) => {
+    if (tab === "candidates") return "applications"; // the page was called #candidates before
     if (tab === "reports") return "insights";
     if (tab === "talent-pool") return "talent_pool";
     if (tab === "email-templates") return "email_templates";
@@ -195,11 +197,18 @@ export default function App() {
     }
   };
 
+  // An old bookmark such as #candidates opens the Applications page and shows the new address.
+  useEffect(() => {
+    if (window.location.hash === "#candidates") {
+      window.history.replaceState(null, "", "#applications");
+    }
+  }, []);
+
   useEffect(() => {
     const handleHashChange = () => {
       let hash = window.location.hash.replace("#", "").trim();
       const targetHash = normalizeTab(hash);
-      if (hash === "reports" || hash === "talent-pool") {
+      if (hash === "reports" || hash === "talent-pool" || hash === "candidates") {
         window.history.replaceState(null, "", `#${targetHash}`);
       }
       if (targetHash && targetHash !== activeTab) {
@@ -311,12 +320,12 @@ export default function App() {
   };
 
   const triggerSimulatedNotification = async () => {
-    try {
-      await NotificationRepository.simulate();
-      fetchNotifications(false);
-    } catch (err) {
-      console.error("Failed to simulate notification:", err);
-    }
+    // NotificationRepository.simulate() has been removed: notifications now
+    // reach the real database, and fabricating "candidate applied" alerts on
+    // demand would write fake data other users can see. This UI entry point
+    // (Navbar/Sidebar "simulate" action) is left wired but inert pending a
+    // decision on whether to remove it outright.
+    console.warn("Notification simulation has been disabled — see repositories/notificationRepository.ts for why.");
   };
 
   useEffect(() => {
@@ -370,7 +379,7 @@ export default function App() {
     switch (activeTab) {
       case "dashboard": return <DashboardView onNavigate={handleNavigateWithFilters} onSelectApplication={setSelectedApplication} />;
       case "jobs": return <JobsView onNavigate={handleNavigateWithFilters} />;
-      case "candidates": return (
+      case "applications": return (
         <CandidatesView 
           initialSelectedApp={selectedApplication} 
           clearInitialSelection={() => setSelectedApplication(null)}

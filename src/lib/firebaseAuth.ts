@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, signInWithPopup, GoogleAuthProvider } from "firebase/auth";
 import axios from "axios";
+import { apiUrl } from "./api";
 
 // Dynamically fetch config from server to match the container's environment
 let authInstance: any = null;
@@ -9,7 +10,7 @@ export async function getFirebaseAuth() {
   if (authInstance) return authInstance;
 
   try {
-    const res = await axios.get("/api/firebase-config");
+    const res = await axios.get(apiUrl("/api/firebase-config"));
     const firebaseConfig = res.data;
     const app = initializeApp(firebaseConfig);
     authInstance = getAuth(app);
@@ -25,7 +26,7 @@ export async function getFirebaseAuth() {
  * Connects directly using your GOOGLE_CLIENT_ID without requiring Firebase Auth Console setup.
  */
 export async function directGoogleOAuthSignIn() {
-  const configRes = await axios.get("/api/firebase-config");
+  const configRes = await axios.get(apiUrl("/api/firebase-config"));
   const clientId = configRes.data?.oAuthClientId || "937529520946-82ri0sk3p7lebugrb3t4j6l5ipkirr3m.apps.googleusercontent.com";
   
   const redirectUri = window.location.origin; // http://localhost:3000
@@ -81,12 +82,12 @@ export async function directGoogleOAuthSignIn() {
               headers: { Authorization: `Bearer ${accessToken}` }
             }).then(userRes => {
               const email = userRes.data?.email || "user@encureit.com";
-              axios.post("/api/auth/google/save-token", { accessToken, email })
+              axios.post(apiUrl("/api/auth/google/save-token"), { accessToken, email })
                 .then(() => resolve({ accessToken, email }))
                 .catch(err => reject(err));
             }).catch(() => {
               const email = "user@encureit.com";
-              axios.post("/api/auth/google/save-token", { accessToken, email })
+              axios.post(apiUrl("/api/auth/google/save-token"), { accessToken, email })
                 .then(() => resolve({ accessToken, email }))
                 .catch(err => reject(err));
             });
@@ -140,7 +141,7 @@ export async function googleSignIn() {
 
     const accessToken = credential.accessToken;
     const email = result.user.email || "";
-    await axios.post("/api/auth/google/save-token", { accessToken, email });
+    await axios.post(apiUrl("/api/auth/google/save-token"), { accessToken, email });
     return { user: result.user, accessToken, email };
   }
 }

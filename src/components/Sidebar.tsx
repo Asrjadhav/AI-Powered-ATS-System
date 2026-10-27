@@ -91,7 +91,7 @@ export default function Sidebar({
       title: "Recruitment & Hiring",
       items: [
         { id: "jobs", label: t("jobs"), icon: Briefcase },
-        { id: "candidates", label: t("candidates"), icon: Users, showAIBadge: true },
+        { id: "applications", label: t("candidates"), icon: Users, showAIBadge: true },
         { id: "talent_pool", label: t("talent_pool"), icon: Database, showAIBadge: true },
         { id: "interviews", label: t("interviews"), icon: Calendar },
         { id: "offers", label: t("offers"), icon: Award },
@@ -125,7 +125,7 @@ export default function Sidebar({
       {/* Brand Header */}
       <div className="p-6 border-b border-slate-900 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3 cursor-pointer" onClick={() => handleNavigate("dashboard")}>
-          <div className="h-10 w-10 rounded-xl bg-white p-1 flex items-center justify-center shadow-md shadow-indigo-900/45 shrink-0 overflow-hidden">
+          <div className="h-10 w-10 rounded-lg bg-white p-1 flex items-center justify-center shadow-sm shadow-indigo-900/45 shrink-0 overflow-hidden">
             <img src="/encureit_icon.png" alt="EncureIT Logo" className="h-full w-full object-contain" />
           </div>
           <div className="flex flex-col">
@@ -188,7 +188,7 @@ export default function Sidebar({
 
         {/* Dynamic System Infrastructure Info Panel (Persistent in Sidebar) */}
         <div className="pt-4 border-t border-slate-900">
-          <div className="bg-slate-900/50 rounded-xl p-3.5 border border-slate-900 space-y-3">
+          <div className="bg-slate-900/50 rounded-lg p-3.5 border border-slate-900 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Cpu className="h-3.5 w-3.5 text-indigo-400" />
@@ -223,7 +223,7 @@ export default function Sidebar({
       <div className="p-4 border-t border-slate-900 bg-slate-950 shrink-0 relative">
         {/* Profile Popover / Dropdown Menu */}
         {showProfileMenu && (
-          <div className="absolute left-4 bottom-20 right-4 bg-slate-950 border border-slate-900 rounded-xl p-3.5 shadow-2xl z-50 space-y-3 text-left animate-in fade-in slide-in-from-bottom-2 duration-150">
+          <div className="absolute left-4 bottom-20 right-4 bg-slate-950 border border-slate-900 rounded-lg p-3.5 shadow-sm z-50 space-y-3 text-left animate-in fade-in slide-in-from-bottom-2 duration-150">
             <div className="flex items-center justify-between border-b border-slate-900 pb-2">
               <span className="text-[9px] text-slate-400 font-mono tracking-wider font-bold">PROFILE CONSOLE</span>
               <span className="text-[8px] bg-indigo-500/15 text-indigo-400 border border-indigo-500/25 px-1.5 py-0.2 rounded-sm font-bold uppercase">Active</span>
@@ -256,7 +256,7 @@ export default function Sidebar({
         {/* Profile Button */}
         <div 
           onClick={() => setShowProfileMenu(!showProfileMenu)}
-          className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900/40 hover:bg-slate-900 border border-slate-900 hover:border-slate-800 transition-all cursor-pointer"
+          className="flex items-center justify-between p-2.5 rounded-lg bg-slate-900/40 hover:bg-slate-900 border border-slate-900 hover:border-slate-800 transition-all cursor-pointer"
         >
           <div className="flex items-center gap-3 min-w-0">
             <div className="h-10 w-10 rounded-full bg-slate-900 flex items-center justify-center border border-indigo-400/30 overflow-hidden shrink-0 relative">
@@ -287,7 +287,7 @@ export default function Sidebar({
       {/* 2. Mobile Header/Top-Bar (Hidden on Desktop) */}
       <header className="lg:hidden w-full bg-slate-950 border-b border-slate-900 text-slate-300 h-14 flex items-center justify-between px-4 shrink-0 z-40 sticky top-0">
         <div className="flex items-center gap-2" onClick={() => handleNavigate("dashboard")}>
-          <div className="h-7 w-7 rounded-lg bg-indigo-600 flex items-center justify-center shadow-md">
+          <div className="h-7 w-7 rounded-lg bg-indigo-600 flex items-center justify-center shadow-sm">
             <span className="text-white font-black text-sm">E</span>
           </div>
           <span className="font-display font-extrabold text-sm text-white tracking-tight">

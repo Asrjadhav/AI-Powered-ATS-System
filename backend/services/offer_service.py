@@ -11,6 +11,11 @@ from models.job import JobModel
 from models.application import ApplicationModel
 from schemas.offer import OfferCreate, OfferUpdate
 from services import candidate_service, job_service, application_service
+from services.application_stage import ApplicationStage
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 def format_offer_response(off: OfferModel, db: Session) -> dict:
     cand = candidate_service.get_candidate_by_id_or_candidate_id(db, off.candidateId)
@@ -85,12 +90,17 @@ def get_offer_by_id(db: Session, identifier: str) -> Optional[OfferModel]:
 def create_offer(db: Session, payload: OfferCreate) -> dict:
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
+    logger.info("Offer create requested: candidate=%s job=%s application=%s status=%s ctc=%s",
+                payload.candidateId, payload.jobId, payload.applicationId, payload.status or "Draft",
+                payload.offeredCTC if payload.offeredCTC else "not given (a default is used)")
+
     # 1. Resolve Candidate
     cand = candidate_service.get_candidate_by_id_or_candidate_id(db, payload.candidateId)
     if not cand and payload.candidateEmail:
         cand = db.query(CandidateModel).filter(func.lower(CandidateModel.email) == payload.candidateEmail.strip().lower()).first()
 
     if not cand:
+        logger.warning("Offer create refused: candidate %r not found", payload.candidateId)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Candidate '{payload.candidateId}' not found. Cannot create offer without a valid candidate."
@@ -144,22 +154,25 @@ def create_offer(db: Session, payload: OfferCreate) -> dict:
 
     db.add(new_offer)
 
-    # If offer is created directly as Accepted or Joined, sync application & candidate status in PostgreSQL
+    # If an offer is created directly as Accepted or Joined, the application and candidate become Hired
     new_status_str = str(payload.status or "").strip().lower()
     if new_status_str in ["accepted", "joined", "hired"]:
-        target_stage = "Hired" if new_status_str in ["joined", "hired"] else "Offered"
+        target_stage = ApplicationStage.HIRED.value
         cand.status = target_stage
         if app:
             app.status = target_stage
 
     db.commit()
     db.refresh(new_offer)
+    logger.info("Offer created: id=%s candidate=%s job=%s application=%s status=%s ctc=%s",
+                new_offer.id, cand.id, new_offer.jobId, new_offer.applicationId, new_offer.status, new_offer.offeredCTC)
 
     return format_offer_response(new_offer, db)
 
 def update_offer(db: Session, identifier: str, updates: OfferUpdate) -> Optional[dict]:
     off = get_offer_by_id(db, identifier)
     if not off:
+        logger.warning("Offer update: %r not found", identifier)
         return None
 
     update_data = updates.dict(exclude_unset=True)
@@ -174,11 +187,11 @@ def update_offer(db: Session, identifier: str, updates: OfferUpdate) -> Optional
     for key, val in update_data.items():
         setattr(off, key, val)
 
-    # Sync Application/Candidate status if offer status updated to Accepted or Joined
+    # An offer that becomes Accepted or Joined makes the application and candidate Hired
     if updates.status:
         st_lower = str(updates.status).strip().lower()
         if st_lower in ["accepted", "joined", "hired"]:
-            target_stage = "Hired" if st_lower in ["joined", "hired"] else "Offered"
+            target_stage = ApplicationStage.HIRED.value
             cand = candidate_service.get_candidate_by_id_or_candidate_id(db, off.candidateId)
             if cand:
                 cand.status = target_stage
@@ -189,14 +202,19 @@ def update_offer(db: Session, identifier: str, updates: OfferUpdate) -> Optional
 
     db.commit()
     db.refresh(off)
+    logger.info("Offer %s updated: fields=%s status=%s", off.id,
+                sorted(k for k in update_data if k != "updatedAt"), off.status)
     return format_offer_response(off, db)
 
 def update_offer_status(db: Session, identifier: str, status_str: str, workflow_stage: Optional[str] = None) -> Optional[dict]:
     off = get_offer_by_id(db, identifier)
     if not off:
+        logger.warning("Offer status change: %r not found", identifier)
         return None
 
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    logger.info("Offer %s status: %s -> %s%s", off.id, off.status, status_str,
+                f" (workflow stage {workflow_stage})" if workflow_stage else "")
     off.status = status_str
     if workflow_stage:
         off.workflowStage = workflow_stage
@@ -204,7 +222,7 @@ def update_offer_status(db: Session, identifier: str, status_str: str, workflow_
 
     st_lower = str(status_str).strip().lower()
     if st_lower in ["accepted", "joined", "hired"]:
-        target_stage = "Hired" if st_lower in ["joined", "hired"] else "Offered"
+        target_stage = ApplicationStage.HIRED.value
         cand = candidate_service.get_candidate_by_id_or_candidate_id(db, off.candidateId)
         if cand:
             cand.status = target_stage
@@ -215,13 +233,16 @@ def update_offer_status(db: Session, identifier: str, status_str: str, workflow_
 
     db.commit()
     db.refresh(off)
+    logger.info("Offer %s status saved", off.id)
     return format_offer_response(off, db)
 
 def delete_offer(db: Session, identifier: str) -> bool:
     off = get_offer_by_id(db, identifier)
     if not off:
+        logger.warning("Offer delete: %r not found", identifier)
         return False
 
     db.delete(off)
     db.commit()
+    logger.info("Offer %s deleted", off.id)
     return True

@@ -47,6 +47,8 @@ import {
   AlertCircle
 } from "lucide-react";
 import axios from "axios";
+import { apiUrl } from "../lib/api";
+import { SearchableSelect } from "./common/SearchableSelect";
 
 interface ProfileViewProps {
   currentUser: { 
@@ -212,7 +214,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
 
   // Check Google Calendar connection status on mount
   useEffect(() => {
-    axios.get("/api/auth/google/status")
+    axios.get(apiUrl("/api/auth/google/status"))
       .then(res => {
         if (res.data?.connected) {
           setGcalConnected(true);
@@ -304,7 +306,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
 
   const handleDisconnectGcal = async () => {
     try {
-      await axios.post("/api/auth/google/disconnect");
+      await axios.post(apiUrl("/api/auth/google/disconnect"));
       setGcalConnected(false);
       setGcalEmail("");
       triggerToast("Disconnected Google Calendar.");
@@ -357,7 +359,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
           payload.newPassword = newPassword;
         }
 
-        const res = await axios.post("/api/auth/update-profile", payload);
+        const res = await axios.post(apiUrl("/api/auth/update-profile"), payload);
         if (res.data.success) {
           onProfileUpdate(res.data.user);
           setCurrentPassword("");
@@ -453,14 +455,13 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         
         {/* LEFT VERTICAL NAVIGATION PANEL */}
-        <div className="lg:col-span-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs lg:sticky top-20 text-left space-y-5">
+        <div className="lg:col-span-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-5 shadow-xs lg:sticky top-20 text-left space-y-5">
           {/* Header */}
-          <div className="border-b border-slate-100 dark:border-slate-800 pb-4 space-y-1">
-            <h2 className="font-display font-black text-2xl text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
-              <Settings className="h-6 w-6 text-indigo-600 dark:text-indigo-400 shrink-0" />
+          <div className="border-b border-slate-200 pb-4 space-y-1">
+            <h2 className="text-xl font-semibold text-slate-900 tracking-tight flex items-center gap-2.5">
               <span>Settings</span>
             </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-medium">
+            <p className="text-sm text-slate-500 mt-1">
               Manage your account, workspace and ATS preferences.
             </p>
           </div>
@@ -478,7 +479,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
                     setActiveSubTab(item.id);
                     setErrorMsg(null);
                   }}
-                  className={`w-full flex items-center justify-between px-3.5 py-3 rounded-xl text-xs sm:text-sm font-bold transition-all duration-150 cursor-pointer ${
+                  className={`w-full flex items-center justify-between px-3.5 py-3 rounded-lg text-xs sm:text-sm font-bold transition-all duration-150 cursor-pointer ${
                     isActive
                       ? "bg-indigo-50/80 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border-l-3 border-indigo-600 dark:border-indigo-400 shadow-3xs"
                       : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/40"
@@ -514,7 +515,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
         <div className="lg:col-span-9 space-y-6 text-left">
 
           {/* Top Section Header */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xs flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 shadow-xs flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div className="space-y-1">
               <h3 className="font-display font-black text-xl text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
                 {React.createElement(currentNav.icon, { className: "h-5 w-5 text-indigo-600 dark:text-indigo-400" })}
@@ -528,7 +529,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
 
           {/* Error Banner */}
           {errorMsg && (
-            <div className="p-4 bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/30 text-rose-800 dark:text-rose-400 rounded-xl text-xs font-semibold animate-in fade-in duration-200">
+            <div className="p-4 bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/30 text-rose-800 dark:text-rose-400 rounded-lg text-xs font-semibold animate-in fade-in duration-200">
               {errorMsg}
             </div>
           )}
@@ -538,14 +539,14 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-200">
               
               {/* Personal Information Section */}
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-7 shadow-xs space-y-6">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 sm:p-7 shadow-xs space-y-6">
                 <h4 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider border-b border-slate-100 dark:border-slate-800 pb-3 flex items-center gap-2">
                   <User className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
                   <span>Personal Information</span>
                 </h4>
 
                 {/* Profile Photo (Compact Layout) */}
-                <div className="flex items-center gap-5 p-4 bg-slate-50/50 dark:bg-slate-950/30 border border-slate-100 dark:border-slate-800/80 rounded-xl">
+                <div className="flex items-center gap-5 p-4 bg-slate-50/50 dark:bg-slate-950/30 border border-slate-100 dark:border-slate-800/80 rounded-lg">
                   <div className="relative w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-800 border-2 border-white dark:border-slate-900 shadow-sm overflow-hidden shrink-0">
                     {profileImage ? (
                       <img src={profileImage} alt={name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
@@ -592,7 +593,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
                       type="text"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-semibold bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                      className="w-full px-3.5 py-2 rounded-lg border border-slate-200 dark:border-slate-800 text-xs font-semibold bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                       placeholder="Aditi Jadhav"
                     />
                   </div>
@@ -604,7 +605,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
                       type="email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-semibold bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                      className="w-full px-3.5 py-2 rounded-lg border border-slate-200 dark:border-slate-800 text-xs font-semibold bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                       placeholder="aditijadhav2828@gmail.com"
                     />
                   </div>
@@ -616,7 +617,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
                       type="text"
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-semibold bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                      className="w-full px-3.5 py-2 rounded-lg border border-slate-200 dark:border-slate-800 text-xs font-semibold bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                       placeholder="+91 98765 43210"
                     />
                   </div>
@@ -624,17 +625,17 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
                   {/* Timezone */}
                   <div className="space-y-1.5">
                     <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Timezone</label>
-                    <select
+                    <SearchableSelect
                       value={timezone}
                       onChange={(e) => setTimezone(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-semibold bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
+                      className="w-full px-3.5 py-2 rounded-lg border border-slate-200 dark:border-slate-800 text-xs font-semibold bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
                     >
                       <option value="Asia/Kolkata">Asia/Kolkata (GMT+5:30) - India</option>
                       <option value="America/New_York">Eastern Time (EST, GMT-5)</option>
                       <option value="America/Los_Angeles">Pacific Time (PST, GMT-8)</option>
                       <option value="Europe/London">London (GMT+0)</option>
                       <option value="Asia/Singapore">Singapore (GMT+8)</option>
-                    </select>
+                    </SearchableSelect>
                   </div>
 
                   {/* Professional Bio */}
@@ -644,7 +645,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
                       value={bio}
                       onChange={(e) => setBio(e.target.value)}
                       rows={3}
-                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-medium bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                      className="w-full px-3.5 py-2 rounded-lg border border-slate-200 dark:border-slate-800 text-xs font-medium bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                       placeholder="Brief details about your recruiting background..."
                     />
                   </div>
@@ -652,7 +653,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
               </div>
 
               {/* Primary HR Email Section */}
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-7 shadow-xs space-y-4">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 sm:p-7 shadow-xs space-y-4">
                 <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
                   <h4 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider flex items-center gap-2">
                     <Mail className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
@@ -673,7 +674,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
                       type="email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="w-full sm:w-80 px-3 py-2 text-xs font-semibold rounded-xl border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100"
+                      className="w-full sm:w-80 px-3 py-2 text-xs font-semibold rounded-lg border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100"
                     />
                   ) : (
                     <div className="flex items-center gap-2">
@@ -698,7 +699,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-200">
               
               {/* Workspace Preferences */}
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-7 shadow-xs space-y-6">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 sm:p-7 shadow-xs space-y-6">
                 <h4 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider border-b border-slate-100 dark:border-slate-800 pb-3 flex items-center gap-2">
                   <LayoutGrid className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
                   <span>Workspace Preferences</span>
@@ -710,7 +711,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
                     <input
                       type="text"
                       defaultValue="EncureIT Systems Pvt Ltd"
-                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-semibold bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100"
+                      className="w-full px-3.5 py-2 rounded-lg border border-slate-200 dark:border-slate-800 text-xs font-semibold bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100"
                     />
                   </div>
 
@@ -719,7 +720,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
                     <select
                       value={defaultInterviewDuration}
                       onChange={(e) => updateSettingState(e.target.value, setDefaultInterviewDuration)}
-                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-semibold bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 cursor-pointer"
+                      className="w-full px-3.5 py-2 rounded-lg border border-slate-200 dark:border-slate-800 text-xs font-semibold bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 cursor-pointer"
                     >
                       <option value="30 Minutes">30 Minutes</option>
                       <option value="45 Minutes">45 Minutes</option>
@@ -732,7 +733,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
                     <select
                       value={defaultLandingPage}
                       onChange={(e) => updateSettingState(e.target.value, setDefaultLandingPage)}
-                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-semibold bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 cursor-pointer"
+                      className="w-full px-3.5 py-2 rounded-lg border border-slate-200 dark:border-slate-800 text-xs font-semibold bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 cursor-pointer"
                     >
                       <option value="dashboard">Dashboard</option>
                       <option value="candidates">Candidates Table</option>
@@ -746,7 +747,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
                     <select
                       value={dateFormat}
                       onChange={(e) => updateSettingState(e.target.value, setDateFormat)}
-                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-semibold bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 cursor-pointer"
+                      className="w-full px-3.5 py-2 rounded-lg border border-slate-200 dark:border-slate-800 text-xs font-semibold bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 cursor-pointer"
                     >
                       <option value="DD/MM/YYYY">DD/MM/YYYY</option>
                       <option value="MM/DD/YYYY">MM/DD/YYYY</option>
@@ -757,13 +758,13 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
               </div>
 
               {/* Integrations: Google Calendar Card */}
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-7 shadow-xs space-y-5">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 sm:p-7 shadow-xs space-y-5">
                 <h4 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider border-b border-slate-100 dark:border-slate-800 pb-3 flex items-center gap-2">
                   <Calendar className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
                   <span>Integrations</span>
                 </h4>
 
-                <div className="p-5 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/40 dark:bg-slate-950/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5">
+                <div className="p-5 border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-50/40 dark:bg-slate-950/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5">
                   <div className="space-y-2 max-w-xl">
                     <div className="flex items-center gap-3">
                       <h5 className="font-extrabold text-sm text-slate-900 dark:text-white">Google Calendar</h5>
@@ -793,14 +794,14 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
                         <button
                           type="button"
                           onClick={() => triggerToast("Google Calendar integration is active and managed.")}
-                          className="px-3.5 py-2 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold text-xs rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer"
+                          className="px-3.5 py-2 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold text-xs rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer"
                         >
                           Manage
                         </button>
                         <button
                           type="button"
                           onClick={handleDisconnectGcal}
-                          className="px-3.5 py-2 border border-rose-200 dark:border-rose-900/30 text-rose-600 dark:text-rose-400 font-bold text-xs rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/20 cursor-pointer"
+                          className="px-3.5 py-2 border border-rose-200 dark:border-rose-900/30 text-rose-600 dark:text-rose-400 font-bold text-xs rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/20 cursor-pointer"
                         >
                           Disconnect
                         </button>
@@ -810,7 +811,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
                         type="button"
                         onClick={handleConnectGcal}
                         disabled={connectingGcal}
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition-all shadow-xs cursor-pointer"
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg transition-all shadow-xs cursor-pointer"
                       >
                         {connectingGcal ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CalendarCheck className="h-3.5 w-3.5" />}
                         <span>Connect Google Calendar</span>
@@ -828,14 +829,14 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-200">
               
               {/* Authentication & Password */}
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-7 shadow-xs space-y-6">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 sm:p-7 shadow-xs space-y-6">
                 <h4 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider border-b border-slate-100 dark:border-slate-800 pb-3 flex items-center gap-2">
                   <Lock className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
                   <span>Account Security</span>
                 </h4>
 
                 {/* Google Account Row */}
-                <div className="p-4 border border-slate-100 dark:border-slate-800 rounded-xl bg-slate-50/30 dark:bg-slate-950/20 flex justify-between items-center">
+                <div className="p-4 border border-slate-100 dark:border-slate-800 rounded-lg bg-slate-50/30 dark:bg-slate-950/20 flex justify-between items-center">
                   <div className="space-y-0.5">
                     <p className="text-xs font-bold text-slate-900 dark:text-white">Google OAuth Authentication</p>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">Logged in via {currentUser?.email || "aditijadhav2828@gmail.com"}</p>
@@ -854,7 +855,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
                         type="password"
                         value={currentPassword}
                         onChange={(e) => setCurrentPassword(e.target.value)}
-                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100"
+                        className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100"
                         placeholder="••••••••"
                       />
                     </div>
@@ -865,7 +866,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
                         type="password"
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
-                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100"
+                        className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100"
                         placeholder="••••••••"
                       />
                     </div>
@@ -876,7 +877,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
                         type="password"
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
-                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100"
+                        className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100"
                         placeholder="••••••••"
                       />
                     </div>
@@ -904,7 +905,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
               </div>
 
               {/* Active Sessions */}
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-7 shadow-xs space-y-4">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 sm:p-7 shadow-xs space-y-4">
                 <h4 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider border-b border-slate-100 dark:border-slate-800 pb-3 flex items-center gap-2">
                   <Laptop className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
                   <span>Active Login Sessions</span>
@@ -912,7 +913,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
 
                 <div className="space-y-2">
                   {activeSessions.map((session) => (
-                    <div key={session.id} className="p-3 border border-slate-100 dark:border-slate-800 rounded-xl flex items-center justify-between text-xs">
+                    <div key={session.id} className="p-3 border border-slate-100 dark:border-slate-800 rounded-lg flex items-center justify-between text-xs">
                       <div className="flex items-center gap-3">
                         <Laptop className="h-4 w-4 text-slate-400" />
                         <div>
@@ -935,7 +936,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
           {activeSubTab === "notifications" && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-200">
               
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-7 shadow-xs space-y-5">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 sm:p-7 shadow-xs space-y-5">
                 <h4 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider border-b border-slate-100 dark:border-slate-800 pb-3 flex items-center gap-2">
                   <Bell className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
                   <span>Notification Preferences</span>
@@ -1065,7 +1066,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
           {activeSubTab === "appearance" && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-200">
               
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-7 shadow-xs space-y-6">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 sm:p-7 shadow-xs space-y-6">
                 <h4 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider border-b border-slate-100 dark:border-slate-800 pb-3 flex items-center gap-2">
                   <Palette className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
                   <span>Appearance Customization</span>
@@ -1081,7 +1082,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
                           key={tOption}
                           type="button"
                           onClick={() => updateSettingState(tOption, setDashboardTheme)}
-                          className={`px-3 py-2.5 border rounded-xl text-xs font-bold transition-all text-center capitalize cursor-pointer ${
+                          className={`px-3 py-2.5 border rounded-lg text-xs font-bold transition-all text-center capitalize cursor-pointer ${
                             dashboardTheme === tOption
                               ? "bg-indigo-50 dark:bg-indigo-950/45 border-indigo-500 text-indigo-700 dark:text-indigo-300"
                               : "border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 bg-white dark:bg-slate-950"
@@ -1102,7 +1103,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
                           key={dOption}
                           type="button"
                           onClick={() => updateSettingState(dOption, setLayoutDensity)}
-                          className={`px-3 py-2.5 border rounded-xl text-xs font-bold transition-all text-center capitalize cursor-pointer ${
+                          className={`px-3 py-2.5 border rounded-lg text-xs font-bold transition-all text-center capitalize cursor-pointer ${
                             layoutDensity === dOption
                               ? "bg-indigo-50 dark:bg-indigo-950/45 border-indigo-500 text-indigo-700 dark:text-indigo-300"
                               : "border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 bg-white dark:bg-slate-950"
@@ -1142,14 +1143,14 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
           {activeSubTab === "about" && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-200">
               
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-7 shadow-xs space-y-6">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 sm:p-7 shadow-xs space-y-6">
                 <h4 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider border-b border-slate-100 dark:border-slate-800 pb-3 flex items-center gap-2">
                   <Info className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
                   <span>About EncureIT Talent AI Console</span>
                 </h4>
 
                 <div className="space-y-4">
-                  <div className="p-4 bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-100/60 dark:border-indigo-900/30 rounded-xl space-y-2">
+                  <div className="p-4 bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-100/60 dark:border-indigo-900/30 rounded-lg space-y-2">
                     <h5 className="text-xs font-extrabold text-indigo-800 dark:text-indigo-300 uppercase tracking-wide flex items-center gap-1.5">
                       <Sparkles className="h-4 w-4" />
                       <span>Enterprise Recruitment Console</span>
@@ -1160,22 +1161,22 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-medium">
-                    <div className="p-3 border border-slate-100 dark:border-slate-800 rounded-xl flex justify-between items-center bg-slate-50/30 dark:bg-slate-950/20">
+                    <div className="p-3 border border-slate-100 dark:border-slate-800 rounded-lg flex justify-between items-center bg-slate-50/30 dark:bg-slate-950/20">
                       <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px]">Application Name</span>
                       <span className="font-bold text-slate-900 dark:text-white">EncureIT Talent AI Console</span>
                     </div>
 
-                    <div className="p-3 border border-slate-100 dark:border-slate-800 rounded-xl flex justify-between items-center bg-slate-50/30 dark:bg-slate-950/20">
+                    <div className="p-3 border border-slate-100 dark:border-slate-800 rounded-lg flex justify-between items-center bg-slate-50/30 dark:bg-slate-950/20">
                       <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px]">Version</span>
                       <span className="font-bold text-slate-900 dark:text-white">v2.5.0 Enterprise</span>
                     </div>
 
-                    <div className="p-3 border border-slate-150 dark:border-slate-800 rounded-xl flex justify-between items-center bg-slate-50/30 dark:bg-slate-950/20">
+                    <div className="p-3 border border-slate-150 dark:border-slate-800 rounded-lg flex justify-between items-center bg-slate-50/30 dark:bg-slate-950/20">
                       <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px]">Powered By</span>
                       <span className="font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded">Google Gemini AI</span>
                     </div>
 
-                    <div className="p-3 border border-slate-150 dark:border-slate-800 rounded-xl flex justify-between items-center bg-slate-50/30 dark:bg-slate-950/20">
+                    <div className="p-3 border border-slate-150 dark:border-slate-800 rounded-lg flex justify-between items-center bg-slate-50/30 dark:bg-slate-950/20">
                       <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px]">Support Email</span>
                       <span className="font-bold text-slate-800 dark:text-slate-200">support@encureit.com</span>
                     </div>
@@ -1201,7 +1202,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
               <button
                 type="button"
                 onClick={handleCancelSettings}
-                className="px-5 py-2.5 rounded-xl border border-slate-250 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs transition-all cursor-pointer shadow-xs active:scale-98"
+                className="px-5 py-2.5 rounded-lg border border-slate-250 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs transition-all cursor-pointer shadow-xs active:scale-98"
               >
                 Discard Changes
               </button>
@@ -1210,7 +1211,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
                 type="button"
                 onClick={() => handleSaveAllSettings()}
                 disabled={saving}
-                className="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-bold text-xs px-6 py-2.5 rounded-xl transition-all shadow-md cursor-pointer hover:shadow-lg active:scale-98"
+                className="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-bold text-xs px-6 py-2.5 rounded-lg transition-all shadow-sm cursor-pointer hover:shadow-sm active:scale-98"
               >
                 {saving ? (
                   <>
@@ -1233,7 +1234,7 @@ export default function ProfileView({ currentUser, onProfileUpdate }: ProfileVie
 
       {/* Floating Success Toast */}
       {showToast && (
-        <div className="fixed bottom-6 right-6 z-50 p-4 bg-slate-900 text-white dark:bg-white dark:text-slate-900 rounded-xl shadow-2xl flex items-center gap-3 border border-slate-800 dark:border-slate-100 animate-in slide-in-from-bottom-5 duration-300">
+        <div className="fixed bottom-6 right-6 z-50 p-4 bg-slate-900 text-white dark:bg-white dark:text-slate-900 rounded-lg shadow-sm flex items-center gap-3 border border-slate-800 dark:border-slate-100 animate-in slide-in-from-bottom-5 duration-300">
           <div className="h-5 w-5 rounded-full bg-emerald-500 text-white flex items-center justify-center font-extrabold text-xs">
             ✓
           </div>

@@ -2,6 +2,7 @@ import os
 import re
 import json
 import uuid
+import time
 import datetime
 from typing import List, Optional
 from sqlalchemy.orm import Session
@@ -18,8 +19,14 @@ import services.job_service as job_service
 
 import config
 import services.notification_service as notification_service
-import services.email_service as email_service
+import services.automated_email_service as automated_email_service
 import services.talent_pool_service as talent_pool_service
+from services.application_stage import ApplicationStage, to_db_stage
+from services.application_state import ApplicationState
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 def generate_next_application_id(db: Session) -> str:
     """
@@ -126,9 +133,12 @@ def create_application(db: Session, app_in: ApplicationCreate) -> ApplicationMod
     Rejects duplicate applications for the same (candidateId, jobId) pair with 409 Conflict.
     Stores job-specific atsScore directly on the Application record.
     """
+    logger.info("Application create requested: candidate=%s job=%s", app_in.candidateId, app_in.jobId)
+
     # 1. Resolve Candidate
     cand = candidate_service.get_candidate_by_id_or_candidate_id(db, app_in.candidateId)
     if not cand:
+        logger.warning("Application create refused: candidate %r not found", app_in.candidateId)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Candidate with identifier '{app_in.candidateId}' not found."
@@ -137,6 +147,7 @@ def create_application(db: Session, app_in: ApplicationCreate) -> ApplicationMod
     # 2. Resolve Job
     job = job_service.get_job_by_id_or_job_id(db, app_in.jobId)
     if not job:
+        logger.warning("Application create refused: job %r not found", app_in.jobId)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Job opening with identifier '{app_in.jobId}' not found."
@@ -145,6 +156,8 @@ def create_application(db: Session, app_in: ApplicationCreate) -> ApplicationMod
     # 3. Check for existing application (Duplicate Prevention)
     existing_app = get_application_by_candidate_and_job(db, cand.id, job.id)
     if existing_app:
+        logger.warning("Application create refused: candidate %s already applied to job %s (application %s)",
+                       cand.id, job.id, existing_app.id)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="You have already applied to this job."
@@ -166,7 +179,8 @@ def create_application(db: Session, app_in: ApplicationCreate) -> ApplicationMod
             data["candidateName"] = data.get("candidateName") or f"{cand.firstName or ''} {cand.lastName or ''}".strip()
             data["appliedRole"] = job.title if (job and job.title) else (data.get("appliedRole") or "Applicant")
             data["department"] = data.get("department") or job.department
-            data["status"] = data.get("status") or "Applied"
+            data["status"] = to_db_stage(data.get("status"))
+            data["applicationState"] = ApplicationState.OPEN
             data["source"] = data.get("source") or "Career Portal"
             data["createdAt"] = data.get("createdAt") or now
             data["updatedAt"] = now
@@ -175,13 +189,17 @@ def create_application(db: Session, app_in: ApplicationCreate) -> ApplicationMod
             db.add(db_app)
             db.commit()
             db.refresh(db_app)
+            logger.info("Application created: id=%s applicationId=%s candidate=%s job=%s status=%s",
+                        db_app.id, db_app.applicationId, cand.id, job.id, db_app.status)
 
             # Auto-run AI screening upon application creation for instant accurate ATS score
             try:
+                logger.info("Application %s: running automatic screening", db_app.id)
                 screen_application_resume(db, application_id=db_app.id)
                 db.refresh(db_app)
             except Exception as screen_err:
-                print(f"Auto AI screening upon application creation encountered warning: {screen_err}")
+                logger.warning("Application %s: automatic screening failed, application kept unscreened: %s",
+                               db_app.id, screen_err, exc_info=True)
 
             return db_app
         except IntegrityError as err:
@@ -204,6 +222,7 @@ def update_application(db: Session, identifier: str, updates: ApplicationUpdate)
     """
     db_app = get_application_by_id_or_app_id(db, identifier)
     if not db_app:
+        logger.warning("Application update: %r not found", identifier)
         return None
 
     update_data = updates.dict(exclude_unset=True)
@@ -216,6 +235,18 @@ def update_application(db: Session, identifier: str, updates: ApplicationUpdate)
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     update_data["updatedAt"] = now
 
+    # Map any known status spelling (e.g. "Applied", "Screening", "Offered")
+    # onto the canonical Title Case stage so the PostgreSQL application_stage
+    # enum never rejects the write.
+    if "status" in update_data:
+        update_data["status"] = to_db_stage(update_data["status"])
+
+    previous_status = db_app.status.value if isinstance(db_app.status, ApplicationStage) else db_app.status
+    becomes_rejected = (
+        update_data.get("status") == ApplicationStage.REJECTED.value
+        and previous_status != ApplicationStage.REJECTED.value
+    )
+
     for key, val in update_data.items():
         setattr(db_app, key, val)
 
@@ -223,11 +254,11 @@ def update_application(db: Session, identifier: str, updates: ApplicationUpdate)
     if updates.status:
         cand = candidate_service.get_candidate_by_id_or_candidate_id(db, db_app.candidateId)
         if cand:
-            cand.status = updates.status
+            cand.status = db_app.status
             cand.updatedAt = now
 
         # Auto-preserve candidate in Talent Pool when application is Rejected
-        if str(updates.status).strip().lower() in ["rejected", "decline", "declined"]:
+        if str(updates.status).strip().upper() in [ApplicationStage.REJECTED.value.upper(), "DECLINE", "DECLINED"]:
             try:
                 from services import talent_pool_service
                 from schemas.talent_pool import TalentPoolCreate
@@ -245,10 +276,17 @@ def update_application(db: Session, identifier: str, updates: ApplicationUpdate)
                         tags=["Rejected Application", "Talent Pool"]
                     ))
             except Exception as tp_err:
-                print("Talent pool auto-archiving note:", tp_err)
+                logger.warning("Application %s: talent pool auto-archive failed: %s", db_app.id, tp_err, exc_info=True)
 
     db.commit()
     db.refresh(db_app)
+    logger.info("Application %s updated: fields=%s status %s -> %s",
+                db_app.id, sorted(k for k in update_data if k != "updatedAt"),
+                previous_status, db_app.status.value if isinstance(db_app.status, ApplicationStage) else db_app.status)
+
+    if becomes_rejected:
+        logger.info("Application %s: moved to Rejected, sending rejection email", db_app.id)
+        automated_email_service.notify_candidate_rejected(db, db_app)
     return db_app
 
 def delete_application(db: Session, identifier: str) -> bool:
@@ -257,6 +295,7 @@ def delete_application(db: Session, identifier: str) -> bool:
     """
     db_app = get_application_by_id_or_app_id(db, identifier)
     if not db_app:
+        logger.warning("Application delete: %r not found", identifier)
         return False
         
     from models.interview import InterviewModel
@@ -268,7 +307,43 @@ def delete_application(db: Session, identifier: str) -> bool:
 
     db.delete(db_app)
     db.commit()
+    logger.info("Application %s deleted together with its offers and interviews", db_app.id)
     return True
+
+def is_fresher_profile(cand) -> bool:
+    """A candidate with under a year of experience (or declared a fresher) is scored on academics."""
+    declared = f"{cand.experienceLevel or ''} {cand.totalExperience or ''}".lower()
+    if "fresh" in declared:
+        return True
+    return (cand.totalExperienceMonths or 0) < 12 and (cand.experienceYears or 0) < 1
+
+
+def profile_evidence_text(cand) -> str:
+    """
+    What a candidate added without a CV is scored on, built only from the saved profile:
+    - a fresher: academic details (education, specialization, year of passing) and key skills
+    - an experienced candidate: key skills, current role and current company
+    Nothing is invented; a field that is empty is left out.
+    """
+    key_skills = (cand.keySkills or "").strip()
+    if not key_skills and isinstance(cand.skills, list):
+        key_skills = ", ".join(str(s) for s in cand.skills if s)
+    lines = ["Profile details (no CV was uploaded):"]
+    if is_fresher_profile(cand):
+        lines.append("Candidate type: Fresher")
+        for label, value in (("Highest education", cand.highestEducation), ("Specialization", cand.specialization),
+                             ("Year of passing", cand.yearOfPassing)):
+            if value and str(value).strip():
+                lines.append(f"{label}: {str(value).strip()}")
+    else:
+        lines.append("Candidate type: Experienced")
+        for label, value in (("Current role", cand.currentRole), ("Current company", cand.currentCompany)):
+            if value and str(value).strip() and str(value).strip().lower() != "not specified":
+                lines.append(f"{label}: {str(value).strip()}")
+    if key_skills:
+        lines.append(f"Key skills: {key_skills}")
+    return "\n".join(lines)
+
 
 def screen_application_resume(db: Session, application_id: str) -> dict:
     """
@@ -276,8 +351,10 @@ def screen_application_resume(db: Session, application_id: str) -> dict:
     Compares the candidate resume & skills against the COMPLETE Job Description stored in JobModel.
     Updates application's aiEvaluation JSON field and atsScore in PostgreSQL.
     """
+    logger.info("Screening started: application=%s", application_id)
     db_app = get_application_by_id_or_app_id(db, application_id)
     if not db_app:
+        logger.warning("Screening refused: application %r not found", application_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Application record '{application_id}' not found."
@@ -308,7 +385,11 @@ def screen_application_resume(db: Session, application_id: str) -> dict:
 
     # Resolve job from JobModel
     job = job_service.get_job_by_id_or_job_id(db, db_app.jobId) if db_app.jobId else None
+    if not db_app.jobId:
+        logger.warning("Screening application %s: it has NO job (the job was deleted?), so it is scored against an empty job description",
+                       db_app.id)
     if db_app.jobId and not job:
+        logger.warning("Screening refused: job %r of application %s does not exist", db_app.jobId, db_app.id)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Selected job opening '{db_app.jobId}' does not exist in backend database."
@@ -335,7 +416,27 @@ def screen_application_resume(db: Session, application_id: str) -> dict:
         skills_text = str(cand.skills)
     else:
         skills_text = ""
-    full_resume_text = resume_text or "No physical resume document content provided."
+    # No CV: score the saved profile instead (fresher: academics + key skills; experienced: key skills,
+    # current role, current company), so a candidate added by hand still gets a real ATS score.
+    profile_only = bool(cand) and not (resume_text and resume_text.strip())
+    profile_fresher = profile_only and is_fresher_profile(cand)
+    if profile_only:
+        full_resume_text = profile_evidence_text(cand)
+        basis_note = (
+            "NO CV WAS UPLOADED. Score ONLY from the profile details above: "
+            + ("the academic details and key skills of this fresher. " if profile_fresher
+               else "the key skills, current role and current company. ")
+            + "Do not lower the score because a CV's usual sections (projects, experience history) are absent."
+        )
+        logger.info("Screening application %s: no CV, scoring the %s profile details", db_app.id,
+                    "fresher (academics + key skills)" if profile_fresher else "experienced (key skills, role, company)")
+    else:
+        full_resume_text = resume_text or "No physical resume document content provided."
+        basis_note = ""
+    logger.info("Screening input: candidate=%s job=%s resume_text=%s skills=%d",
+                cand.id if cand else None, job.id if job else None,
+                f"{len(resume_text)} characters" if resume_text else "NONE (no resume text found)",
+                len(skills_text.split(",")) if skills_text else 0)
 
     def format_field(val):
         if isinstance(val, list):
@@ -381,10 +482,19 @@ Preferred Skills:
     api_key = os.environ.get("GEMINI_API_KEY")
     evaluation = None
 
+    if not api_key:
+        logger.info("Screening engine: fallback scoring (GEMINI_API_KEY is not set)")
     if api_key:
+        gemini_started = time.monotonic()
         try:
+            logger.info("Screening engine: Gemini (model=gemini-2.5-flash), calling the API (gives up after %ss)",
+                        config.GEMINI_TIMEOUT_SECONDS)
             from google import genai
-            client = genai.Client(api_key=api_key)
+            from google.genai import types as genai_types
+            client = genai.Client(
+                api_key=api_key,
+                http_options=genai_types.HttpOptions(timeout=config.GEMINI_TIMEOUT_SECONDS * 1000),
+            )
             prompt = f"""You are an expert Enterprise ATS AI Screening Engine.
 Your task is to conduct a rigorous, objective, and evidence-based ATS match evaluation comparing a candidate's resume against a specific Job Description (JD).
 
@@ -397,6 +507,7 @@ Declared Skills: {skills_text}
 
 === CANDIDATE RESUME TEXT ===
 {full_resume_text}
+{basis_note}
 
 === SCORING & EVALUATION INSTRUCTIONS ===
 1. SCORE (0 - 100):
@@ -440,8 +551,13 @@ Output ONLY valid JSON matching this exact structure:
             parsed = json.loads(raw_json)
             if isinstance(parsed, dict) and "score" in parsed:
                 evaluation = parsed
+                logger.info("Gemini returned a score of %s for application %s in %.1fs", parsed.get("score"), db_app.id,
+                            time.monotonic() - gemini_started)
+            else:
+                logger.warning("Gemini reply for application %s had no score, falling back", db_app.id)
         except Exception as e:
-            print(f"Gemini API invocation error during screening: {e}")
+            logger.warning("Gemini screening failed for application %s after %.1fs, falling back to the scoring engine: %s",
+                           db_app.id, time.monotonic() - gemini_started, e)
 
     # Helper evaluation routines for experience, projects, and education
     def evaluate_experience_ratio(job_info_dict: dict, resume_str: str) -> float:
@@ -502,6 +618,7 @@ Output ONLY valid JSON matching this exact structure:
         return 0.50
 
     if not evaluation or not isinstance(evaluation, dict) or "score" not in evaluation:
+        logger.info("Screening engine: fallback 6-category scoring for application %s", db_app.id)
         # Structured, Alias-Aware ATS Fallback Evaluation Engine
         jd_title_lower = job_info["title"].lower()
         combined_resume = (skills_text + " " + full_resume_text).lower()
@@ -655,6 +772,15 @@ Output ONLY valid JSON matching this exact structure:
         R_proj = evaluate_projects_ratio(job_info, full_resume_text)
         R_role = role_match_score
 
+        # Weights of the experience / projects / role categories. With no CV the profile has no
+        # projects or experience history to read, so those are switched off (like preferred skills
+        # and education are when the JD lacks them) and the profile's own evidence carries the score:
+        # a fresher on academics + key skills, an experienced candidate on key skills + current role.
+        W_exp, W_proj, W_role = 20.0, 15.0, 10.0
+        if profile_only:
+            W_exp, W_proj = 0.0, 0.0
+            W_role = 0.0 if profile_fresher else 20.0
+
         if clean_pref_skills:
             R_pref = len(matched_pref) / len(clean_pref_skills)
             W_pref = 10.0
@@ -665,13 +791,13 @@ Output ONLY valid JSON matching this exact structure:
         edu_req_str = str(job_info.get("education") or "").strip()
         if edu_req_str and edu_req_str.lower() not in ["not specified", "none", "n/a"]:
             R_edu = evaluate_education_ratio(edu_req_str, full_resume_text)
-            W_edu = 5.0
+            W_edu = 20.0 if profile_fresher else 5.0
         else:
             R_edu = 0.0
             W_edu = 0.0  # Deactivated if absent from JD
 
-        W_active_sum = 40.0 + 20.0 + 15.0 + 10.0 + W_pref + W_edu
-        earned_points = (40.0 * R_req) + (20.0 * R_exp) + (15.0 * R_proj) + (10.0 * R_role) + (W_pref * R_pref) + (W_edu * R_edu)
+        W_active_sum = 40.0 + W_exp + W_proj + W_role + W_pref + W_edu
+        earned_points = (40.0 * R_req) + (W_exp * R_exp) + (W_proj * R_proj) + (W_role * R_role) + (W_pref * R_pref) + (W_edu * R_edu)
 
         calc_score = int(round((earned_points / max(1.0, W_active_sum)) * 100.0))
 
@@ -742,18 +868,18 @@ Output ONLY valid JSON matching this exact structure:
                 "ratio": round(R_req, 2)
             },
             "experience": {
-                "score": round(20.0 * R_exp, 1),
-                "maxWeight": 20,
+                "score": round(W_exp * R_exp, 1),
+                "maxWeight": int(W_exp),
                 "ratio": round(R_exp, 2)
             },
             "projects": {
-                "score": round(15.0 * R_proj, 1),
-                "maxWeight": 15,
+                "score": round(W_proj * R_proj, 1),
+                "maxWeight": int(W_proj),
                 "ratio": round(R_proj, 2)
             },
             "roleMatch": {
-                "score": round(10.0 * R_role, 1),
-                "maxWeight": 10,
+                "score": round(W_role * R_role, 1),
+                "maxWeight": int(W_role),
                 "ratio": round(R_role, 2)
             },
             "preferredSkills": {
@@ -780,6 +906,8 @@ Output ONLY valid JSON matching this exact structure:
 
         evaluation = {
             "score": calc_score,
+            "basis": ("profile: academic details and key skills" if profile_fresher else
+                      "profile: key skills, current role and current company") if profile_only else "cv",
             "categoryBreakdown": category_breakdown,
             "summary": f"{cand_name} has been evaluated against the {job_info['title']} Job Description. The profile displays a {calc_score}% ATS alignment across technical skills, experience, projects, and role fit.",
             "strengths": strengths_list,
@@ -788,21 +916,33 @@ Output ONLY valid JSON matching this exact structure:
             "fitReasoning": f"Score of {calc_score}% calculated by evaluating candidate resume evidence against JD requirements for {job_info['title']} using a 6-category weighted evidence engine (Active Weight Base: {int(W_active_sum)}pts)."
         }
 
+    # Record what the score was based on (the CV, or the profile when none was uploaded).
+    evaluation.setdefault("basis", ("profile: academic details and key skills" if profile_fresher else
+                                    "profile: key skills, current role and current company") if profile_only else "cv")
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     calc_score = int(evaluation.get("score", 0))
     threshold = config.ATS_MATCH_THRESHOLD
-    prev_status = str(db_app.status or "").lower()
+    # Unwrap the SQLAlchemy enum member so this yields "rejected", not
+    # "applicationstage.rejected".
+    prev_raw = db_app.status.value if isinstance(db_app.status, ApplicationStage) else (db_app.status or "")
+    prev_status = str(prev_raw).lower()
 
     existing_eval = dict(db_app.aiEvaluation or {})
     merged_eval = {**existing_eval, **evaluation}
     
-    if calc_score >= threshold:
-        new_stage = "Shortlisted"
+    if calc_score > threshold:
+        new_stage = ApplicationStage.SHORTLISTED.value
         rejection_reason = None
     else:
-        new_stage = "Rejected"
+        new_stage = ApplicationStage.REJECTED.value
         rejection_reason = f"Candidate did not meet the minimum ATS match threshold of {threshold}%."
         merged_eval["rejectionReason"] = rejection_reason
+
+    logger.info("Screening result: application=%s score=%s threshold=%s (needs MORE than the threshold) -> %s (was %s)",
+                db_app.id, calc_score, threshold, new_stage, prev_status or "none")
+    if prev_status in ("interviewing", "offer") and new_stage.lower() != prev_status:
+        logger.warning("Screening is changing application %s from %s to %s even though it was already past screening",
+                       db_app.id, prev_status, new_stage)
 
     db_app.aiEvaluation = merged_eval
     db_app.atsScore = calc_score
@@ -817,7 +957,7 @@ Output ONLY valid JSON matching this exact structure:
     db.refresh(db_app)
 
     # Perform automated rejection side-effects (notification, email trigger, & talent pool retention)
-    if new_stage == "Rejected":
+    if new_stage == ApplicationStage.REJECTED.value:
         # 1. Retain candidate in Talent Pool for future opportunity matching (idempotent)
         if cand:
             try:
@@ -828,15 +968,15 @@ Output ONLY valid JSON matching this exact structure:
                     score=calc_score,
                     rejection_reason=rejection_reason
                 )
+                logger.info("Application %s rejected by screening: candidate kept in the talent pool", db_app.id)
             except Exception as tp_err:
-                print(f"Auto talent pool retention note: {tp_err}")
+                logger.warning("Application %s: talent pool retention failed: %s", db_app.id, tp_err, exc_info=True)
 
         if prev_status != "rejected":
             eval_dict = dict(db_app.aiEvaluation or {})
             if not eval_dict.get("rejectionEmailSent"):
                 cand_name_str = (db_app.candidateName or f"{cand.firstName if cand else ''} {cand.lastName if cand else ''}").strip() or "Candidate"
                 job_title_str = db_app.appliedRole or (job.title if job else "Open Position")
-                cand_email_str = db_app.candidateEmail or (cand.email if cand else "")
 
                 # 2. Create rejection notification for recruiter/HR dashboard
                 try:
@@ -847,26 +987,19 @@ Output ONLY valid JSON matching this exact structure:
                         candidate_name=cand_name_str,
                         job_title=job_title_str
                     )
+                    logger.info("Application %s: dashboard notification created for the rejection", db_app.id)
                 except Exception as notif_err:
-                    print(f"Rejection notification creation note: {notif_err}")
+                    logger.warning("Application %s: rejection notification failed: %s", db_app.id, notif_err, exc_info=True)
 
-                # 3. Trigger automated rejection email (idempotent & non-blocking)
+                # 3. Automated rejection email (non-blocking; marked sent only when delivered)
                 try:
-                    if cand_email_str:
-                        email_service.send_rejection_email(
-                            db=db,
-                            candidate_email=cand_email_str,
-                            candidate_name=cand_name_str,
-                            job_title=job_title_str
-                        )
-                        eval_dict["rejectionEmailSent"] = True
-                        eval_dict["rejectionEmailSentAt"] = now
-                        db_app.aiEvaluation = eval_dict
-                        db.commit()
+                    automated_email_service.notify_candidate_rejected(db, db_app)
                 except Exception as email_err:
-                    print(f"Rejection email dispatch note: {email_err}")
+                    logger.error("Application %s: rejection email step failed: %s", db_app.id, email_err, exc_info=True)
 
     return {
         "success": True,
-        "evaluation": db_app.aiEvaluation
+        "evaluation": db_app.aiEvaluation,
+        # The stage the screening actually saved (Shortlisted or Rejected), so screens show the real one.
+        "status": new_stage,
     }

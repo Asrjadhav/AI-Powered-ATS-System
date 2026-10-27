@@ -2,10 +2,22 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
-from schemas.email_template import EmailTemplateCreate, EmailTemplateUpdate, EmailTemplateResponse
-from services import email_template_service
+from schemas.email_template import (
+    EmailTemplateCreate, EmailTemplateUpdate, EmailTemplateResponse,
+    TemplateAIRequest, TemplateAIResponse,
+)
+from services import email_template_service, template_ai_service
 
 router = APIRouter(tags=["Email Templates"])
+
+# POST-only, so it cannot collide with the /templates/{id} routes below.
+@router.post("/templates/generate", response_model=TemplateAIResponse)
+def generate_template(payload: TemplateAIRequest):
+    """Generate a new email template, or rewrite one, with Gemini."""
+    try:
+        return template_ai_service.generate_template(payload)
+    except template_ai_service.TemplateGenerationError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error))
 
 @router.get("/templates", response_model=List[dict])
 def list_templates(db: Session = Depends(get_db)):

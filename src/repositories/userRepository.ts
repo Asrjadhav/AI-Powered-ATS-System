@@ -3,63 +3,99 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { LocalStorageService } from "../services/localStorageService";
-import { generateId } from "./repositoryUtils";
+import axios from "axios";
 
+const FASTAPI_BASE_URL =
+  (import.meta as any).env?.VITE_FASTAPI_BASE_URL ||
+  (import.meta as any).env?.VITE_API_URL ||
+  "http://127.0.0.1:8000";
+
+const apiConfig = {
+  headers: {
+    "X-Skip-Interceptor": "true",
+    "Content-Type": "application/json",
+  },
+};
+
+/**
+ * A team member (recruiter, HR, admin), mirroring UserResponse in
+ * backend/schemas/user.py.
+ *
+ * This is the same "users" table /api/auth/login writes to on first sign-in.
+ * A user created here can log in immediately; their first successful login
+ * sets their password from whatever they enter.
+ */
+export interface User {
+  id: string;
+  email: string;
+  fullName?: string;
+  role?: string;
+  department?: string;
+  designation?: string;
+  manager?: string;
+  employeeId?: string;
+  phone?: string;
+  avatarUrl?: string;
+  avatarColor?: string;
+  status?: string;
+  lastLogin?: string;
+  changePasswordOnFirstLogin?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/**
+ * UserRepository
+ *
+ * Previously backed entirely by localStorage under the key "users",
+ * disconnected from the Users & Roles screen's own localStorage key
+ * ("ats_users") and from the "users" table /api/auth/login writes to. All
+ * three now converge on this one API, backed by that same table.
+ */
 export const UserRepository = {
-  async getAll(): Promise<any[]> {
-    return LocalStorageService.get<any[]>("users", []);
+  async getAll(department?: string): Promise<User[]> {
+    const res = await axios.get(`${FASTAPI_BASE_URL}/api/users`, {
+      ...apiConfig,
+      params: department && department !== "All Departments" ? { department } : undefined,
+    });
+    return Array.isArray(res.data) ? res.data : [];
   },
 
-  async create(payload: any): Promise<any> {
-    const list = await this.getAll();
-    const now = new Date().toISOString();
-
-    const newUser = {
-      id: payload.id || generateId("usr"),
-      createdAt: now,
-      updatedAt: now,
-      createdBy: "admin",
-      status: payload.status || "Active",
-      name: payload.name || "New Team Member",
-      email: payload.email || "",
-      phone: payload.phone || "",
-      employeeId: payload.employeeId || generateId("ENC"),
-      department: payload.department || "Talent Acquisition",
-      designation: payload.designation || "Recruiter",
-      role: payload.role || "Recruiter",
-      manager: payload.manager || "HR Manager",
-      avatarColor: payload.avatarColor || "bg-indigo-600 text-white",
-      createdOn: new Date().toLocaleDateString("en-US", { day: 'numeric', month: 'long', year: 'numeric' }),
-      lastLogin: "Never",
-      ...payload
-    };
-
-    list.push(newUser);
-    LocalStorageService.set("users", list);
-    return newUser;
+  async getById(id: string): Promise<User | null> {
+    try {
+      const res = await axios.get(
+        `${FASTAPI_BASE_URL}/api/users/${encodeURIComponent(id)}`,
+        apiConfig
+      );
+      return res.data ?? null;
+    } catch (e) {
+      return null;
+    }
   },
 
-  async update(id: string, updates: any): Promise<any> {
-    const list = await this.getAll();
-    const index = list.findIndex(u => u.id === id);
-    if (index === -1) throw new Error("User not found.");
+  /**
+   * Adds a team member. Throws with the server's detail message on failure,
+   * including a 409 when the email is already in use.
+   */
+  async create(payload: Partial<User>): Promise<User> {
+    const res = await axios.post(`${FASTAPI_BASE_URL}/api/users`, payload, apiConfig);
+    return res.data;
+  },
 
-    const updated = {
-      ...list[index],
-      ...updates,
-      updatedAt: new Date().toISOString()
-    };
-
-    list[index] = updated;
-    LocalStorageService.set("users", list);
-    return updated;
+  async update(id: string, updates: Partial<User>): Promise<User> {
+    const res = await axios.patch(
+      `${FASTAPI_BASE_URL}/api/users/${encodeURIComponent(id)}`,
+      updates,
+      apiConfig
+    );
+    return res.data;
   },
 
   async delete(id: string): Promise<boolean> {
-    const list = await this.getAll();
-    const filtered = list.filter(u => u.id !== id);
-    LocalStorageService.set("users", filtered);
-    return true;
-  }
+    const res = await axios.delete(
+      `${FASTAPI_BASE_URL}/api/users/${encodeURIComponent(id)}`,
+      apiConfig
+    );
+    return Boolean(res.data?.success);
+  },
 };

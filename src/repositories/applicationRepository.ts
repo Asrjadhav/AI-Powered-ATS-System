@@ -4,10 +4,9 @@
  */
 
 import axios from "axios";
-import { LocalStorageService } from "../services/localStorageService";
 import { generateId, formatJobId } from "./repositoryUtils";
 
-const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || (import.meta as any).env?.VITE_API_URL || "https://ats-fastapi-backend.onrender.com";
+const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || (import.meta as any).env?.VITE_API_URL || "http://127.0.0.1:8000";
 
 const apiConfig = {
   headers: {
@@ -24,6 +23,8 @@ export interface ApplicationRecord {
   appliedRole?: string;
   department?: string;
   status: string;
+  // "Open", or "On Hold" while the job is closed/draft (set by the backend).
+  applicationState: string;
   source: string;
   atsScore: number;
   aiEvaluation?: any;
@@ -34,35 +35,32 @@ export interface ApplicationRecord {
   candidateName?: string;
 }
 
+function mapApplication(item: any): ApplicationRecord {
+  return {
+    id: item.id,
+    applicationId: item.applicationId || item.id || generateId("app"),
+    candidateId: item.candidateId || item.candidate?.id || "",
+    // An application whose job was deleted has no jobId; keep it empty rather than
+    // attributing it to a different job.
+    jobId: formatJobId(item.jobId || item.job?.id),
+    appliedRole: item.appliedRole || item.jobTitle || item.job?.title || "Applicant Role",
+    department: item.department || item.job?.department || "General",
+    status: item.status || "New",
+    applicationState: item.applicationState || "Open",
+    source: item.source || "Career Website",
+    atsScore: item.atsScore ?? item.aiEvaluation?.score ?? 75,
+    aiEvaluation: item.aiEvaluation,
+    createdAt: item.createdAt || new Date().toISOString(),
+    updatedAt: item.updatedAt || new Date().toISOString(),
+    candidateEmail: item.candidateEmail,
+    candidateName: item.candidateName
+  };
+}
+
 export const ApplicationRepository = {
   async getAllApplications(): Promise<ApplicationRecord[]> {
-    try {
-      const res = await axios.get(`${FASTAPI_BASE_URL}/api/applications`, apiConfig);
-      if (res.data && Array.isArray(res.data)) {
-        return res.data.map((item: any) => ({
-          id: item.id,
-          applicationId: item.applicationId || item.id || generateId("app"),
-          candidateId: item.candidateId || item.candidate?.id || "",
-          jobId: formatJobId(item.jobId || item.job?.id || "JOB-0001"),
-          appliedRole: item.appliedRole || item.jobTitle || item.job?.title || "Applicant Role",
-          department: item.department || item.job?.department || "General",
-          status: item.status || "Applied",
-          source: item.source || "Career Website",
-          atsScore: item.atsScore ?? item.aiEvaluation?.score ?? 75,
-          aiEvaluation: item.aiEvaluation,
-          createdAt: item.createdAt || new Date().toISOString(),
-          updatedAt: item.updatedAt || new Date().toISOString(),
-          candidateEmail: item.candidateEmail,
-          candidateName: item.candidateName
-        }));
-      }
-    } catch (e) {
-      console.warn("ApplicationRepository.getAllApplications API fetch failed, falling back to local storage:", e);
-    }
-    const local = LocalStorageService.get<ApplicationRecord[]>("applications_db", []);
-    if (local && local.length > 0) return local;
-
-    return [];
+    const res = await axios.get(`${FASTAPI_BASE_URL}/api/applications`, apiConfig);
+    return Array.isArray(res.data) ? res.data.map(mapApplication) : [];
   },
 
   async getAll(): Promise<ApplicationRecord[]> {
@@ -80,92 +78,33 @@ export const ApplicationRepository = {
 
   async getApplicationsByCandidateId(candidateIdentifier: string): Promise<ApplicationRecord[]> {
     if (!candidateIdentifier) return [];
-    try {
-      const res = await axios.get(`${FASTAPI_BASE_URL}/api/applications?candidateId=${encodeURIComponent(candidateIdentifier)}`, apiConfig);
-      if (res.data && Array.isArray(res.data) && res.data.length > 0) {
-        return res.data.map((item: any) => ({
-          id: item.id,
-          applicationId: item.applicationId || item.id || generateId("app"),
-          candidateId: item.candidateId || candidateIdentifier,
-          jobId: formatJobId(item.jobId || item.job?.id || "JOB-0001"),
-          appliedRole: item.appliedRole || item.jobTitle || item.job?.title || "Applicant Role",
-          department: item.department || item.job?.department || "General",
-          status: item.status || "Applied",
-          source: item.source || "Career Website",
-          atsScore: item.atsScore ?? item.aiEvaluation?.score ?? 75,
-          createdAt: item.createdAt || new Date().toISOString(),
-          updatedAt: item.updatedAt || new Date().toISOString(),
-          candidateEmail: item.candidateEmail,
-          candidateName: item.candidateName
-        }));
-      }
-    } catch (e) {
-      // Fall through to local list filter
-    }
-
-    const list = await this.getAllApplications();
-    const cleanCandId = String(candidateIdentifier || "").replace(/^app-/, "").trim().toLowerCase();
-    return list.filter(a => {
-      const aCandId = String(a.candidateId || "").replace(/^app-/, "").trim().toLowerCase();
-      const aEmail = String(a.candidateEmail || "").trim().toLowerCase();
-      return aCandId === cleanCandId || aEmail === cleanCandId;
-    });
+    const res = await axios.get(
+      `${FASTAPI_BASE_URL}/api/applications?candidateId=${encodeURIComponent(candidateIdentifier)}`,
+      apiConfig
+    );
+    return Array.isArray(res.data) ? res.data.map(mapApplication) : [];
   },
 
   async createApplication(data: Partial<ApplicationRecord>): Promise<ApplicationRecord> {
-    try {
-      const res = await axios.post(`${FASTAPI_BASE_URL}/api/applications`, data, apiConfig);
-      const created = res.data;
-      const formatted: ApplicationRecord = {
-        id: created.id,
-        applicationId: created.applicationId || created.id,
-        candidateId: created.candidateId,
-        jobId: formatJobId(created.jobId),
-        appliedRole: created.appliedRole || data.appliedRole || "Applicant Role",
-        department: created.department || data.department || "General",
-        status: created.status || "Applied",
-        source: created.source || "Career Portal",
-        atsScore: created.atsScore ?? 75,
-        createdAt: created.createdAt || new Date().toISOString(),
-        updatedAt: created.updatedAt || new Date().toISOString(),
-        candidateEmail: created.candidateEmail,
-        candidateName: created.candidateName
-      };
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("applications-updated"));
-      }
-      return formatted;
-    } catch (e) {
-      console.warn("FastAPI application creation failed, saving locally:", e);
-    }
-
-    const list = await this.getAllApplications();
-    const now = new Date().toISOString();
-    const newApp: ApplicationRecord = {
-      applicationId: data.applicationId || generateId("app"),
-      candidateId: data.candidateId || "",
-      jobId: formatJobId(data.jobId || "JOB-0001"),
-      appliedRole: data.appliedRole || "Applicant Role",
-      department: data.department || "General",
-      status: data.status || "Applied",
-      source: data.source || "Career Website",
-      atsScore: data.atsScore ?? 75,
-      createdAt: data.createdAt || now,
-      updatedAt: now,
-      ...data
-    };
-    list.unshift(newApp);
-    LocalStorageService.set("applications_db", list);
+    const res = await axios.post(`${FASTAPI_BASE_URL}/api/applications`, data, apiConfig);
+    const formatted = mapApplication(res.data);
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("applications-updated"));
     }
-    return newApp;
+    return formatted;
   },
 
   async create(data: Partial<ApplicationRecord>): Promise<ApplicationRecord> {
     return this.createApplication(data);
   },
 
+  /**
+   * Updates an application's pipeline status.
+   *
+   * `id` may be an application id or a candidate id — the backend resolves
+   * either (services/application_service.get_application_by_id_or_app_id),
+   * so there is no separate "by candidate or app id" path needed here.
+   */
   async updateStatus(id: string, status: string, email?: string): Promise<any> {
     const rawId = String(id || "").trim();
     if (!rawId) throw new Error("Application identifier is required.");
@@ -188,58 +127,12 @@ export const ApplicationRepository = {
     }
   },
 
-  async updateStatusByCandidateOrAppId(id: string, status: string): Promise<void> {
-    const list = await this.getAllApplications();
-    const cleanId = String(id || "").replace(/^app-/, "").toLowerCase();
-    let updated = false;
-    const newList = list.map(a => {
-      const aCandId = String(a.candidateId || "").replace(/^app-/, "").toLowerCase();
-      const aAppId = String(a.applicationId || "").replace(/^app-/, "").toLowerCase();
-      if (aCandId === cleanId || aAppId === cleanId || a.applicationId === id || a.candidateId === id) {
-        updated = true;
-        return {
-          ...a,
-          status,
-          updatedAt: new Date().toISOString()
-        };
-      }
-      return a;
-    });
-
-    if (updated) {
-      LocalStorageService.set("applications_db", newList);
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("applications-updated"));
-      }
-    }
-  },
-
   async updateApplication(applicationId: string, updates: Partial<ApplicationRecord>): Promise<ApplicationRecord> {
-    try {
-      const res = await axios.put(`${FASTAPI_BASE_URL}/api/applications/${applicationId}`, updates, apiConfig);
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("applications-updated"));
-      }
-      return res.data;
-    } catch (e) {
-      // Fallback
-    }
-
-    const list = await this.getAllApplications();
-    const index = list.findIndex(a => a.applicationId === applicationId || a.id === applicationId);
-    if (index === -1) throw new Error("Application not found.");
-
-    const updated = {
-      ...list[index],
-      ...updates,
-      updatedAt: new Date().toISOString()
-    };
-    list[index] = updated;
-    LocalStorageService.set("applications_db", list);
+    const res = await axios.put(`${FASTAPI_BASE_URL}/api/applications/${applicationId}`, updates, apiConfig);
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("applications-updated"));
     }
-    return updated;
+    return mapApplication(res.data);
   },
 
   async update(applicationId: string, updates: Partial<ApplicationRecord>): Promise<ApplicationRecord> {
@@ -247,19 +140,7 @@ export const ApplicationRepository = {
   },
 
   async deleteApplication(applicationId: string): Promise<boolean> {
-    try {
-      await axios.delete(`${FASTAPI_BASE_URL}/api/applications/${applicationId}`, apiConfig);
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("applications-updated"));
-      }
-      return true;
-    } catch (e) {
-      // Fallback
-    }
-
-    const list = await this.getAllApplications();
-    const filtered = list.filter(a => a.applicationId !== applicationId && a.id !== applicationId);
-    LocalStorageService.set("applications_db", filtered);
+    await axios.delete(`${FASTAPI_BASE_URL}/api/applications/${applicationId}`, apiConfig);
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("applications-updated"));
     }

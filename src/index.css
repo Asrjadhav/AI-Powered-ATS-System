@@ -65,6 +65,34 @@
 html, body {
   max-width: 100%;
   overflow-x: hidden;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+/* Shared presentation layer for every recruiter workspace view. */
+.ats-enterprise-page {
+  background: #f8fafc;
+}
+
+.ats-enterprise-page .rounded-xl {
+  border-radius: 0.5rem;
+}
+
+.ats-enterprise-page .shadow-xl,
+.ats-enterprise-page .shadow-2xl {
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
+}
+
+.ats-enterprise-page table tbody tr {
+  min-height: 52px;
+}
+
+.ats-enterprise-page input:focus,
+.ats-enterprise-page select:focus,
+.ats-enterprise-page textarea:focus {
+  outline: none;
+  border-color: #1f3b75;
+  box-shadow: 0 0 0 3px rgba(31, 59, 117, 0.12);
 }
 
 /* Global Page Container Token */

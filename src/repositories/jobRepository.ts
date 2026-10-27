@@ -6,7 +6,7 @@
 import axios from "axios";
 import { generateId, formatJobId, cleanJobTitle } from "./repositoryUtils";
 
-const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || (import.meta as any).env?.VITE_API_URL || "https://ats-fastapi-backend.onrender.com";
+const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || (import.meta as any).env?.VITE_API_URL || "http://127.0.0.1:8000";
 
 const apiConfig = {
   headers: {
@@ -15,7 +15,27 @@ const apiConfig = {
   },
 };
 
+// Changing a job's status or deleting it also changes its applications (On Hold / Open /
+// deleted) and the Talent Pool on the backend, so those screens refresh too.
+const notifyJobLifecycleChange = () => {
+  if (typeof window === "undefined") return;
+  ["jobs-updated", "applications-updated", "candidates-updated", "talent-pool-updated"].forEach((name) =>
+    window.dispatchEvent(new CustomEvent(name))
+  );
+};
+
 export const JobRepository = {
+  /** The distinct positions (job titles) in the jobs table, for the Applications page filter. */
+  async getPositions(): Promise<{ title: string; jobIds: string[] }[]> {
+    try {
+      const response = await axios.get(`${FASTAPI_BASE_URL}/api/jobs/positions`, apiConfig);
+      return Array.isArray(response.data) ? response.data : [];
+    } catch (err: any) {
+      console.error("JobRepository.getPositions error:", err?.response?.data || err.message);
+      throw new Error(err?.response?.data?.detail || "Failed to retrieve job positions from server.");
+    }
+  },
+
   async getAll(): Promise<any[]> {
     try {
       const response = await axios.get(`${FASTAPI_BASE_URL}/api/jobs`, apiConfig);
@@ -86,9 +106,7 @@ export const JobRepository = {
         id: formatJobId(updated.jobId || updated.id),
         status: updated.status === "published" ? "active" : updated.status,
       };
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("jobs-updated"));
-      }
+      notifyJobLifecycleChange();
       return formatted;
     } catch (err: any) {
       console.error("JobRepository.update error:", err?.response?.data || err.message);
@@ -110,9 +128,7 @@ export const JobRepository = {
         id: formatJobId(updated.jobId || updated.id),
         status: updated.status === "published" ? "active" : updated.status,
       };
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("jobs-updated"));
-      }
+      notifyJobLifecycleChange();
       return formatted;
     } catch (err: any) {
       console.error("JobRepository.updateStatus error:", err?.response?.data || err.message);
@@ -124,9 +140,7 @@ export const JobRepository = {
     try {
       const targetId = formatJobId(id);
       await axios.delete(`${FASTAPI_BASE_URL}/api/jobs/${encodeURIComponent(targetId)}`, apiConfig);
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("jobs-updated"));
-      }
+      notifyJobLifecycleChange();
       return true;
     } catch (err: any) {
       console.error("JobRepository.delete error:", err?.response?.data || err.message);
@@ -135,121 +149,72 @@ export const JobRepository = {
     }
   },
 
-  async importParse(payload: { content?: string; fileData?: string; fileName?: string | null }): Promise<{ success: boolean; data: any[]; warning?: string }> {
-    try {
-      const response = await axios.post("/api/jobs/import", payload, {
-        headers: { "X-Skip-Interceptor": "true" }
-      });
-      if (response.data && response.data.success && Array.isArray(response.data.data) && response.data.data.length > 0) {
-        const aiParsedWithIds = response.data.data.map((job: any) => ({
-          id: generateId("job"),
-          status: "published",
-          ...job,
-          title: cleanJobTitle(job.title),
-        }));
-        return { success: true, data: aiParsedWithIds };
-      }
-    } catch (err: any) {
-      console.warn("Server Gemini AI job parser encountered issue, using structured fallback:", err?.message || err);
+  /**
+   * Extracts job postings from an uploaded document or pasted text.
+   *
+   * The file is sent as multipart/form-data and read entirely by the backend
+   * (PDF, DOCX, XLSX, CSV, TSV, TXT). There is deliberately no client-side
+   * fallback parser: if extraction fails the error is surfaced, because a
+   * guessed job posting is worse than an honest failure.
+   */
+  async importParse(payload: { file?: File | null; content?: string }): Promise<{
+    success: boolean;
+    data: any[];
+    warning?: string | null;
+    sourceFileName?: string | null;
+    extractedCharacters?: number;
+  }> {
+    const formData = new FormData();
+    if (payload.file) {
+      formData.append("file", payload.file);
+    }
+    if (payload.content && payload.content.trim()) {
+      formData.append("content", payload.content);
     }
 
-    const rawText = payload.content || "";
-    const lines = rawText.split("\n").map(l => l.trim()).filter(Boolean);
-
-    // Extract Title cleanly from text
-    let titleCandidate = "";
-    const titleMatch = rawText.match(/(?:job|role|title|position)\s*:\s*([^\n\r]+)/i);
-    if (titleMatch && titleMatch[1]) {
-      titleCandidate = titleMatch[1].trim();
-    } else if (lines.length > 0) {
-      titleCandidate = lines[0];
-    }
-    const cleanTitle = cleanJobTitle(titleCandidate) || (payload.fileName ? payload.fileName.replace(/\.[^/.]+$/, "") : "Python Backend Developer");
-
-    // Extract Department cleanly
-    let deptCandidate = "Software Engineering";
-    const deptMatch = rawText.match(/(?:team|department|dept|unit|division)\s*:\s*([^\n\r]+)/i);
-    if (deptMatch && deptMatch[1]) {
-      deptCandidate = deptMatch[1].trim();
-    }
-
-    // Extract Location cleanly
-    let locCandidate = "Not specified";
-    const locMatch = rawText.match(/(?:location|city|place|offices|site|based in|stationed in)\s*:\s*([^\n\r]+)/i);
-    if (locMatch && locMatch[1]) {
-      locCandidate = locMatch[1].trim();
-    }
-
-    // Extract Experience Range cleanly
-    let expCandidate = "0–2 years";
-    const expMatch = rawText.match(/(?:experience|exp|years of experience)\s*:\s*([^\n\r]+)/i);
-    if (expMatch && expMatch[1]) {
-      expCandidate = expMatch[1].trim();
-    }
-    
-    let currentSection: "about" | "responsibilities" | "requirements" | "preferred" | "benefits" = "about";
-    const aboutLines: string[] = [];
-    const respLines: string[] = [];
-    const reqLines: string[] = [];
-    const prefLines: string[] = [];
-    const benefitLines: string[] = [];
-
-    lines.forEach(line => {
-      const lower = line.toLowerCase();
-      if (lower.includes("responsibility") || lower.includes("responsibilities") || lower.includes("what you'll do") || lower.includes("role overview")) {
-        currentSection = "responsibilities";
-      } else if (lower.includes("requirement") || lower.includes("requirements") || lower.includes("qualifications") || lower.includes("must have") || lower.includes("what you bring")) {
-        currentSection = "requirements";
-      } else if (lower.includes("preferred") || lower.includes("nice to have") || lower.includes("good to have") || lower.includes("bonus")) {
-        currentSection = "preferred";
-      } else if (lower.includes("benefit") || lower.includes("benefits") || lower.includes("perks") || lower.includes("what we offer")) {
-        currentSection = "benefits";
-      } else if (lower.includes("about the role") || lower.includes("about the job") || lower.includes("summary")) {
-        currentSection = "about";
-      } else {
-        const cleanLine = line.replace(/^[\s\-*•\d.]+/, "").trim();
-        if (cleanLine && !/^(?:Job|Team|Location|Experience)\s*:/i.test(cleanLine)) {
-          if (currentSection === "about") aboutLines.push(cleanLine);
-          else if (currentSection === "responsibilities") respLines.push(cleanLine);
-          else if (currentSection === "requirements") reqLines.push(cleanLine);
-          else if (currentSection === "preferred") prefLines.push(cleanLine);
-          else if (currentSection === "benefits") benefitLines.push(cleanLine);
-        }
-      }
+    const res = await axios.post(`${FASTAPI_BASE_URL}/api/jobs/import`, formData, {
+      headers: {
+        "X-Skip-Interceptor": "true",
+        "Content-Type": "multipart/form-data",
+      },
     });
 
-    const parsedJob = {
-      id: generateId("job"),
-      title: cleanTitle,
-      department: deptCandidate,
-      location: locCandidate,
-      type: "Full-time",
-      workMode: /remote/i.test(locCandidate) ? "Remote" : (/hybrid/i.test(locCandidate) ? "Hybrid" : "On-site"),
-      experienceRange: expCandidate,
-      experienceLevel: expCandidate,
-      salaryRange: "Competitive",
-      status: "published",
-      description: aboutLines.join(" ") || rawText || `Job posting for ${cleanTitle}.`,
-      responsibilities: respLines.length > 0 ? respLines : [`Develop and maintain ${cleanTitle} core deliverables.`],
-      requirements: {
-        mustHave: reqLines.length > 0 ? reqLines : [`Relevant professional experience in ${cleanTitle}.`],
-        goodToHave: prefLines,
-        softSkills: [],
-        languages: []
-      },
-      preferredSkills: prefLines,
-      benefits: benefitLines
+    const data = Array.isArray(res.data?.data) ? res.data.data : [];
+    return {
+      success: Boolean(res.data?.success),
+      data: data.map((job: any) => ({
+        id: generateId("job"),
+        ...job,
+        title: cleanJobTitle(job.title),
+      })),
+      warning: res.data?.warning ?? null,
+      sourceFileName: res.data?.sourceFileName ?? null,
+      extractedCharacters: res.data?.extractedCharacters ?? 0,
     };
-
-    return { success: true, data: [parsedJob] };
   },
 
+  /**
+   * Saves reviewed job postings in one request.
+   *
+   * The backend writes them in a single transaction, so an import either
+   * saves every posting or none. Previously this looped create() once per
+   * job, which could leave a partial import behind on failure.
+   */
   async importConfirm(jobs: any[]): Promise<any[]> {
-    const createdList: any[] = [];
-    for (const job of jobs) {
-      const created = await this.create(job);
-      createdList.push(created);
+    const res = await axios.post(
+      `${FASTAPI_BASE_URL}/api/jobs/import/confirm`,
+      { jobs },
+      {
+        headers: {
+          "X-Skip-Interceptor": "true",
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("jobs-updated"));
     }
-    return createdList;
+    return Array.isArray(res.data?.jobs) ? res.data.jobs : [];
   }
 };

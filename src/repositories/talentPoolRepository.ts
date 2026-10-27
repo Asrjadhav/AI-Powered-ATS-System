@@ -5,7 +5,7 @@
 
 import axios from "axios";
 
-const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || (import.meta as any).env?.VITE_API_URL || "https://ats-fastapi-backend.onrender.com";
+const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || (import.meta as any).env?.VITE_API_URL || "http://127.0.0.1:8000";
 
 const apiConfig = {
   headers: {
@@ -27,6 +27,16 @@ export const TalentPoolRepository = {
     } catch (err: any) {
       console.error("TalentPoolRepository.getAll error:", err?.response?.data || err.message);
       throw new Error(err?.response?.data?.detail || "Failed to retrieve talent pool candidates from server.");
+    }
+  },
+
+  async getStats(): Promise<{ total: number; aiRecommendedCount: number; immediateJoinersCount: number; averageMatchScore: number }> {
+    try {
+      const response = await axios.get(`${FASTAPI_BASE_URL}/api/talent-pool/stats`, apiConfig);
+      return response.data;
+    } catch (err: any) {
+      console.error("TalentPoolRepository.getStats error:", err?.response?.data || err.message);
+      throw new Error(err?.response?.data?.detail || "Failed to retrieve talent pool statistics.");
     }
   },
 
