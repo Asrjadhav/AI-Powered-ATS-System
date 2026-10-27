@@ -8,7 +8,7 @@ import { useState, useEffect } from "react";
 export const translations = {
   en: {
     dashboard: "Dashboard",
-    candidates: "Candidates",
+    candidates: "Applications",
     jobs: "Jobs",
     interviews: "Interviews",
     reports: "Reports",

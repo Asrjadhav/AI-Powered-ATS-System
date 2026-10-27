@@ -7,10 +7,15 @@ class UserBase(BaseModel):
     fullName: Optional[str] = None
     role: Optional[str] = "Recruiter"
     department: Optional[str] = None
+    designation: Optional[str] = None
+    manager: Optional[str] = None
     employeeId: Optional[str] = None
+    phone: Optional[str] = None
     avatarUrl: Optional[str] = None
+    avatarColor: Optional[str] = None
     status: Optional[str] = "Active"
     lastLogin: Optional[str] = None
+    changePasswordOnFirstLogin: Optional[bool] = None
     createdAt: Optional[str] = None
     updatedAt: Optional[str] = None
 
@@ -19,11 +24,18 @@ class UserCreate(UserBase):
 
 class UserUpdate(BaseModel):
     fullName: Optional[str] = None
+    email: Optional[str] = None
     role: Optional[str] = None
     department: Optional[str] = None
+    designation: Optional[str] = None
+    manager: Optional[str] = None
+    employeeId: Optional[str] = None
+    phone: Optional[str] = None
     avatarUrl: Optional[str] = None
+    avatarColor: Optional[str] = None
     status: Optional[str] = None
     lastLogin: Optional[str] = None
+    changePasswordOnFirstLogin: Optional[bool] = None
 
 class UserResponse(UserBase):
     class Config:

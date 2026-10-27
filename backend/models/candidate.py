@@ -1,6 +1,7 @@
-from sqlalchemy import Column, String, Integer, Float, Text, JSON, ForeignKey
+from sqlalchemy import Column, String, Integer, Float, Text, JSON, ForeignKey, Enum as SAEnum
 from sqlalchemy.orm import relationship
 from database import Base
+from services.application_stage import ApplicationStage
 
 class CandidateModel(Base):
     __tablename__ = "candidates"
@@ -42,11 +43,14 @@ class CandidateModel(Base):
     inHandSalary = Column(String, nullable=True)
     projectsWorkedOn = Column(Text, nullable=True)
     relocateToPune = Column(String, nullable=True)
+    # The candidate's preferred way of working (Work from Office / Hybrid / Work from Home).
+    # Not the job's work mode, which is jobs.workMode.
+    preferredWorkMode = Column(String, nullable=True)
     
     createdAt = Column(String, nullable=True)
     updatedAt = Column(String, nullable=True)
     createdBy = Column(String, nullable=True)
-    status = Column(String, nullable=True)
+    status = Column(SAEnum(ApplicationStage, name="application_stage", create_type=False, values_callable=lambda x: [e.value for e in x]), nullable=True)
     aiScore = Column(Integer, nullable=True)
     timeline = Column(JSON, nullable=True)
 

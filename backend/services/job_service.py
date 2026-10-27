@@ -9,6 +9,11 @@ from sqlalchemy.exc import IntegrityError
 from models.job import JobModel
 from models.candidate import CandidateModel
 from schemas.job import JobCreate, JobUpdate, JobResponse
+import services.job_lifecycle_service as job_lifecycle_service
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 def clean_job_title(title: Optional[str]) -> str:
     if not title:
@@ -37,17 +42,16 @@ def generate_next_job_id(db: Session) -> str:
 
 def compute_candidate_count(db: Session, job: JobModel) -> int:
     """
-    Counts candidates associated with a job by matching candidate.jobId
-    or candidate.currentRole.
+    Number of different candidates who applied to this job: the candidates with an application for
+    it in the applications table. That is the same data the Applications page lists, so the "N applied"
+    figure always matches what clicking it shows.
     """
-    count = db.query(CandidateModel).filter(
-        or_(
-            CandidateModel.jobId == job.id,
-            CandidateModel.jobId == job.jobId,
-            func.lower(CandidateModel.currentRole) == func.lower(job.title)
-        )
-    ).count()
-    return count
+    from models.application import ApplicationModel
+
+    job_keys = [key for key in (job.id, job.jobId) if key]
+    return db.query(func.count(func.distinct(ApplicationModel.candidateId))).filter(
+        ApplicationModel.jobId.in_(job_keys)
+    ).scalar() or 0
 
 def build_job_response(db: Session, job: JobModel) -> JobResponse:
     """
@@ -63,6 +67,22 @@ def build_job_response(db: Session, job: JobModel) -> JobResponse:
         
     job_dict["candidateCount"] = compute_candidate_count(db, job)
     return JobResponse(**job_dict)
+
+def list_positions(db: Session) -> List[dict]:
+    """
+    The distinct positions (job titles) that exist in the jobs table, for the Applications page's
+    "Job Position / Role" filter. Titles that differ only in case or spacing are one position; each
+    position lists the ids of every job opening that has it. Sorted by title.
+    """
+    positions: dict = {}
+    rows = db.query(JobModel.id, JobModel.jobId, JobModel.title).all()
+    for row_id, job_id, title in rows:
+        label = re.sub(r"\s+", " ", str(title or "")).strip()
+        if not label:
+            continue
+        entry = positions.setdefault(label.lower(), {"title": label, "jobIds": []})
+        entry["jobIds"].extend(key for key in (row_id, job_id) if key and key not in entry["jobIds"])
+    return sorted(positions.values(), key=lambda p: p["title"].lower())
 
 def get_jobs(db: Session, status_filter: Optional[str] = None, search: Optional[str] = None) -> List[JobResponse]:
     """
@@ -146,9 +166,11 @@ def create_job(db: Session, job_in: JobCreate) -> JobResponse:
             db.add(db_job)
             db.commit()
             db.refresh(db_job)
+            logger.info("Job created: id=%s jobId=%s title=%r status=%s", db_job.id, db_job.jobId, db_job.title, db_job.status)
             return build_job_response(db, db_job)
         except IntegrityError as err:
             db.rollback()
+            logger.warning("Job create: integrity error on attempt %d/%d: %s", attempt + 1, max_retries, err)
             # If conflict occurred on auto-generated jobId, retry up to max_retries
             if attempt < max_retries - 1 and not job_in.jobId:
                 continue
@@ -174,51 +196,88 @@ def update_job(db: Session, identifier: str, updates: JobUpdate) -> Optional[Job
         update_data["title"] = clean_job_title(update_data["title"])
 
     update_data["updatedAt"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    
-    for key, val in update_data.items():
-        setattr(db_job, key, val)
-        
-    db.commit()
+
+    old_status = db_job.status
+    try:
+        for key, val in update_data.items():
+            setattr(db_job, key, val)
+        # The edit form can change the status too: same application/Talent Pool rules as PATCH /status.
+        if "status" in update_data:
+            _apply_status_transition(db, db_job, old_status, db_job.status)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(db_job)
+    logger.info("Job %s updated: fields=%s", db_job.id, sorted(k for k in update_data if k != "updatedAt"))
     return build_job_response(db, db_job)
+
+def _apply_status_transition(db: Session, db_job: JobModel, old_status: Optional[str], new_status: Optional[str]) -> None:
+    """Open -> not open puts the job's applications on hold; not open -> Open reopens them. No commit."""
+    was_open = job_lifecycle_service.is_open_status(old_status)
+    now_open = job_lifecycle_service.is_open_status(new_status)
+    logger.info("Job %s status %r -> %r", db_job.id, old_status, new_status)
+    if was_open and not now_open:
+        job_lifecycle_service.hold_job_applications(db, db_job)
+    elif now_open and not was_open:
+        job_lifecycle_service.reopen_job_applications(db, db_job)
 
 def update_job_status(db: Session, identifier: str, new_status: str) -> Optional[JobResponse]:
     """
-    Updates the status field of a job record.
+    Updates the status field of a job record. Leaving Open puts its applications On Hold and
+    moves their candidates to the Talent Pool; becoming Open again reverses that.
     """
     db_job = get_job_by_id_or_job_id(db, identifier)
     if not db_job:
         return None
-        
-    db_job.status = new_status
-    db_job.updatedAt = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    
-    db.commit()
+
+    old_status = db_job.status
+    try:
+        db_job.status = new_status
+        db_job.updatedAt = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        _apply_status_transition(db, db_job, old_status, new_status)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.error("Job %s status change to %r failed and was rolled back", db_job.id, new_status, exc_info=True)
+        raise
     db.refresh(db_job)
     return build_job_response(db, db_job)
 
 def delete_job(db: Session, identifier: str) -> bool:
     """
-    Deletes a job row safely without cascade deleting related candidate/application history.
-    Safely disassociates jobId in linked candidates, applications, interviews, and offers to avoid foreign key violations.
+    Deletes a job. Its candidates are added to the Talent Pool first, then its applications
+    are deleted. Candidates (and their resumes), interviews and offers are kept; they just
+    lose the link to the deleted job (jobId -> NULL). All in one transaction.
     """
     db_job = get_job_by_id_or_job_id(db, identifier)
     if not db_job:
+        logger.warning("Job delete: %r not found", identifier)
         return False
 
+    logger.warning("Job delete requested: %s (%s, title %r). Candidates go to the Talent Pool, applications are deleted",
+                   db_job.id, db_job.jobId, db_job.title)
     j_ids = list(set([identifier, db_job.id, db_job.jobId]))
 
     from models.candidate import CandidateModel
-    from models.application import ApplicationModel
     from models.interview import InterviewModel
     from models.offer import OfferModel
 
-    # Safely nullify jobId in linked candidates, applications, interviews, and offers to prevent foreign key errors
-    db.query(CandidateModel).filter(CandidateModel.jobId.in_(j_ids)).update({CandidateModel.jobId: None}, synchronize_session=False)
-    db.query(ApplicationModel).filter(ApplicationModel.jobId.in_(j_ids)).update({ApplicationModel.jobId: None}, synchronize_session=False)
-    db.query(InterviewModel).filter(InterviewModel.jobId.in_(j_ids)).update({InterviewModel.jobId: None}, synchronize_session=False)
-    db.query(OfferModel).filter(OfferModel.jobId.in_(j_ids)).update({OfferModel.jobId: None}, synchronize_session=False)
+    try:
+        # Talent Pool first, then the applications (see job_lifecycle_service.remove_job_applications).
+        job_lifecycle_service.remove_job_applications(db, db_job)
 
-    db.delete(db_job)
-    db.commit()
+        # Nullify jobId in linked candidates, interviews, and offers to prevent foreign key errors
+        n_candidates = db.query(CandidateModel).filter(CandidateModel.jobId.in_(j_ids)).update({CandidateModel.jobId: None}, synchronize_session=False)
+        n_interviews = db.query(InterviewModel).filter(InterviewModel.jobId.in_(j_ids)).update({InterviewModel.jobId: None}, synchronize_session=False)
+        n_offers = db.query(OfferModel).filter(OfferModel.jobId.in_(j_ids)).update({OfferModel.jobId: None}, synchronize_session=False)
+
+        db.delete(db_job)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.error("Job %s delete failed and was rolled back; nothing was changed", db_job.id, exc_info=True)
+        raise
+    logger.warning("Job %s deleted. Rows that lost their job: %d candidate(s), %d interview(s), %d offer(s)",
+                   db_job.id, n_candidates, n_interviews, n_offers)
     return True

@@ -6,7 +6,7 @@
 import axios from "axios";
 import { formatJobId } from "./repositoryUtils";
 
-const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || (import.meta as any).env?.VITE_API_URL || "https://ats-fastapi-backend.onrender.com";
+const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || (import.meta as any).env?.VITE_API_URL || "http://127.0.0.1:8000";
 
 const apiConfig = {
   headers: {
@@ -65,8 +65,12 @@ export const InterviewRepository = {
     try {
       const res = await axios.get(`${FASTAPI_BASE_URL}/api/interviews`, apiConfig);
       if (res.data && Array.isArray(res.data)) {
-        const mapped = res.data.map((item: any) => ({
+        const mapped = res.data.map((item: any) => {
+          // The Meet URL is stored in meetingLink (other values there are just labels).
+          const meetUrl = /^https:\/\/meet\.google\.com\//.test(item.meetingLink || "") ? item.meetingLink : undefined;
+          return {
           ...item,
+          ...(meetUrl ? { googleMeetUrl: meetUrl, type: item.type || "Online", platform: item.platform || "Google Meet" } : {}),
           jobId: formatJobId(item.jobId || "JOB-0001"),
           date: item.date || new Date().toISOString().split("T")[0],
           time: item.time || "14:00",
@@ -74,7 +78,8 @@ export const InterviewRepository = {
           round: item.round || "Technical Interview",
           interviewer: item.interviewer || "Panel Evaluator",
           feedback: parseFeedbackObj(item.feedback, item.technicalScore, item.communicationScore)
-        }));
+          };
+        });
 
         const seen = new Set<string>();
         return mapped.filter((item: any) => {
@@ -132,19 +137,21 @@ export const InterviewRepository = {
         time: payload.time || "14:00",
         interviewer: payload.interviewer || "Panel Evaluator",
         status: payload.status || "Scheduled",
-        meetingLink: payload.meetingLink || payload.platform || "Google Meet",
         notes: payload.notes || "",
         ...payload
       };
 
       const res = await axios.post(`${FASTAPI_BASE_URL}/api/interviews`, schedulePayload, apiConfig);
 
-      // Trigger real-time Google Calendar API event creation on Node server
-      try {
-        await axios.post("/api/interviews", schedulePayload, { headers: { "X-Skip-Interceptor": "true" } });
-      } catch (gcalErr) {
-        console.warn("Real-time Google Calendar sync note:", gcalErr);
-      }
+      // A second POST to the relative /api/interviews path used to run here
+      // to reach Express, which (unlike FastAPI today) creates a real Google
+      // Calendar event and Meet link as a side effect of this same request.
+      // Removed: it wrote a second, disconnected copy of this interview into
+      // Express's own flat-file store, unsynced with the Postgres row above.
+      // Calendar creation belongs in services/google_calendar_service.py
+      // (currently stubbed) once it's implemented, wired into this same
+      // POST /api/interviews call server-side rather than a second client
+      // request to a different backend.
 
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("interviews-updated"));

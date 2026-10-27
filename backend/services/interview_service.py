@@ -3,7 +3,7 @@ import uuid
 import datetime
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_, func
+from sqlalchemy import or_, and_, func, String
 from fastapi import HTTPException, status
 
 from models.interview import InterviewModel
@@ -14,6 +14,11 @@ from schemas.interview import InterviewCreate, InterviewUpdate
 import services.candidate_service as candidate_service
 import services.job_service as job_service
 import services.application_service as application_service
+from services.application_stage import ApplicationStage
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 def get_interview_by_id(db: Session, identifier: str) -> Optional[InterviewModel]:
     """
@@ -44,8 +49,8 @@ def ensure_interview_records_synced(db: Session):
 
         cands_in_interview = db.query(CandidateModel).filter(
             or_(
-                CandidateModel.status.ilike("%interview%"),
-                CandidateModel.status == "Interviewing"
+                CandidateModel.status.cast(String).ilike("%interview%"),
+                CandidateModel.status == ApplicationStage.INTERVIEWING.value
             )
         ).all()
 
@@ -90,11 +95,13 @@ def ensure_interview_records_synced(db: Session):
                 )
                 db.add(new_int)
                 new_records = True
+                logger.warning("Auto-created a PLACEHOLDER interview %s for candidate %s (stage Interviewing but no interview row; dated today 14:00)",
+                               new_int.id, cand.id)
 
         if new_records:
             db.commit()
     except Exception as sync_err:
-        print("Auto-sync interview records note:", sync_err)
+        logger.error("Auto-sync of interview records failed: %s", sync_err, exc_info=True)
 
 def get_interviews(
     db: Session,
@@ -207,9 +214,9 @@ def create_interview(db: Session, interview_in: InterviewCreate) -> InterviewMod
     
     # Synchronize application and candidate status to Interviewing in PostgreSQL
     if app:
-        application_service.update_application(db, app.id, application_service.ApplicationUpdate(status="Interviewing"))
+        application_service.update_application(db, app.id, application_service.ApplicationUpdate(status=ApplicationStage.INTERVIEWING.value))
     if cand:
-        cand.status = "Interviewing"
+        cand.status = ApplicationStage.INTERVIEWING.value
         cand.updatedAt = now
 
     db.commit()
@@ -255,11 +262,11 @@ def cancel_interview(db: Session, identifier: str) -> Optional[InterviewModel]:
 
     # If no other active interviews remain, revert status
     if db_int.applicationId:
-        application_service.update_application(db, db_int.applicationId, application_service.ApplicationUpdate(status="Shortlisted"))
+        application_service.update_application(db, db_int.applicationId, application_service.ApplicationUpdate(status=ApplicationStage.SHORTLISTED.value))
     elif db_int.candidateId:
         cand = candidate_service.get_candidate_by_id_or_candidate_id(db, db_int.candidateId)
         if cand:
-            cand.status = "Shortlisted"
+            cand.status = ApplicationStage.SHORTLISTED.value
             cand.updatedAt = now
 
     db.commit()
@@ -296,11 +303,11 @@ def submit_feedback(db: Session, identifier: str, feedback_payload: Dict[str, An
 
     if recommendation.lower() == "reject":
         if db_int.applicationId:
-            application_service.update_application(db, db_int.applicationId, application_service.ApplicationUpdate(status="Rejected"))
+            application_service.update_application(db, db_int.applicationId, application_service.ApplicationUpdate(status=ApplicationStage.REJECTED.value))
         elif db_int.candidateId:
             cand = candidate_service.get_candidate_by_id_or_candidate_id(db, db_int.candidateId)
             if cand:
-                cand.status = "Rejected"
+                cand.status = ApplicationStage.REJECTED.value
                 cand.updatedAt = now
     if application_id:
         app = application_service.get_application_by_id_or_app_id(db, application_id)
@@ -431,9 +438,9 @@ def create_interview(db: Session, interview_in: InterviewCreate) -> InterviewMod
     
     # Synchronize application and candidate status to Interviewing in PostgreSQL
     if app:
-        application_service.update_application(db, app.id, application_service.ApplicationUpdate(status="Interviewing"))
+        application_service.update_application(db, app.id, application_service.ApplicationUpdate(status=ApplicationStage.INTERVIEWING.value))
     if cand:
-        cand.status = "Interviewing"
+        cand.status = ApplicationStage.INTERVIEWING.value
         cand.updatedAt = now
 
     db.commit()
@@ -479,11 +486,11 @@ def cancel_interview(db: Session, identifier: str) -> Optional[InterviewModel]:
 
     # If no other active interviews remain, revert status
     if db_int.applicationId:
-        application_service.update_application(db, db_int.applicationId, application_service.ApplicationUpdate(status="Shortlisted"))
+        application_service.update_application(db, db_int.applicationId, application_service.ApplicationUpdate(status=ApplicationStage.SHORTLISTED.value))
     elif db_int.candidateId:
         cand = candidate_service.get_candidate_by_id_or_candidate_id(db, db_int.candidateId)
         if cand:
-            cand.status = "Shortlisted"
+            cand.status = ApplicationStage.SHORTLISTED.value
             cand.updatedAt = now
 
     db.commit()
@@ -520,11 +527,11 @@ def submit_feedback(db: Session, identifier: str, feedback_payload: Dict[str, An
 
     if recommendation.lower() == "reject":
         if db_int.applicationId:
-            application_service.update_application(db, db_int.applicationId, application_service.ApplicationUpdate(status="Rejected"))
+            application_service.update_application(db, db_int.applicationId, application_service.ApplicationUpdate(status=ApplicationStage.REJECTED.value))
         elif db_int.candidateId:
             cand = candidate_service.get_candidate_by_id_or_candidate_id(db, db_int.candidateId)
             if cand:
-                cand.status = "Rejected"
+                cand.status = ApplicationStage.REJECTED.value
                 cand.updatedAt = now
 
     db.commit()
@@ -598,11 +605,11 @@ def delete_interview(db: Session, identifier: str) -> bool:
         cand = candidate_service.get_candidate_by_id_or_candidate_id(db, raw_id)
         if cand and ("interview" in str(cand.status).lower()):
             now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-            cand.status = "Shortlisted"
+            cand.status = ApplicationStage.SHORTLISTED.value
             cand.updatedAt = now
             apps = db.query(ApplicationModel).filter(ApplicationModel.candidateId.in_([cand.id, cand.candidateId])).all()
             for app in apps:
-                app.status = "Shortlisted"
+                app.status = ApplicationStage.SHORTLISTED.value
                 app.updatedAt = now
             db.commit()
             return True
@@ -619,11 +626,11 @@ def delete_interview(db: Session, identifier: str) -> bool:
     # Revert candidate & application status to Shortlisted
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     if app_id:
-        application_service.update_application(db, app_id, application_service.ApplicationUpdate(status="Shortlisted"))
+        application_service.update_application(db, app_id, application_service.ApplicationUpdate(status=ApplicationStage.SHORTLISTED.value))
     if cand_id:
         cand = candidate_service.get_candidate_by_id_or_candidate_id(db, cand_id)
         if cand:
-            cand.status = "Shortlisted"
+            cand.status = ApplicationStage.SHORTLISTED.value
             cand.updatedAt = now
             db.commit()
 

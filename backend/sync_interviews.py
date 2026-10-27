@@ -5,6 +5,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from sqlalchemy import String
 from database import SessionLocal
 from models.candidate import CandidateModel
 from models.application import ApplicationModel
@@ -26,7 +27,7 @@ def run_sync():
         db.commit()
 
         # 2. Find all candidates in Interviewing stage
-        cands_in_interview = db.query(CandidateModel).filter(CandidateModel.status.ilike("%interview%")).all()
+        cands_in_interview = db.query(CandidateModel).filter(CandidateModel.status.cast(String).ilike("%interview%")).all()
         print(f"Found {len(cands_in_interview)} candidate(s) in Interviewing stage in PostgreSQL.")
 
         created_count = 0
@@ -66,7 +67,7 @@ def run_sync():
         print(f"\nSUCCESS: Synchronization complete! Created {created_count} missing interview record(s).")
 
         # Verify final state
-        total_interview_cands = db.query(CandidateModel).filter(CandidateModel.status.ilike("%interview%")).count()
+        total_interview_cands = db.query(CandidateModel).filter(CandidateModel.status.cast(String).ilike("%interview%")).count()
         total_interview_records = db.query(InterviewModel).count()
         print(f"\nFinal Verified Counts in PostgreSQL:")
         print(f"- Candidates in 'Interviewing' stage: {total_interview_cands}")

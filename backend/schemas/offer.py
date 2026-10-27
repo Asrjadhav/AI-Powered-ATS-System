@@ -20,7 +20,10 @@ class OfferBase(BaseModel):
     updatedAt: Optional[str] = None
 
 class OfferCreate(OfferBase):
-    pass
+    # Used for the offer letter PDF only (the offers table has no column for them): the date
+    # the offer stays valid till, and who the candidate reports to.
+    expiryDate: Optional[str] = None
+    reportingManager: Optional[str] = None
 
 class OfferUpdate(BaseModel):
     offeredCTC: Optional[float] = None

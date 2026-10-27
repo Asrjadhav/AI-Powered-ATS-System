@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from schemas.candidate import CandidateCreate, CandidateUpdate, CandidateResponse
+from schemas.resume import ParsedResume, ResumeParseRequest, ResumeParseResponse
 import services.candidate_service as candidate_service
 
 router = APIRouter()
@@ -137,27 +138,87 @@ def delete_candidate_resume(
     """
     return candidate_service.delete_candidate_resume(db, identifier=id)
 
-class ResumeParseRequest(BaseModel):
-    fileData: Optional[str] = None
-    fileName: Optional[str] = None
-    content: Optional[str] = None
-
-@router.post("/candidates/parse-resume")
-def parse_candidate_resume(payload: ResumeParseRequest):
+def _to_parse_response(raw: dict, filename: Optional[str]) -> ResumeParseResponse:
     """
-    Zero-mock document text parser for candidate CV upload.
+    Adapts the extraction service output to the flat, form-ready API contract.
+
+    All derivation happens here or further down in the service so that clients
+    only ever assign values to form fields.
+    """
+    parsed = (raw or {}).get("parsed") or {}
+    try:
+        years = int(parsed.get("experienceYears") or 0)
+    except (TypeError, ValueError):
+        years = 0
+
+    return ResumeParseResponse(
+        success=bool((raw or {}).get("success", True)),
+        parsed=ParsedResume(
+            firstName=parsed.get("firstName") or "",
+            lastName=parsed.get("lastName") or "",
+            fullName=parsed.get("fullName") or "",
+            email=parsed.get("email") or "",
+            phone=parsed.get("phone") or "",
+            location=parsed.get("location") or "",
+            role=parsed.get("role") or "",
+            company=parsed.get("company") or "",
+            experienceYears=years,
+            experienceLabel=parsed.get("totalExperience") or "Fresher",
+            isFresher=years <= 0,
+            skills=parsed.get("skills") or "",
+            educationText=parsed.get("educationText") or "",
+            resumeText=parsed.get("extractedRawText") or "",
+            source="Uploaded CV",
+            fileName=filename,
+        ),
+    )
+
+
+@router.post("/candidates/parse-resume", response_model=ResumeParseResponse)
+async def parse_candidate_resume(file: UploadFile = File(...)):
+    """
+    Extracts structured candidate details from an uploaded CV.
+
+    Accepts the raw document as multipart/form-data. Text extraction (PDF via
+    pypdf, DOCX via python-docx) and all field derivation run server-side; the
+    response maps directly onto the Add Candidate form.
+    """
+    contents = await file.read()
+    filename = file.filename or "resume.pdf"
+    candidate_service.validate_resume_file(
+        file_bytes=contents,
+        original_filename=filename,
+        content_type=file.content_type,
+    )
+    raw = candidate_service.parse_resume_document(
+        file_bytes=contents,
+        filename=filename,
+    )
+    return _to_parse_response(raw, filename)
+
+
+@router.post("/candidates/parse-resume/base64", response_model=ResumeParseResponse)
+def parse_candidate_resume_base64(payload: ResumeParseRequest):
+    """
+    Deprecated: base64/JSON variant of the resume parser.
+
+    Kept so existing integrations keep working. New callers should POST the
+    file to /candidates/parse-resume as multipart/form-data instead.
     """
     file_bytes = None
     if payload.fileData:
+        import base64 as _b64
+        # Tolerate a full data: URI as well as a bare base64 payload.
+        encoded = payload.fileData.split(",", 1)[-1]
         try:
-            import base64
-            file_bytes = base64.b64decode(payload.fileData)
+            file_bytes = _b64.b64decode(encoded)
         except Exception:
-            pass
+            file_bytes = None
 
-    return candidate_service.parse_resume_document(
+    raw = candidate_service.parse_resume_document(
         file_bytes=file_bytes,
         filename=payload.fileName,
-        raw_content=payload.content
+        raw_content=payload.content,
     )
+    return _to_parse_response(raw, payload.fileName)
 

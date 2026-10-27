@@ -40,6 +40,7 @@ import {
   X,
   Sparkles
 } from "lucide-react";
+import { SearchableSelect } from "./common/SearchableSelect";
 
 // ==========================================
 // MOCK JSON DATA FOR REPORTS
@@ -296,17 +297,31 @@ export default function ReportsView() {
   const [scheduleFormat, setScheduleFormat] = useState("PDF");
   const [scheduleEmails, setScheduleEmails] = useState("aditijadhav2828@gmail.com, hr-alerts@company.com");
   const [scheduleDept, setScheduleDept] = useState("All Departments");
-  const [activeSchedules, setActiveSchedules] = useState<Array<{id: string, frequency: string, format: string, emails: string, department: string, lastSent: string}>>(() => {
-    const list = LocalStorageService.get<any[]>("ats_report_schedules", []);
-    return list.length > 0 ? list : [
-      { id: "sch-1", frequency: "Weekly", format: "PDF", emails: "aditijadhav2828@gmail.com", department: "Engineering", lastSent: "2026-07-05 08:00" },
-      { id: "sch-2", frequency: "Monthly", format: "Excel", emails: "exec-board@company.com", department: "All Departments", lastSent: "2026-07-01 00:00" }
-    ];
-  });
+  // Schedules are stored via ReportRepository (real FastAPI table), not
+  // localStorage. This used to be its own private key ("ats_report_schedules"),
+  // disconnected from ReportRepository even though ReportRepository was
+  // already imported above — the real client existed and simply wasn't
+  // called. It also seeded two entirely fake schedules ("sch-1"/"sch-2")
+  // whenever nothing was stored yet, which looked exactly like real,
+  // previously-configured automation.
+  const [activeSchedules, setActiveSchedules] = useState<Array<{id: string, frequency: string, format: string, emails: string, department: string, lastSent: string}>>([]);
+  const [schedulesLoading, setSchedulesLoading] = useState(true);
+
+  const fetchSchedules = async () => {
+    try {
+      setSchedulesLoading(true);
+      const schedules = await ReportRepository.getSchedules();
+      setActiveSchedules(schedules as any);
+    } catch (err) {
+      console.error("Failed to load report schedules:", err);
+    } finally {
+      setSchedulesLoading(false);
+    }
+  };
 
   React.useEffect(() => {
-    LocalStorageService.set("ats_report_schedules", activeSchedules);
-  }, [activeSchedules]);
+    fetchSchedules();
+  }, []);
 
   const handleRefresh = () => {
     setIsRefreshing(true);
@@ -505,13 +520,12 @@ export default function ReportsView() {
       </div>
 
       {/* Page Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-5">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-4 border-b border-slate-200">
         <div>
-          <h2 className="font-display font-black text-2xl sm:text-3xl text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
-            <FileText className="h-7 w-7 text-indigo-600" />
+          <h2 className="text-xl font-semibold text-slate-900 tracking-tight flex items-center gap-2.5">
             <span>Reports</span>
           </h2>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+          <p className="text-sm text-slate-500 mt-1">
             Analyze hiring performance, recruiter productivity, and recruitment trends.
           </p>
         </div>
@@ -558,7 +572,7 @@ export default function ReportsView() {
       </div>
 
       {/* FILTER BAR - STICKY PANEL */}
-      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-3xs sticky top-0 z-20 space-y-3">
+      <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-3xs sticky top-0 z-20 space-y-3">
         <div className="flex items-center justify-between border-b border-slate-100 pb-2">
           <div className="flex items-center gap-2">
             <Filter className="h-4 w-4 text-indigo-500" />
@@ -578,13 +592,13 @@ export default function ReportsView() {
           <div className="flex flex-col gap-1.5">
             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Date Range</label>
             <div className="relative">
-              <select 
+              <SearchableSelect 
                 value={dateRange}
                 onChange={(e) => setDateRange(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 pl-3 pr-8 text-xs font-medium text-slate-700 focus:outline-hidden focus:border-indigo-500 cursor-pointer appearance-none"
               >
                 {DATE_RANGES.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-              </select>
+              </SearchableSelect>
               <ChevronDown className="h-3.5 w-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
           </div>
@@ -593,13 +607,13 @@ export default function ReportsView() {
           <div className="flex flex-col gap-1.5">
             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Department</label>
             <div className="relative">
-              <select 
+              <SearchableSelect 
                 value={department}
                 onChange={(e) => setDepartment(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 pl-3 pr-8 text-xs font-medium text-slate-700 focus:outline-hidden focus:border-indigo-500 cursor-pointer appearance-none"
               >
                 {DEPARTMENTS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-              </select>
+              </SearchableSelect>
               <ChevronDown className="h-3.5 w-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
           </div>
@@ -608,13 +622,13 @@ export default function ReportsView() {
           <div className="flex flex-col gap-1.5">
             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Recruiter</label>
             <div className="relative">
-              <select 
+              <SearchableSelect 
                 value={recruiter}
                 onChange={(e) => setRecruiter(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 pl-3 pr-8 text-xs font-medium text-slate-700 focus:outline-hidden focus:border-indigo-500 cursor-pointer appearance-none"
               >
                 {RECRUITERS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-              </select>
+              </SearchableSelect>
               <ChevronDown className="h-3.5 w-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
           </div>
@@ -623,13 +637,13 @@ export default function ReportsView() {
           <div className="flex flex-col gap-1.5">
             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Job Position</label>
             <div className="relative">
-              <select 
+              <SearchableSelect 
                 value={jobPosition}
                 onChange={(e) => setJobPosition(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 pl-3 pr-8 text-xs font-medium text-slate-700 focus:outline-hidden focus:border-indigo-500 cursor-pointer appearance-none"
               >
                 {JOB_POSITIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-              </select>
+              </SearchableSelect>
               <ChevronDown className="h-3.5 w-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
           </div>
@@ -638,13 +652,13 @@ export default function ReportsView() {
           <div className="flex flex-col gap-1.5">
             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Candidate Source</label>
             <div className="relative">
-              <select 
+              <SearchableSelect 
                 value={candidateSource}
                 onChange={(e) => setCandidateSource(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 pl-3 pr-8 text-xs font-medium text-slate-700 focus:outline-hidden focus:border-indigo-500 cursor-pointer appearance-none"
               >
                 {CANDIDATE_SOURCES.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-              </select>
+              </SearchableSelect>
               <ChevronDown className="h-3.5 w-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
           </div>
@@ -653,13 +667,13 @@ export default function ReportsView() {
           <div className="flex flex-col gap-1.5">
             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Hiring Status</label>
             <div className="relative">
-              <select 
+              <SearchableSelect 
                 value={hiringStatus}
                 onChange={(e) => setHiringStatus(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 pl-3 pr-8 text-xs font-medium text-slate-700 focus:outline-hidden focus:border-indigo-500 cursor-pointer appearance-none"
               >
                 {HIRING_STATUSES.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-              </select>
+              </SearchableSelect>
               <ChevronDown className="h-3.5 w-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
           </div>
@@ -670,7 +684,7 @@ export default function ReportsView() {
       {isRefreshing ? (
         <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
           {[...Array(6)].map((_, i) => (
-            <div key={i} className="bg-white border border-slate-200 rounded-xl p-5 animate-pulse space-y-3">
+            <div key={i} className="bg-white border border-slate-200 rounded-lg p-5 animate-pulse space-y-3">
               <div className="h-4 bg-slate-200 rounded-sm w-3/4" />
               <div className="h-8 bg-slate-200 rounded-sm w-1/2" />
               <div className="h-3 bg-slate-200 rounded-sm w-5/6" />
@@ -684,7 +698,7 @@ export default function ReportsView() {
             return (
               <div 
                 key={metric.id}
-                className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between group relative overflow-hidden"
+                className="bg-white border border-slate-200 rounded-lg p-5 shadow-sm hover:shadow-sm transition-all flex flex-col justify-between group relative overflow-hidden"
               >
                 {/* Visual Accent */}
                 <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500/0 group-hover:bg-indigo-500 transition-all duration-300" />
@@ -720,7 +734,7 @@ export default function ReportsView() {
       )}
 
       {/* HIRING FUNNEL SECTION */}
-      <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+      <div className="bg-white border border-slate-200 rounded-lg p-6 shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
           <div>
             <h3 className="font-display font-semibold text-base text-slate-950 flex items-center gap-2">
@@ -752,7 +766,7 @@ export default function ReportsView() {
             return (
               <div 
                 key={stage.stage}
-                className="flex flex-col rounded-xl overflow-hidden border border-slate-250 hover:border-indigo-300 hover:shadow-xs transition-all p-4 space-y-3 relative group"
+                className="flex flex-col rounded-lg overflow-hidden border border-slate-250 hover:border-indigo-300 hover:shadow-xs transition-all p-4 space-y-3 relative group"
               >
                 <div className="flex justify-between items-start">
                   <span className="text-xs font-bold text-slate-400 uppercase tracking-wider font-mono">Stage {idx + 1}</span>
@@ -784,7 +798,7 @@ export default function ReportsView() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
         {/* RECRUITER PERFORMANCE (Leaderboard) */}
-        <div className="lg:col-span-2 bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4">
+        <div className="lg:col-span-2 bg-white border border-slate-200 rounded-lg p-6 shadow-sm space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-4">
             <div>
               <h3 className="font-display font-semibold text-base text-slate-950 flex items-center gap-2">
@@ -846,7 +860,7 @@ export default function ReportsView() {
         </div>
 
         {/* EXPORT HISTORY LOGS */}
-        <div className="lg:col-span-1 bg-white border border-slate-200 rounded-xl p-6 shadow-sm flex flex-col justify-between space-y-4">
+        <div className="lg:col-span-1 bg-white border border-slate-200 rounded-lg p-6 shadow-sm flex flex-col justify-between space-y-4">
           <div className="border-b border-slate-100 pb-4">
             <h3 className="font-display font-semibold text-sm text-slate-950 flex items-center gap-2">
               <Clock className="h-4 w-4 text-indigo-500" />
@@ -861,7 +875,7 @@ export default function ReportsView() {
             {EXPORT_HISTORY_LOGS.map((log) => (
               <div 
                 key={log.filename}
-                className="bg-slate-50 border border-slate-200/60 rounded-xl p-3 flex items-start justify-between gap-3 hover:border-slate-300 transition-all text-xs"
+                className="bg-slate-50 border border-slate-200/60 rounded-lg p-3 flex items-start justify-between gap-3 hover:border-slate-300 transition-all text-xs"
               >
                 <div className="space-y-1 min-w-0">
                   <h5 className="font-bold text-slate-900 truncate flex items-center gap-1">
@@ -899,7 +913,7 @@ export default function ReportsView() {
       </div>
 
       {/* JOB PERFORMANCE TABLE */}
-      <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4">
+      <div className="bg-white border border-slate-200 rounded-lg p-6 shadow-sm space-y-4">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-4">
           <div>
             <h3 className="font-display font-semibold text-base text-slate-950 flex items-center gap-2">
@@ -996,13 +1010,13 @@ export default function ReportsView() {
       {showScheduleModal && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div 
-            className="bg-white border border-slate-200 rounded-2xl w-full max-w-2xl shadow-2xl relative flex flex-col max-h-[90vh] overflow-hidden animate-slide-in"
+            className="bg-white border border-slate-200 rounded-lg w-full max-w-2xl shadow-sm relative flex flex-col max-h-[90vh] overflow-hidden animate-slide-in"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
             <div className="p-6 border-b border-slate-100 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
+                <div className="h-10 w-10 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
                   <Calendar className="h-5.5 w-5.5 animate-pulse" />
                 </div>
                 <div>
@@ -1022,7 +1036,7 @@ export default function ReportsView() {
             <div className="p-6 overflow-y-auto space-y-6 text-left">
               
               {/* 💡 EDUCATIONAL EXPLANATION BOX */}
-              <div className="p-4 bg-indigo-50/50 border border-indigo-100 rounded-xl flex items-start gap-3">
+              <div className="p-4 bg-indigo-50/50 border border-indigo-100 rounded-lg flex items-start gap-3">
                 <Info className="h-4.5 w-4.5 text-indigo-600 shrink-0 mt-0.5" />
                 <div className="space-y-1">
                   <h4 className="text-xs font-bold text-indigo-950 uppercase tracking-wider">Why Use Scheduled Reports?</h4>
@@ -1081,7 +1095,7 @@ export default function ReportsView() {
                 {/* Target Scope (Department) */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Department Scope</label>
-                  <select
+                  <SearchableSelect
                     value={scheduleDept}
                     onChange={(e) => setScheduleDept(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 px-3 text-xs font-semibold text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500 focus:bg-white cursor-pointer"
@@ -1089,7 +1103,7 @@ export default function ReportsView() {
                     {DEPARTMENTS.map((dept) => (
                       <option key={dept} value={dept}>{dept}</option>
                     ))}
-                  </select>
+                  </SearchableSelect>
                 </div>
 
                 {/* Recipient Emails */}
@@ -1116,11 +1130,13 @@ export default function ReportsView() {
                 </h4>
 
                 <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
-                  {activeSchedules.length > 0 ? (
+                  {schedulesLoading ? (
+                    <p className="text-xs text-slate-400 italic">Loading schedules...</p>
+                  ) : activeSchedules.length > 0 ? (
                     activeSchedules.map((schedule) => (
                       <div 
                         key={schedule.id}
-                        className="bg-slate-50 border border-slate-200/60 hover:border-slate-300 rounded-xl p-3 flex items-center justify-between gap-4 transition-all text-xs"
+                        className="bg-slate-50 border border-slate-200/60 hover:border-slate-300 rounded-lg p-3 flex items-center justify-between gap-4 transition-all text-xs"
                       >
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
@@ -1140,9 +1156,15 @@ export default function ReportsView() {
                         </div>
 
                         <button
-                          onClick={() => {
-                            setActiveSchedules(prev => prev.filter(s => s.id !== schedule.id));
-                            triggerToast("🗑️ Report schedule removed from continuous automation loops.");
+                          onClick={async () => {
+                            try {
+                              await ReportRepository.deleteSchedule(schedule.id);
+                              setActiveSchedules(prev => prev.filter(s => s.id !== schedule.id));
+                              triggerToast("🗑️ Report schedule deleted.");
+                            } catch (err) {
+                              console.error("Failed to delete report schedule:", err);
+                              triggerToast("❌ Failed to delete report schedule.");
+                            }
                           }}
                           className="p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg border border-transparent hover:border-rose-100 transition-all cursor-pointer shrink-0"
                           title="Delete Schedule"
@@ -1169,22 +1191,29 @@ export default function ReportsView() {
               </button>
               <button
                 type="button"
-                onClick={() => {
+                onClick={async () => {
                   if (!scheduleEmails.trim()) {
                     triggerToast("⚠️ Stakeholder recipient list cannot be blank!");
                     return;
                   }
-                  const newSched = {
-                    id: `sch-${Date.now()}`,
-                    frequency: scheduleFreq,
-                    format: scheduleFormat,
-                    emails: scheduleEmails.trim(),
-                    department: scheduleDept,
-                    lastSent: "Scheduled / Waiting"
-                  };
-                  setActiveSchedules(prev => [...prev, newSched]);
-                  triggerToast(`🚀 Automated ${scheduleFreq} ${scheduleFormat} Report successfully saved and linked to ATS scheduler!`);
-                  setShowScheduleModal(false);
+                  try {
+                    const saved = await ReportRepository.saveSchedule({
+                      frequency: scheduleFreq,
+                      format: scheduleFormat,
+                      emails: scheduleEmails.trim(),
+                      department: scheduleDept,
+                    });
+                    setActiveSchedules(prev => [...prev, saved as any]);
+                    // Honest wording: this saves the schedule config only.
+                    // Nothing currently sends a report on this cadence — no
+                    // scheduler is wired up to act on these rows yet (see
+                    // backend/services/report_schedule_service.py).
+                    triggerToast(`💾 ${scheduleFreq} ${scheduleFormat} report schedule saved. Automatic sending is not yet enabled.`);
+                    setShowScheduleModal(false);
+                  } catch (err) {
+                    console.error("Failed to save report schedule:", err);
+                    triggerToast("❌ Failed to save report schedule.");
+                  }
                 }}
                 className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer shadow-xs flex items-center gap-1.5"
               >
@@ -1200,7 +1229,7 @@ export default function ReportsView() {
       {/* FLOAT TOAST NOTIFICATIONS                                 */}
       {/* ========================================================== */}
       {toast && (
-        <div className="fixed bottom-6 right-6 z-[100] bg-slate-900 border border-slate-800 text-white text-xs font-bold px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2.5 animate-slide-in">
+        <div className="fixed bottom-6 right-6 z-[100] bg-slate-900 border border-slate-800 text-white text-xs font-bold px-4 py-3 rounded-lg shadow-sm flex items-center gap-2.5 animate-slide-in">
           <Sparkles className="h-4 w-4 text-indigo-400 animate-pulse" />
           <span>{toast}</span>
         </div>

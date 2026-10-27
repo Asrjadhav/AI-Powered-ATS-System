@@ -59,7 +59,7 @@ export default function Navbar({ activeTab, setActiveTab, notifications, onSimul
   const navItems = [
     { id: "dashboard", label: t("dashboard"), icon: LayoutDashboard },
     { id: "jobs", label: t("jobs"), icon: Briefcase },
-    { id: "candidates", label: t("candidates"), icon: Users, showAIBadge: true },
+    { id: "applications", label: t("candidates"), icon: Users, showAIBadge: true },
     { id: "interviews", label: t("interviews"), icon: Calendar },
     { id: "reports", label: t("reports"), icon: FileText },
     { id: "insights", label: t("insights"), icon: Compass, showAIBadge: true },
@@ -72,7 +72,7 @@ export default function Navbar({ activeTab, setActiveTab, notifications, onSimul
         <div className="flex items-center justify-between h-16">
           {/* Left: Sleek, bold logo for encureIT */}
           <div className="flex items-center gap-2 shrink-0 cursor-pointer" onClick={() => setActiveTab("dashboard")}>
-            <div className="h-8 w-8 rounded-lg bg-white p-1 flex items-center justify-center shadow-md shrink-0 overflow-hidden">
+            <div className="h-8 w-8 rounded-lg bg-white p-1 flex items-center justify-center shadow-sm shrink-0 overflow-hidden">
               <img src="/encureit_icon.png" alt="EncureIT Logo" className="h-full w-full object-contain" />
             </div>
             <div className="flex items-center gap-1">
@@ -141,7 +141,7 @@ export default function Navbar({ activeTab, setActiveTab, notifications, onSimul
               </button>
 
               {showCreditsDropdown && (
-                <div className="absolute right-0 mt-2 w-64 bg-slate-950 border border-slate-900 rounded-xl p-4 shadow-2xl z-50 space-y-3 text-left">
+                <div className="absolute right-0 mt-2 w-64 bg-slate-950 border border-slate-900 rounded-lg p-4 shadow-sm z-50 space-y-3 text-left">
                   <div className="flex items-center justify-between border-b border-slate-900 pb-2 mb-1">
                     <span className="text-[10px] text-slate-400 font-mono">MODEL INFRASTRUCTURE</span>
                     <span className="text-[9px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 px-1.5 py-0.2 rounded-sm font-bold uppercase">Connected</span>
@@ -190,7 +190,7 @@ export default function Navbar({ activeTab, setActiveTab, notifications, onSimul
                   setShowAdminDropdown(!showAdminDropdown);
                   setShowCreditsDropdown(false);
                 }}
-                className="flex items-center gap-1 p-0.5 rounded-full hover:bg-slate-900/80 transition-all cursor-pointer border border-slate-800 hover:border-slate-700 shadow-md relative shrink-0 bg-slate-950"
+                className="flex items-center gap-1 p-0.5 rounded-full hover:bg-slate-900/80 transition-all cursor-pointer border border-slate-800 hover:border-slate-700 shadow-sm relative shrink-0 bg-slate-950"
                 title="Admin Profile Settings"
               >
                 <div className="h-8.5 w-8.5 rounded-full bg-slate-900 flex items-center justify-center border border-indigo-400/30 overflow-hidden relative">
@@ -208,7 +208,7 @@ export default function Navbar({ activeTab, setActiveTab, notifications, onSimul
               </button>
 
               {showAdminDropdown && (
-                <div className="absolute right-0 mt-2.5 w-72 bg-slate-950 border border-slate-900 rounded-xl p-4 shadow-2xl z-50 space-y-3.5 text-left animate-in fade-in slide-in-from-top-1 duration-150">
+                <div className="absolute right-0 mt-2.5 w-72 bg-slate-950 border border-slate-900 rounded-lg p-4 shadow-sm z-50 space-y-3.5 text-left animate-in fade-in slide-in-from-top-1 duration-150">
                   <div className="flex items-center justify-between border-b border-slate-900 pb-2">
                     <span className="text-[10px] text-slate-400 font-mono tracking-wider font-bold">ADMIN PROFILE SETTINGS</span>
                     <span className="text-[8px] bg-indigo-500/15 text-indigo-400 border border-indigo-500/25 px-1.5 py-0.2 rounded-sm font-bold uppercase">Active</span>

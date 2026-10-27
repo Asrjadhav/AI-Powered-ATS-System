@@ -1,0 +1,6 @@
+[
+  {"id": "emp-001", "name": "Satyajeet Narayan", "email": "satyajeet.narayan@encureit.com", "role": "AI Developer"},
+  {"id": "emp-002", "name": "Parth Shinde", "email": "parth.s@encureit.com", "role": "DevOps Engineer"},
+  {"id": "emp-003", "name": "Aniruddha Motegaonkar", "email": "aniruddha.motegaonkar@encureit.com", "role": "AI Developer"}
+]
+

@@ -39,6 +39,7 @@ import {
   ChevronDown,
   ChevronRight
 } from "lucide-react";
+import { apiUrl } from "../lib/api";
 
 interface IntegrationsViewProps {
   currentUser?: { email: string; name: string; role: string } | null;
@@ -48,7 +49,7 @@ interface IntegrationsViewProps {
 interface IntegrationService {
   id: string;
   name: string;
-  category: "job_portals" | "calendars" | "video_platforms" | "emails" | "comms" | "ai" | "bg_verification";
+  category: "job_portals" | "calendars" | "video_platforms" | "emails" | "comms" | "ai";
   connectionStatus: "connected" | "disconnected" | "error";
   connectedAccount?: string;
   lastSync?: string;
@@ -69,10 +70,7 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
   const [services, setServices] = useState<IntegrationService[]>([
     // Category: Job Portals
     { id: "linkedin", name: "LinkedIn Jobs", category: "job_portals", connectionStatus: "connected", connectedAccount: "encureit_enterprise_jobs", lastSync: "12 mins ago" },
-    { id: "indeed", name: "Indeed Enterprise", category: "job_portals", connectionStatus: "connected", connectedAccount: "recruitment@encureit.com", lastSync: "1 hour ago" },
     { id: "naukri", name: "Naukri Recruiter", category: "job_portals", connectionStatus: "disconnected" },
-    { id: "foundit", name: "Foundit (Monster)", category: "job_portals", connectionStatus: "connected", connectedAccount: "monster_it_procurement", lastSync: "4 hours ago" },
-    { id: "glassdoor", name: "Glassdoor Business", category: "job_portals", connectionStatus: "error", lastSync: "Failed on Jul 15" },
     { id: "career_site", name: "Company Career Website", category: "job_portals", connectionStatus: "connected", connectedAccount: "https://careers.encureit.com", lastSync: "Just now" },
 
     // Category: Calendars
@@ -83,40 +81,18 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
       connectionStatus: "disconnected", 
       details: { syncInterviews: true, duration: 45, tz: "Asia/Kolkata (IST)", autoCreate: true }
     },
-    { 
-      id: "outlook_cal", 
-      name: "Microsoft Outlook Calendar", 
-      category: "calendars", 
-      connectionStatus: "disconnected",
-      details: { syncInterviews: false, duration: 30, tz: "UTC", autoCreate: false }
-    },
 
     // Category: Video Interview Platforms
     { id: "gmeet", name: "Google Meet", category: "video_platforms", connectionStatus: "disconnected", details: { isDefault: true, autoGenLink: true } },
-    { id: "teams", name: "Microsoft Teams", category: "video_platforms", connectionStatus: "disconnected", details: { isDefault: false, autoGenLink: false } },
-    { id: "zoom", name: "Zoom Video Rooms", category: "video_platforms", connectionStatus: "connected", connectedAccount: "zoom_corporate_pro_3", details: { isDefault: false, autoGenLink: true } },
 
     // Category: Email Services
     { id: "smtp", name: "SMTP Relay", category: "emails", connectionStatus: "connected", connectedAccount: "smtp.encureit-mail.com:587", details: { sender: "no-reply@encureit.com", hasSignature: true } },
-    { id: "outlook_mail", name: "Microsoft Outlook Mail", category: "disconnected", connectionStatus: "disconnected" },
-    { id: "gmail_api", name: "Gmail API Service", category: "emails", connectionStatus: "connected", connectedAccount: "hr-comms@encureit.com", details: { sender: "aditi.j@encureit.com", hasSignature: true } },
-    { id: "sendgrid", name: "SendGrid Comms", category: "emails", connectionStatus: "connected", connectedAccount: "sg_api_sub_recruit", details: { sender: "system@encureit.com", hasSignature: false } },
 
     // Category: Communication Platforms
-    { id: "slack", name: "Slack Notifications", category: "comms", connectionStatus: "connected", connectedAccount: "#recruiting-pipeline", details: { sendHiring: true, sendInterviews: true, sendOffers: true } },
-    { id: "teams_chat", name: "Microsoft Teams Chat", category: "comms", connectionStatus: "disconnected", details: { sendHiring: false, sendInterviews: false, sendOffers: false } },
-    { id: "discord", name: "Discord Webhook", category: "comms", connectionStatus: "error", lastSync: "Failed to post webhook", details: { sendHiring: true, sendInterviews: false, sendOffers: false } },
+    { id: "gchat", name: "Google Chat", category: "comms", connectionStatus: "disconnected", details: { sendHiring: false, sendInterviews: false, sendOffers: false } },
 
     // Category: AI Services
-    { id: "gemini", name: "Gemini Pro Engine", category: "ai", connectionStatus: "connected", lastSync: "3 secs ago", details: { apiStatus: "Optimal", requestsCount: 4210, latency: "230ms" }, hasConfigureModal: true },
-    { id: "openai", name: "OpenAI GPT-4o", category: "ai", connectionStatus: "connected", lastSync: "2 mins ago", details: { apiStatus: "Optimal", requestsCount: 1530, latency: "420ms" }, hasConfigureModal: true },
-    { id: "parser", name: "Aura Resume Parser", category: "ai", connectionStatus: "connected", lastSync: "Just now", details: { apiStatus: "Optimal", requestsCount: 890, latency: "120ms" }, hasConfigureModal: false },
-    { id: "nlp", name: "NLP Sentiment Analyzer", category: "ai", connectionStatus: "error", lastSync: "Invalid API Key", details: { apiStatus: "Unreachable", requestsCount: 0, latency: "N/A" }, hasConfigureModal: true },
-
-    // Category: Background Verification
-    { id: "hireright", name: "HireRight Screening", category: "bg_verification", connectionStatus: "connected", connectedAccount: "HR_ENC_9829", details: { verifStatus: "Active" } },
-    { id: "first_adv", name: "First Advantage", category: "bg_verification", connectionStatus: "disconnected", details: { verifStatus: "None" } },
-    { id: "checkr", name: "Checkr API", category: "bg_verification", connectionStatus: "connected", connectedAccount: "chk_enterprise_prod", details: { verifStatus: "Active" } }
+    { id: "gemini", name: "Gemini Pro Engine", category: "ai", connectionStatus: "connected", lastSync: "3 secs ago", details: { apiStatus: "Optimal", requestsCount: 4210, latency: "230ms" }, hasConfigureModal: true }
   ]);
 
   // Syncing state tracker
@@ -140,7 +116,7 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const res = await axios.get("/api/auth/google/status");
+        const res = await axios.get(apiUrl("/api/auth/google/status"));
         if (res.data.connected) {
           setServices(prev => prev.map(s => {
             if (s.id === "gcal") {
@@ -186,7 +162,7 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
         }
 
         try {
-          await axios.post("/api/auth/google/disconnect");
+          await axios.post(apiUrl("/api/auth/google/disconnect"));
           setServices(prev => prev.map(s => {
             if (s.id === "gcal" || s.id === "gmeet") {
               return { ...s, connectionStatus: "disconnected", connectedAccount: undefined };
@@ -250,7 +226,7 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
       setSyncingId(id);
       triggerToast("🔄 Synchronizing interviews with Google Calendar...", "info");
       try {
-        const res = await axios.post("/api/interviews/sync-gcal");
+        const res = await axios.post(apiUrl("/api/interviews/sync-gcal"));
         setSyncingId(null);
         triggerToast(`✨ GCal Sync Complete! Synchronized ${res.data.updatedCount || 0} event changes with Google Calendar.`, "success");
       } catch (err) {
@@ -317,7 +293,6 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
   const emails = services.filter(s => s.category === "emails");
   const comms = services.filter(s => s.category === "comms");
   const aiServices = services.filter(s => s.category === "ai");
-  const bgVerification = services.filter(s => s.category === "bg_verification");
 
   // Health summary metrics
   const totalConnected = services.filter(s => s.connectionStatus === "connected").length;
@@ -328,7 +303,7 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
   if (!isAuthorized) {
     return (
       <div className="p-8 max-w-4xl mx-auto flex flex-col items-center justify-center min-h-[70vh]">
-        <div className="h-16 w-16 bg-rose-50 dark:bg-rose-950/20 rounded-2xl flex items-center justify-center mb-6 border border-rose-200 dark:border-rose-900/30">
+        <div className="h-16 w-16 bg-rose-50 dark:bg-rose-950/20 rounded-lg flex items-center justify-center mb-6 border border-rose-200 dark:border-rose-900/30">
           <ShieldAlert className="h-8 w-8 text-rose-600 dark:text-rose-400" />
         </div>
         <h2 className="font-display font-black text-2xl text-slate-950 dark:text-white tracking-tight text-center">
@@ -337,7 +312,7 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
         <p className="text-slate-500 dark:text-slate-400 text-sm mt-2 max-w-md text-center">
           The Integrations Hub is reserved exclusively for HR Directors, Executives, and System Administrators. Your current role (<span className="font-mono font-bold text-slate-800 dark:text-slate-200">{userRole}</span>) does not have permission to view or manage third-party APIs.
         </p>
-        <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 mt-6 max-w-md">
+        <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-4 mt-6 max-w-md">
           <div className="flex gap-3 items-start">
             <Lock className="h-5 w-5 text-indigo-500 shrink-0 mt-0.5" />
             <div className="text-xs">
@@ -357,7 +332,7 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
       
       {/* Toast Notification Banner */}
       {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 p-4 rounded-xl shadow-2xl flex items-center gap-3 border transition-all transform translate-y-0 scale-100 ${
+        <div className={`fixed bottom-6 right-6 z-50 p-4 rounded-lg shadow-sm flex items-center gap-3 border transition-all transform translate-y-0 scale-100 ${
           toast.type === "success" 
             ? "bg-slate-900 border-emerald-500/30 text-white" 
             : toast.type === "error" 
@@ -369,20 +344,19 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
           ) : toast.type === "error" ? (
             <AlertCircle className="h-5 w-5 text-rose-400 shrink-0" />
           ) : (
-            <RefreshCw className="h-5 w-5 text-brand-600 animate-spin shrink-0" />
+            <RefreshCw className="h-5 w-5 text-[#1F3B75] animate-spin shrink-0" />
           )}
           <span className="text-xs font-semibold">{toast.message}</span>
         </div>
       )}
 
       {/* Header Panel */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-4 border-b border-slate-200">
         <div>
-          <h2 className="font-display font-black text-2xl sm:text-3xl text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
-            <Link className="h-7 w-7 text-brand-600 shrink-0" />
+          <h2 className="text-xl font-semibold text-slate-900 tracking-tight flex items-center gap-2.5">
             <span>Integration Hub</span>
           </h2>
-          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium mt-0.5 max-w-3xl">
+          <p className="text-sm text-slate-500 mt-1 max-w-3xl">
             Manage ATS integrations, webhooks, and job board connections.
           </p>
         </div>
@@ -415,17 +389,14 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {jobPortals.map((job) => (
-            <div key={job.id} className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-xl p-5 hover:shadow-md transition-all hover:border-slate-300 dark:hover:border-slate-700 flex flex-col justify-between">
+            <div key={job.id} className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-lg p-5 hover:shadow-sm transition-all hover:border-slate-300 dark:hover:border-slate-700 flex flex-col justify-between">
               <div>
                 <div className="flex justify-between items-start">
                   {/* Service Logo & Name */}
                   <div className="flex items-center gap-3">
                     <div className={`h-10 w-10 rounded-lg flex items-center justify-center font-bold text-sm ${
                       job.id === "linkedin" ? "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300" :
-                      job.id === "indeed" ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300" :
                       job.id === "naukri" ? "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300" :
-                      job.id === "foundit" ? "bg-brand-50 text-brand-700 dark:bg-brand-950 dark:text-brand-300" :
-                      job.id === "glassdoor" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" :
                       "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
                     }`}>
                       {job.name.substring(0, 2).toUpperCase()}
@@ -497,23 +468,139 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
         </div>
       </div>
 
+      {/* SECTIONS 2 & 3: Video Interview Platforms (left) beside Calendar Integrations (right) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-stretch">
+      {/* SECTION 3: Video Interview Platforms */}
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
+            <Video className="h-4.5 w-4.5" />
+          </div>
+          <h3 className="font-display font-bold text-lg text-slate-950 dark:text-white tracking-tight">Video Interview Platforms</h3>
+        </div>
+        <div className="grid grid-cols-1 gap-5 flex-1">
+          {videoPlatforms.map((vid) => (
+            <div key={vid.id} className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-lg p-5 hover:shadow-sm transition-all hover:border-slate-300 dark:hover:border-slate-700 h-full flex flex-col justify-between">
+              <div>
+                <div className="flex justify-between items-start">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-lg flex items-center justify-center shrink-0 bg-indigo-50 text-indigo-600 dark:bg-indigo-950 dark:text-indigo-300">
+                      <Video className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-white">{vid.name}</h4>
+                      <p className="text-[10px] text-slate-400 font-mono truncate">Automated video link generator</p>
+                    </div>
+                  </div>
+                  <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide font-mono ${
+                    vid.connectionStatus === "connected" 
+                      ? "bg-emerald-50 border border-emerald-200 text-emerald-700 dark:bg-emerald-950/20 dark:border-emerald-800/40 dark:text-emerald-400" 
+                      : "bg-slate-100 border border-slate-200 text-slate-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400"
+                  }`}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${vid.connectionStatus === "connected" ? "bg-emerald-500" : "bg-slate-400"}`} />
+                    {vid.connectionStatus === "connected" ? "CONNECTED" : "DISCONNECTED"}
+                  </span>
+                </div>
+
+
+                {/* Status Options */}
+                <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800/60 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-400 font-medium">Default Meeting Platform</span>
+                    <button
+                      disabled={vid.connectionStatus !== "connected"}
+                      onClick={() => {
+                        setServices(prev => prev.map(s => {
+                          if (s.category === "video_platforms") {
+                            return { ...s, details: { ...s.details, isDefault: s.id === vid.id } };
+                          }
+                          return s;
+                        }));
+                        triggerToast(`🎯 ${vid.name} is now set as your primary video conference platform.`);
+                      }}
+                      className={`text-[10px] font-bold px-2 py-1 rounded transition-all cursor-pointer ${
+                        vid.details?.isDefault
+                          ? "bg-indigo-600 text-white"
+                          : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700"
+                      }`}
+                    >
+                      {vid.details?.isDefault ? "PRIMARY" : "SET DEFAULT"}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-400 font-medium">Generate Room Link</span>
+                    <span className="font-semibold text-slate-700 dark:text-slate-300">
+                      {vid.connectionStatus === "connected" ? "On Schedule" : "Disabled"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="mt-5 pt-3 border-t border-slate-100 dark:border-slate-800/60 flex gap-2 justify-between">
+                {serviceIdPendingDisconnect === vid.id ? (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => handleToggleConnection(vid.id, true)}
+                      className="text-[11px] font-bold text-rose-600 hover:text-rose-800 cursor-pointer"
+                    >
+                      Disconnect?
+                    </button>
+                    <button
+                      onClick={() => setServiceIdPendingDisconnect(null)}
+                      className="text-[11px] font-bold text-slate-500 hover:text-slate-700 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => handleToggleConnection(vid.id)}
+                    className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 hover:underline cursor-pointer"
+                  >
+                    {vid.connectionStatus === "connected" ? "Disconnect" : "Connect"}
+                  </button>
+                )}
+
+                <button
+                  disabled={vid.connectionStatus !== "connected" || testingId === vid.id}
+                  onClick={() => {
+                    setTestingId(vid.id);
+                    triggerToast(`🔗 Creating live sandbox room for ${vid.name}...`, "info");
+                    setTimeout(() => {
+                      setTestingId(null);
+                      triggerToast(`🚀 Success! Standard room generated: https://meet.encureit.com/test-${vid.id}`, "success");
+                    }, 1200);
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100 hover:border-slate-300 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer flex items-center gap-1.5 disabled:opacity-40"
+                >
+                  {testingId === vid.id && <RefreshCw className="h-3 w-3 animate-spin" />}
+                  <span>Test API Link</span>
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* SECTION 2: Calendar Integrations */}
-      <div className="space-y-4">
+      <div className="flex flex-col gap-4">
         <div className="flex items-center gap-2">
           <div className="p-1.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
             <Calendar className="h-4.5 w-4.5" />
           </div>
           <h3 className="font-display font-bold text-lg text-slate-950 dark:text-white tracking-tight">Calendar Integrations</h3>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 gap-5 flex-1">
           {calendars.map((cal) => (
-            <div key={cal.id} className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-xl p-5 hover:shadow-md transition-all hover:border-slate-300 dark:hover:border-slate-700">
+            <div key={cal.id} className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-lg p-5 hover:shadow-sm transition-all hover:border-slate-300 dark:hover:border-slate-700 h-full flex flex-col">
               <div className="flex justify-between items-start">
                 <div className="flex items-center gap-3">
                   <div className={`h-10 w-10 rounded-lg flex items-center justify-center font-bold text-sm ${
-                    cal.id === "gcal" ? "bg-red-50 text-red-600 dark:bg-red-950 dark:text-red-300" : "bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-300"
+                    "bg-red-50 text-red-600 dark:bg-red-950 dark:text-red-300"
                   }`}>
-                    {cal.id === "gcal" ? "G" : "O"}
+                    G
                   </div>
                   <div>
                     <h4 className="text-sm font-bold text-slate-900 dark:text-white">{cal.name}</h4>
@@ -532,7 +619,7 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
               </div>
 
               {/* Advanced Calendar Options (Form controls inside cards) */}
-              <div className="mt-5 space-y-4 border-t border-slate-100 dark:border-slate-800/60 pt-4">
+              <div className="mt-5 space-y-4 border-t border-slate-100 dark:border-slate-800/60 pt-4 flex-1">
                 <div className="grid grid-cols-2 gap-4">
                   {/* Option 1: Connect Calendar */}
                   <div className="space-y-1.5">
@@ -661,146 +748,41 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
           ))}
         </div>
       </div>
-
-      {/* SECTION 3: Video Interview Platforms */}
-      <div className="space-y-4">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
-            <Video className="h-4.5 w-4.5" />
-          </div>
-          <h3 className="font-display font-bold text-lg text-slate-950 dark:text-white tracking-tight">Video Interview Platforms</h3>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          {videoPlatforms.map((vid) => (
-            <div key={vid.id} className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-xl p-5 hover:shadow-md transition-all hover:border-slate-300 dark:hover:border-slate-700 flex flex-col justify-between">
-              <div>
-                <div className="flex justify-between items-start">
-                  <span className="text-2xl">{vid.id === "gmeet" ? "🟢" : vid.id === "teams" ? "🟣" : "🔵"}</span>
-                  <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide font-mono ${
-                    vid.connectionStatus === "connected" 
-                      ? "bg-emerald-50 border border-emerald-200 text-emerald-700 dark:bg-emerald-950/20 dark:border-emerald-800/40 dark:text-emerald-400" 
-                      : "bg-slate-100 border border-slate-200 text-slate-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400"
-                  }`}>
-                    {vid.connectionStatus === "connected" ? "CONNECTED" : "DISCONNECTED"}
-                  </span>
-                </div>
-
-                <div className="mt-3">
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">{vid.name}</h4>
-                  <p className="text-[10px] text-slate-400 font-mono mt-0.5">Automated video link generator</p>
-                </div>
-
-                {/* Status Options */}
-                <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800/60 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-400 font-medium">Default Meeting Platform</span>
-                    <button
-                      disabled={vid.connectionStatus !== "connected"}
-                      onClick={() => {
-                        setServices(prev => prev.map(s => {
-                          if (s.category === "video_platforms") {
-                            return { ...s, details: { ...s.details, isDefault: s.id === vid.id } };
-                          }
-                          return s;
-                        }));
-                        triggerToast(`🎯 ${vid.name} is now set as your primary video conference platform.`);
-                      }}
-                      className={`text-[10px] font-bold px-2 py-1 rounded transition-all cursor-pointer ${
-                        vid.details?.isDefault
-                          ? "bg-indigo-600 text-white"
-                          : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700"
-                      }`}
-                    >
-                      {vid.details?.isDefault ? "PRIMARY" : "SET DEFAULT"}
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-400 font-medium">Generate Room Link</span>
-                    <span className="font-semibold text-slate-700 dark:text-slate-300">
-                      {vid.connectionStatus === "connected" ? "On Schedule" : "Disabled"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Actions */}
-              <div className="mt-5 pt-3 border-t border-slate-100 dark:border-slate-800/60 flex gap-2 justify-between">
-                {serviceIdPendingDisconnect === vid.id ? (
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => handleToggleConnection(vid.id, true)}
-                      className="text-[11px] font-bold text-rose-600 hover:text-rose-800 cursor-pointer"
-                    >
-                      Disconnect?
-                    </button>
-                    <button
-                      onClick={() => setServiceIdPendingDisconnect(null)}
-                      className="text-[11px] font-bold text-slate-500 hover:text-slate-700 cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => handleToggleConnection(vid.id)}
-                    className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 hover:underline cursor-pointer"
-                  >
-                    {vid.connectionStatus === "connected" ? "Disconnect" : "Connect"}
-                  </button>
-                )}
-
-                <button
-                  disabled={vid.connectionStatus !== "connected" || testingId === vid.id}
-                  onClick={() => {
-                    setTestingId(vid.id);
-                    triggerToast(`🔗 Creating live sandbox room for ${vid.name}...`, "info");
-                    setTimeout(() => {
-                      setTestingId(null);
-                      triggerToast(`🚀 Success! Standard room generated: https://meet.encureit.com/test-${vid.id}`, "success");
-                    }, 1200);
-                  }}
-                  className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100 hover:border-slate-300 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer flex items-center gap-1.5 disabled:opacity-40"
-                >
-                  {testingId === vid.id && <RefreshCw className="h-3 w-3 animate-spin" />}
-                  <span>Test API Link</span>
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
 
+      {/* SECTIONS 4, 5 & 6: Email, Communication and AI on one line */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-stretch">
       {/* SECTION 4: Email Services */}
-      <div className="space-y-4">
+      <div className="flex flex-col gap-4">
         <div className="flex items-center gap-2">
           <div className="p-1.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
             <Mail className="h-4.5 w-4.5" />
           </div>
           <h3 className="font-display font-bold text-lg text-slate-950 dark:text-white tracking-tight">Email Services & Relays</h3>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+        <div className="grid grid-cols-1 gap-5 flex-1">
           {emails.map((mail) => (
-            <div key={mail.id} className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-xl p-5 hover:shadow-md transition-all hover:border-slate-300 dark:hover:border-slate-700 flex flex-col justify-between">
+            <div key={mail.id} className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-lg p-5 hover:shadow-sm transition-all hover:border-slate-300 dark:hover:border-slate-700 h-full flex flex-col justify-between">
               <div>
                 <div className="flex justify-between items-start">
-                  <div className="p-2 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
-                    <Mail className="h-4.5 w-4.5 text-indigo-500" />
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-lg flex items-center justify-center shrink-0 bg-indigo-50 text-indigo-600 dark:bg-indigo-950 dark:text-indigo-300">
+                      <Mail className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-white">{mail.name}</h4>
+                      <p className="text-[10px] text-slate-400 font-mono truncate">{mail.connectedAccount || "no-reply-comms"}</p>
+                    </div>
                   </div>
-                  <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wide font-mono ${
-                    mail.connectionStatus === "connected" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-400" : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
-                  }`}>
+                  <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide font-mono ${mail.connectionStatus === "connected" ? "bg-emerald-50 border border-emerald-200 text-emerald-700 dark:bg-emerald-950/20 dark:border-emerald-800/40 dark:text-emerald-400" : "bg-slate-100 border border-slate-200 text-slate-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400"}`}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${mail.connectionStatus === "connected" ? "bg-emerald-500" : "bg-slate-400"}`} />
                     {mail.connectionStatus === "connected" ? "CONNECTED" : "INACTIVE"}
                   </span>
                 </div>
 
-                <div className="mt-3">
-                  <h4 className="text-xs font-bold text-slate-900 dark:text-white">{mail.name}</h4>
-                  <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">{mail.connectedAccount || "no-reply-comms"}</p>
-                </div>
 
                 {/* Sub configuration options */}
-                <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800/60 space-y-2 text-[11px]">
+                <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800/60 space-y-2 text-xs">
                   <div className="space-y-1">
                     <span className="text-slate-400 block font-medium">Sender Email Address:</span>
                     <input 
@@ -853,7 +835,7 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
                       Preview Signature
                     </button>
                     {previewSignatureId === mail.id && (
-                      <div className="absolute right-0 bottom-full mb-2 w-64 p-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-50 text-left text-xs text-slate-700 dark:text-slate-300">
+                      <div className="absolute right-0 bottom-full mb-2 w-64 p-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-sm z-50 text-left text-xs text-slate-700 dark:text-slate-300">
                         <div className="flex justify-between items-center mb-1 pb-1 border-b border-slate-100 dark:border-slate-700">
                           <span className="font-bold text-[10px] text-slate-400 uppercase">Signature Preview</span>
                           <button onClick={() => setPreviewSignatureId(null)} className="text-slate-400 hover:text-slate-600 text-[10px]">✕</button>
@@ -875,31 +857,33 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
       </div>
 
       {/* SECTION 5: Communication Platforms */}
-      <div className="space-y-4">
+      <div className="flex flex-col gap-4">
         <div className="flex items-center gap-2">
           <div className="p-1.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
             <MessageSquare className="h-4.5 w-4.5" />
           </div>
           <h3 className="font-display font-bold text-lg text-slate-950 dark:text-white tracking-tight">Communication Platforms & Webhooks</h3>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 gap-5 flex-1">
           {comms.map((comm) => (
-            <div key={comm.id} className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-xl p-5 hover:shadow-md transition-all hover:border-slate-300 dark:hover:border-slate-700 flex flex-col justify-between">
+            <div key={comm.id} className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-lg p-5 hover:shadow-sm transition-all hover:border-slate-300 dark:hover:border-slate-700 h-full flex flex-col justify-between">
               <div>
                 <div className="flex justify-between items-start">
-                  <span className="text-xl font-mono">{comm.id === "slack" ? "💬 Slack" : comm.id === "teams_chat" ? "👥 Teams" : "👾 Discord"}</span>
-                  <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide font-mono ${
-                    comm.connectionStatus === "connected" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-400" :
-                    comm.connectionStatus === "error" ? "bg-rose-50 text-rose-700 dark:bg-rose-950/20 dark:text-rose-400" :
-                    "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
-                  }`}>
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-lg flex items-center justify-center shrink-0 bg-indigo-50 text-indigo-600 dark:bg-indigo-950 dark:text-indigo-300">
+                      <MessageSquare className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-white">{comm.name}</h4>
+                      <p className="text-[10px] text-slate-400 font-mono truncate">Active Hook: {comm.connectedAccount || "None"}</p>
+                    </div>
+                  </div>
+                  <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide font-mono ${comm.connectionStatus === "connected" ? "bg-emerald-50 border border-emerald-200 text-emerald-700 dark:bg-emerald-950/20 dark:border-emerald-800/40 dark:text-emerald-400" : comm.connectionStatus === "error" ? "bg-rose-50 border border-rose-200 text-rose-700 dark:bg-rose-950/20 dark:border-rose-800/40 dark:text-rose-400" : "bg-slate-100 border border-slate-200 text-slate-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400"}`}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${comm.connectionStatus === "connected" ? "bg-emerald-500" : comm.connectionStatus === "error" ? "bg-rose-500" : "bg-slate-400"}`} />
                     {comm.connectionStatus === "connected" ? "ACTIVE" : comm.connectionStatus === "error" ? "ERROR" : "INACTIVE"}
                   </span>
                 </div>
 
-                <div className="mt-3">
-                  <h4 className="text-xs font-bold text-slate-900 dark:text-white">Active Hook: {comm.connectedAccount || "None"}</h4>
-                </div>
 
                 {/* Integration Checkbox configurations */}
                 <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800/60 space-y-2.5">
@@ -911,7 +895,7 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
                       checked={comm.details?.sendHiring || false}
                       onChange={(e) => {
                         setServices(prev => prev.map(s => s.id === comm.id ? { ...s, details: { ...s.details, sendHiring: e.target.checked } } : s));
-                        triggerToast(`📢 Configured Slack hiring dispatch alert preference.`);
+                        triggerToast(`📢 Configured ${comm.name} hiring dispatch alert preference.`);
                       }}
                       className="rounded border-slate-300 text-indigo-600"
                     />
@@ -925,7 +909,7 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
                       checked={comm.details?.sendInterviews || false}
                       onChange={(e) => {
                         setServices(prev => prev.map(s => s.id === comm.id ? { ...s, details: { ...s.details, sendInterviews: e.target.checked } } : s));
-                        triggerToast(`📢 Configured Slack interview schedule dispatch alert preference.`);
+                        triggerToast(`📢 Configured ${comm.name} interview schedule dispatch alert preference.`);
                       }}
                       className="rounded border-slate-300 text-indigo-600"
                     />
@@ -939,7 +923,7 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
                       checked={comm.details?.sendOffers || false}
                       onChange={(e) => {
                         setServices(prev => prev.map(s => s.id === comm.id ? { ...s, details: { ...s.details, sendOffers: e.target.checked } } : s));
-                        triggerToast(`📢 Configured Slack active candidate offers dispatch alert preference.`);
+                        triggerToast(`📢 Configured ${comm.name} active candidate offers dispatch alert preference.`);
                       }}
                       className="rounded border-slate-300 text-indigo-600"
                     />
@@ -972,35 +956,36 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
       </div>
 
       {/* SECTION 6: AI Services */}
-      <div className="space-y-4">
+      <div className="flex flex-col gap-4">
         <div className="flex items-center gap-2">
           <div className="p-1.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
             <Cpu className="h-4.5 w-4.5" />
           </div>
           <h3 className="font-display font-bold text-lg text-slate-950 dark:text-white tracking-tight">AI Services & Models</h3>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+        <div className="grid grid-cols-1 gap-5 flex-1">
           {aiServices.map((ai) => (
-            <div key={ai.id} className="bg-slate-900 border border-slate-800 rounded-xl p-5 hover:shadow-xl hover:border-slate-700 text-white flex flex-col justify-between">
+            <div key={ai.id} className="bg-slate-900 border border-slate-800 rounded-lg p-5 hover:shadow-sm hover:border-slate-700 text-white h-full flex flex-col justify-between">
               <div>
                 <div className="flex justify-between items-start">
-                  <div className="p-2 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                    <Sparkles className="h-4 w-4" />
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-lg flex items-center justify-center shrink-0 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                      <Sparkles className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="text-sm font-bold text-white">{ai.name}</h4>
+                      <p className="text-[10px] text-slate-400 font-mono truncate">Status: {ai.details?.apiStatus}</p>
+                    </div>
                   </div>
-                  <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[9px] font-bold tracking-wide font-mono ${
-                    ai.connectionStatus === "connected" ? "bg-indigo-950/40 text-indigo-300 border border-indigo-500/20 animate-pulse" : "bg-slate-800 text-slate-400 border border-slate-700"
-                  }`}>
+                  <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide font-mono ${ai.connectionStatus === "connected" ? "bg-indigo-950/40 border border-indigo-500/20 text-indigo-300" : "bg-slate-800 border border-slate-700 text-slate-400"}`}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${ai.connectionStatus === "connected" ? "bg-indigo-400" : "bg-slate-400"}`} />
                     {ai.connectionStatus === "connected" ? "ACTIVE" : "ERROR"}
                   </span>
                 </div>
 
-                <div className="mt-3">
-                  <h4 className="text-xs font-bold font-display">{ai.name}</h4>
-                  <p className="text-[10px] text-slate-500 font-mono mt-0.5">Status: {ai.details?.apiStatus}</p>
-                </div>
 
                 {/* Request Analytics */}
-                <div className="mt-4 pt-3 border-t border-slate-800 space-y-2 text-[10.5px] font-mono text-slate-400">
+                <div className="mt-4 pt-3 border-t border-slate-800 space-y-2 text-xs font-mono text-slate-400">
                   <div className="flex justify-between">
                     <span>API Latency:</span>
                     <span className="text-white font-bold">{ai.details?.latency}</span>
@@ -1028,11 +1013,7 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
                     onClick={() => {
                       triggerToast(`⚡ Testing API handshake for ${ai.name}...`, "info");
                       setTimeout(() => {
-                        if (ai.id === "nlp") {
-                          triggerToast(`🔴 Error: Invalid Token signature for NLP.`, "error");
-                        } else {
-                          triggerToast(`🟢 Handshake verified! ${ai.name} response code 200 OK.`, "success");
-                        }
+                        triggerToast(`🟢 Handshake verified! ${ai.name} response code 200 OK.`, "success");
                       }, 1200);
                     }}
                     className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-[11px] font-bold cursor-pointer"
@@ -1045,74 +1026,6 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
           ))}
         </div>
       </div>
-
-      {/* SECTION 7: Background Verification */}
-      <div className="space-y-4">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
-            <ShieldCheck className="h-4.5 w-4.5" />
-          </div>
-          <h3 className="font-display font-bold text-lg text-slate-950 dark:text-white tracking-tight">Background Verification Providers</h3>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          {bgVerification.map((bg) => (
-            <div key={bg.id} className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-xl p-5 hover:shadow-md transition-all hover:border-slate-300 dark:hover:border-slate-700 flex flex-col justify-between">
-              <div>
-                <div className="flex justify-between items-start">
-                  <div className="p-2 rounded bg-indigo-50 dark:bg-indigo-950">
-                    <ShieldCheck className="h-5 w-5 text-indigo-600" />
-                  </div>
-                  <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide font-mono ${
-                    bg.connectionStatus === "connected" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-400" : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
-                  }`}>
-                    {bg.connectionStatus === "connected" ? "ACTIVE" : "INACTIVE"}
-                  </span>
-                </div>
-
-                <div className="mt-3">
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">{bg.name}</h4>
-                  <p className="text-[10px] text-slate-400 font-mono mt-0.5">Automated screening & background checks</p>
-                </div>
-
-                {/* Verification Metadata */}
-                <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800/60 text-xs space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Verification Stage Status:</span>
-                    <span className="font-bold text-slate-700 dark:text-slate-300">{bg.details?.verifStatus === "Active" ? "✓ Fully Operational" : "Unlinked"}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Auth Token ID:</span>
-                    <span className="font-mono text-slate-600 dark:text-slate-400 font-bold">{bg.connectedAccount || "N/A"}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Action buttons */}
-              <div className="mt-5 pt-3 border-t border-slate-100 dark:border-slate-800/60 flex gap-2 justify-between">
-                <button
-                  onClick={() => handleToggleConnection(bg.id)}
-                  className={`px-3 py-1.5 rounded text-xs font-bold border transition-all cursor-pointer ${
-                    bg.connectionStatus === "connected"
-                      ? "border-rose-200 text-rose-600 bg-rose-50 hover:bg-rose-100/50 dark:border-rose-900/30 dark:bg-rose-950/20"
-                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                  }`}
-                >
-                  {bg.connectionStatus === "connected" ? "Disconnect Channel" : "Connect"}
-                </button>
-
-                <button
-                  disabled={bg.connectionStatus !== "connected"}
-                  onClick={() => {
-                    triggerToast(`🛡️ HireRight API sandbox connection: SUCCESS. Checked status code 200.`);
-                  }}
-                  className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white rounded text-xs font-bold cursor-pointer disabled:opacity-40"
-                >
-                  Test Connection
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
 
       {/* SECTION 8: Integration Health Summary */}
@@ -1122,39 +1035,31 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
           <h3 className="font-display font-bold text-lg text-slate-950 dark:text-white tracking-tight">Integration Health Summary</h3>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-xl p-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-lg p-4">
             <span className="text-[10px] text-slate-400 font-bold font-mono block uppercase tracking-wider">Connected Services</span>
             <span className="text-3xl font-black text-emerald-600 dark:text-emerald-400 mt-1 block font-mono">{totalConnected}</span>
             <p className="text-[10px] text-slate-400 mt-1">Services syncing optimal</p>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-xl p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-lg p-4">
             <span className="text-[10px] text-slate-400 font-bold font-mono block uppercase tracking-wider">Pending Connections</span>
             <span className="text-3xl font-black text-slate-500 mt-1 block font-mono">{totalPending}</span>
             <p className="text-[10px] text-slate-400 mt-1">Available third-party modules</p>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-xl p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-lg p-4">
             <span className="text-[10px] text-slate-400 font-bold font-mono block uppercase tracking-wider">Failed Connections</span>
             <span className="text-3xl font-black text-rose-500 mt-1 block font-mono">{totalFailed}</span>
             <p className="text-[10px] text-slate-400 mt-1">Requires re-authorization</p>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-xl p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-lg p-4">
             <span className="text-[10px] text-slate-400 font-bold font-mono block uppercase tracking-wider">Last Successful Sync</span>
             <span className="text-xs font-bold text-slate-800 dark:text-slate-200 mt-2 block truncate">
               Today, 3:15 AM
             </span>
             <p className="text-[10px] text-slate-400 mt-1">Autonomous pipeline run</p>
-          </div>
-
-          <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/60 rounded-xl p-4">
-            <span className="text-[10px] text-slate-400 font-bold font-mono block uppercase tracking-wider">Last Failed Sync</span>
-            <span className="text-xs font-bold text-rose-500 mt-2 block truncate">
-              Jul 15, 11:42 PM
-            </span>
-            <p className="text-[10px] text-slate-400 mt-1">Glassdoor credential expired</p>
           </div>
         </div>
       </div>
@@ -1162,7 +1067,7 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
       {/* Configure API Slide-over / Modal (Dummy configuration) */}
       {configService && (
         <div className="fixed inset-0 z-50 overflow-hidden flex items-center justify-center bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 w-full max-w-md p-6 rounded-2xl shadow-2xl relative animate-in zoom-in-95 duration-200">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 w-full max-w-md p-6 rounded-lg shadow-sm relative animate-in zoom-in-95 duration-200">
             <button 
               onClick={() => setConfigService(null)}
               className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
@@ -1210,7 +1115,7 @@ export default function IntegrationsView({ currentUser }: IntegrationsViewProps)
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-md shadow-indigo-600/15"
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm shadow-indigo-600/15"
                 >
                   Save Integration Setup
                 </button>

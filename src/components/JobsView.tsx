@@ -19,7 +19,6 @@ import {
   Search,
   Filter,
   Upload,
-  FileSpreadsheet,
   Loader2,
   Trash2,
   CheckCircle2,
@@ -48,6 +47,8 @@ import {
 } from "lucide-react";
 import { Job, JobStatus, JobType } from "../types";
 import PublicApplyForm from "./PublicApplyForm";
+import { PageContainer, PageHeader, FilterBar, DataTable, StatusBadge, Button, SearchInput, Select } from "./common/UIPrimitives";
+import { SearchableSelect } from "./common/SearchableSelect";
 
 export function cleanJobDescription(text?: string): string {
   if (!text) return "";
@@ -146,7 +147,6 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
   const [importTab, setImportTab] = useState<"text" | "file">("text");
   const [importText, setImportText] = useState("");
   const [importFile, setImportFile] = useState<File | null>(null);
-  const [importFileBase64, setImportFileBase64] = useState("");
   const [isParsing, setIsParsing] = useState(false);
   const [parseStep, setParseStep] = useState(0);
   const [parsedPreviewJobs, setParsedPreviewJobs] = useState<any[]>([]);
@@ -599,32 +599,25 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
   };
 
   // Handle Drag & Drop / File Select
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const file = e.target.files[0];
-      setImportFile(file);
-      
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          const dataUrl = event.target.result as string;
-          const base64Data = dataUrl.split(",")[1] || "";
-          setImportFileBase64(base64Data);
-          
-          if (file.name.endsWith(".csv") || file.name.endsWith(".txt")) {
-            try {
-              const decoded = atob(base64Data);
-              setImportText(decoded);
-            } catch (err) {
-              setImportText(`[Text File: ${file.name}]\nFile loaded successfully. Click "Analyze & Map with AI" to parse.`);
-            }
-          } else {
-            setImportText(`[Document File: ${file.name} - ${Math.round(file.size / 1024)} KB]\nFile loaded successfully. Click "Analyze & Map with AI" to let Gemini extract the job details (Title, Department, Location, Type, and Requirements).`);
-          }
-        }
-      };
-      reader.readAsDataURL(file);
+  // Only PDF and Word (.docx) documents are accepted for import; the backend reads exactly these.
+  const IMPORT_FILE_EXTENSIONS = [".pdf", ".docx"];
+  const acceptImportFile = (file: File | undefined) => {
+    if (!file) return;
+    const name = file.name.toLowerCase();
+    if (!IMPORT_FILE_EXTENSIONS.some((ext) => name.endsWith(ext))) {
+      triggerToast(name.endsWith(".doc")
+        ? "Old .doc files are not supported. Save it as .docx or PDF and upload again."
+        : "Only PDF or DOC (.docx) files can be uploaded.");
+      return;
     }
+    // The file is held as-is and uploaded on analyse. The browser never
+    // reads, decodes or encodes it; the backend extracts the text.
+    setImportFile(file);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    acceptImportFile(e.target.files?.[0]);
+    e.target.value = ""; // so the same file can be chosen again after a rejection
   };
 
   // Run AI Import Parser
@@ -636,9 +629,8 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
 
     try {
       const res = await JobRepository.importParse({
-        content: importText,
-        fileData: importFileBase64,
-        fileName: importFile ? importFile.name : null
+        file: importFile,
+        content: importText
       });
       if (res.success) {
         setParsedPreviewJobs(res.data);
@@ -646,9 +638,13 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
         triggerToast(`Successfully extracted ${res.data.length} job role(s) with AI.`);
       }
     } catch (err: any) {
+      // No client-side fallback: report what actually went wrong rather than
+      // presenting a guessed posting as an AI result.
       console.error("AI Import failed:", err);
-      setError("AI Parser met an issue. Trying direct parsing.");
-      triggerToast(err.message || "Failed to parse content. Please ensure valid document structure.");
+      const detail = err?.response?.data?.detail || err?.message
+        || "Failed to parse the document.";
+      setError(detail);
+      triggerToast(`❌ ${detail}`);
     } finally {
       setIsParsing(false);
       setParseStep(0);
@@ -662,9 +658,8 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
     try {
       const sanitizedJobs = parsedPreviewJobs.map(j => ({
         ...j,
-        title: cleanJobTitle(j.title),
-        location: j.location || "Not specified",
-        department: j.department || "Software Engineering"
+        // Only the title is tidied; nothing the document did not state is filled in.
+        title: cleanJobTitle(j.title)
       }));
       await JobRepository.importConfirm(sanitizedJobs);
       await fetchJobs();
@@ -674,7 +669,6 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
       setParsedPreviewJobs([]);
       setImportText("");
       setImportFile(null);
-      setImportFileBase64("");
       triggerToast(`📋 Successfully imported and saved ${sanitizedJobs.length} Job Openings!`);
     } catch (err: any) {
       console.error("Failed to confirm import:", err);
@@ -724,450 +718,181 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
   };
 
   return (
-    <div className="w-full px-4 sm:px-6 lg:px-8 pt-7 sm:pt-8 pb-8 space-y-5 sm:space-y-6 relative text-slate-800 dark:text-slate-100 transition-all">
-
-      {/* Top Header Panel */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-5">
-        <div>
-          <h2 className="font-display font-black text-2xl sm:text-3xl text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
-            <Briefcase className="h-7 w-7 text-indigo-600" />
-            <span>Job Openings</span>
-          </h2>
-          <p className="text-slate-500 text-sm mt-1">
-            Publish and manage enterprise vacancies, qualifications, and AI matching parameters.
-          </p>
-        </div>
-        
-        {/* Actions bar: Copy Link, Import Wizard, New Job */}
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            onClick={() => {
-              const masterUrl = `${window.location.origin}/?apply=true`;
-              navigator.clipboard.writeText(masterUrl);
-              triggerToast("📋 Copied Master Public Careers Link!");
-            }}
-            className="flex items-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-semibold text-xs px-3.5 py-2.5 rounded-lg transition-all shadow-xs cursor-pointer active:scale-[0.98]"
-          >
-            <Link className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
-            <span>Copy Master Careers Link</span>
-          </button>
-
-          <button
-            onClick={() => setShowImportModal(true)}
-            className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs px-3.5 py-2.5 rounded-lg transition-all shadow-sm cursor-pointer"
-          >
-            <Upload className="h-3.5 w-3.5 text-indigo-400" />
-            <span>Import Openings</span>
-          </button>
-          
-          <button
-            onClick={handleNewJobClick}
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-4 py-2.5 rounded-lg transition-all shadow-sm cursor-pointer"
-          >
-            <Plus className="h-4 w-4" />
-            <span>New Job Posting</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Real-time search and stats strip */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
-        <div className="relative w-full sm:max-w-md">
-          <Search className="absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Search openings, specifications, keywords..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all font-medium text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-950"
-          />
-          {searchQuery && (
-            <button 
-              onClick={() => setSearchQuery("")}
-              className="absolute right-3 top-2.5 text-xs text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
+    <PageContainer>
+      <PageHeader
+        title="Job Openings"
+        subtitle="Publish and manage enterprise vacancies, qualifications, and AI matching parameters."
+        actions={
+          <>
+            <Button
+              variant="secondary"
+              icon={Link}
+              onClick={() => {
+                const masterUrl = `${window.location.origin}/?apply=true`;
+                navigator.clipboard.writeText(masterUrl);
+                triggerToast("📋 Copied Master Public Careers Link!");
+              }}
             >
-              Clear
-            </button>
-          )}
-        </div>
-        <div className="flex items-center gap-4 text-xs font-mono font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider shrink-0">
-          <span>Active: <span className="text-emerald-600 dark:text-emerald-400 font-extrabold">{jobList.filter(j => j.status === JobStatus.ACTIVE).length}</span></span>
-          <span className="h-3.5 w-[1px] bg-slate-200 dark:bg-slate-800" />
-          <span>Drafts: <span className="text-amber-600 dark:text-amber-400 font-extrabold">{jobList.filter(j => j.status === JobStatus.DRAFT).length}</span></span>
-          <span className="h-3.5 w-[1px] bg-slate-200 dark:bg-slate-800" />
-          <span>Total: <span className="text-indigo-600 dark:text-indigo-400 font-extrabold">{jobList.length}</span></span>
-        </div>
-      </div>
+              Copy Master Link
+            </Button>
+            <Button
+              variant="secondary"
+              icon={Upload}
+              onClick={() => setShowImportModal(true)}
+            >
+              Import Openings
+            </Button>
+            <Button
+              variant="primary"
+              icon={Plus}
+              onClick={handleNewJobClick}
+            >
+              New Job Posting
+            </Button>
+          </>
+        }
+      />
 
       {error && (
-        <div className="p-4 bg-rose-50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/30 text-rose-700 dark:text-rose-400 text-sm rounded-xl flex items-center gap-2">
+        <div className="p-4 bg-rose-50 border border-rose-100 text-rose-700 text-sm rounded-lg flex items-center gap-2 mb-4">
           <AlertCircle className="h-4 w-4 shrink-0" />
           <span>{error}</span>
         </div>
       )}
 
-      {/* Main Structural Layout: Filters Sidebar (Left) + Table View (Right) */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
-        
-        {/* Left Filters Sidebar Panel */}
-        <div className="lg:col-span-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xs overflow-hidden sticky top-20">
-          <div className="p-4.5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-between">
-            <h3 className="font-semibold text-slate-900 dark:text-white text-sm flex items-center gap-2">
-              <SlidersHorizontal className="h-4 w-4 text-indigo-500" />
-              <span>Filter Openings</span>
-            </h3>
-            {(filterDept !== "All" || filterLoc !== "All" || filterType !== "All" || filterStatus !== "All") && (
-              <button
-                onClick={() => {
-                  setFilterDept("All");
-                  setFilterLoc("All");
-                  setFilterType("All");
-                  setFilterStatus("All");
-                }}
-                className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 transition-colors cursor-pointer"
-              >
-                Reset All
-              </button>
-            )}
-          </div>
-
-          <div className="p-5 space-y-6">
-            {/* Department Section */}
-            <div className="space-y-2.5">
-              <label className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">Department</label>
-              <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
-                {departments.map((dept) => {
-                  const count = dept === "All" ? jobList.length : jobList.filter(j => j.department === dept).length;
-                  const isSelected = filterDept === dept;
-                  return (
-                    <button
-                      key={dept}
-                      onClick={() => setFilterDept(dept)}
-                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold text-left transition-all cursor-pointer ${
-                        isSelected 
-                          ? "bg-indigo-55 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 font-bold" 
-                          : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/30 hover:text-slate-900 dark:hover:text-slate-200"
-                      }`}
-                    >
-                      <span className="truncate">{dept}</span>
-                      <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-md ${
-                        isSelected ? "bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-300" : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
-                      }`}>{count}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Location Section */}
-            <div className="space-y-2.5">
-              <label className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">Office Location</label>
-              <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                {locations.map((loc) => {
-                  const count = loc === "All" ? jobList.length : jobList.filter(j => j.location.includes(loc)).length;
-                  const isSelected = filterLoc === loc;
-                  return (
-                    <button
-                      key={loc}
-                      onClick={() => setFilterLoc(loc)}
-                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold text-left transition-all cursor-pointer ${
-                        isSelected 
-                          ? "bg-indigo-55 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 font-bold" 
-                          : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/30 hover:text-slate-900 dark:hover:text-slate-200"
-                      }`}
-                    >
-                      <span className="truncate">{loc}</span>
-                      <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-md ${
-                        isSelected ? "bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-300" : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
-                      }`}>{count}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Employment Type Section */}
-            <div className="space-y-2.5">
-              <label className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">Job Type</label>
-              <div className="flex flex-wrap gap-1.5">
-                {jobTypes.map((t) => {
-                  const isSelected = filterType === t;
-                  return (
-                    <button
-                      key={t}
-                      onClick={() => setFilterType(t)}
-                      className={`px-2.5 py-1.2 rounded-md text-[11px] font-bold border transition-all cursor-pointer ${
-                        isSelected 
-                          ? "bg-slate-900 dark:bg-indigo-600 text-white border-slate-900 dark:border-indigo-600" 
-                          : "bg-white dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-850 hover:border-slate-300 dark:hover:border-slate-700 hover:text-slate-900 dark:hover:text-slate-200"
-                      }`}
-                    >
-                      {t}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Status Section */}
-            <div className="space-y-2.5">
-              <label className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">Pipeline Status</label>
-              <div className="space-y-1.5">
-                {jobStatuses.map((stat) => {
-                  const isSelected = filterStatus === stat;
-                  const isDot = stat !== "All";
-                  return (
-                    <button
-                      key={stat}
-                      onClick={() => setFilterStatus(stat)}
-                      className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-left transition-all cursor-pointer ${
-                        isSelected 
-                          ? "bg-indigo-55 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 font-bold" 
-                          : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/30 hover:text-slate-900 dark:hover:text-slate-200"
-                      }`}
-                    >
-                      {isDot && (
-                        <span className={`h-2 w-2 rounded-full ${
-                          stat === "active" ? "bg-emerald-500" : stat === "draft" ? "bg-amber-500" : "bg-rose-500"
-                        }`} />
-                      )}
-                      <span className="capitalize">
-                        {stat === "All" 
-                          ? "All Statuses" 
-                          : stat === "active" 
-                            ? "Open" 
-                            : stat === "closed" 
-                              ? "Closed" 
-                              : "Drafts"}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
+      {/* Stats and Filter Row */}
+      <FilterBar className="mb-6 justify-between">
+        <div className="flex flex-wrap items-center gap-4 w-full md:w-auto">
+          <SearchInput
+            placeholder="Search openings..."
+            value={searchQuery}
+            onChange={(e: any) => setSearchQuery(e.target.value)}
+          />
+          <Select
+            value={filterDept}
+            onChange={(e: any) => setFilterDept(e.target.value)}
+            options={[
+              { label: "All Departments", value: "All" },
+              ...departments.filter(d => d !== "All").map(d => ({ label: d, value: d }))
+            ]}
+          />
+          <Select
+            value={filterLoc}
+            onChange={(e: any) => setFilterLoc(e.target.value)}
+            options={[
+              { label: "All Locations", value: "All" },
+              ...locations.filter(l => l !== "All").map(l => ({ label: l, value: l }))
+            ]}
+          />
+          <Select
+            value={filterStatus}
+            onChange={(e: any) => setFilterStatus(e.target.value)}
+            options={[
+              { label: "All Statuses", value: "All" },
+              ...jobStatuses.filter(s => s !== "All").map(s => ({ label: s.toUpperCase(), value: s }))
+            ]}
+          />
         </div>
-
-        {/* Right Side: Jobs Table Format View */}
-        <div className="lg:col-span-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xs overflow-hidden transition-all">
-          {loading && jobs.length === 0 ? (
-            <div className="p-8 space-y-4 animate-pulse">
-              <div className="h-6 w-1/3 bg-slate-200 dark:bg-slate-800 rounded" />
-              <div className="space-y-3">
-                {[1, 2, 3, 4].map(i => (
-                  <div key={`job-skel-${i}`} className="h-16 bg-slate-150 dark:bg-slate-800 rounded-lg" />
-                ))}
-              </div>
-            </div>
-          ) : filteredJobs.length === 0 ? (
-            <div className="p-16 text-center flex flex-col items-center justify-center">
-              <Briefcase className="h-12 w-12 text-slate-300 dark:text-slate-700 stroke-[1.5]" />
-              <h3 className="font-bold text-slate-700 dark:text-slate-300 text-sm mt-4">No matching openings found</h3>
-              <p className="text-slate-400 dark:text-slate-500 text-xs mt-1 max-w-sm">
-                Try loosening your left sidebar filters or modifying your active search keyword.
-              </p>
-              <button
-                onClick={() => {
-                  setFilterDept("All");
-                  setFilterLoc("All");
-                  setFilterType("All");
-                  setFilterStatus("All");
-                  setSearchQuery("");
-                }}
-                className="mt-4 px-4 py-2 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 transition-colors border border-slate-200 dark:border-slate-800 rounded-lg hover:border-slate-300 dark:hover:border-slate-700"
-              >
-                Clear all active filters
-              </button>
-            </div>
-          ) : (
-            <div className="w-full overflow-x-auto">
-              <table className="w-full text-left border-collapse min-w-[880px]">
-                <thead>
-                  <tr className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                    <th className="py-3.5 px-5 min-w-[220px]">Job Title & Dept</th>
-                    <th className="py-3.5 px-5 min-w-[100px]">Job ID</th>
-                    <th className="py-3.5 px-5 min-w-[120px]">Location</th>
-                    <th className="py-3.5 px-5 min-w-[100px]">Type</th>
-                    <th className="py-3.5 px-5 min-w-[130px]">Pipeline Status</th>
-                    <th className="py-3.5 px-5 text-center min-w-[90px]">Applied</th>
-                    <th className="py-3.5 px-5 min-w-[110px]">Created On</th>
-                    <th className="py-3.5 px-5 text-right min-w-[110px]">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-850 text-sm">
-                  {filteredJobs.map((job) => {
-                    const isSelected = selectedJob?.id === job.id;
-                    return (
-                      <tr
-                        key={job.id}
-                        onClick={() => handleRowClick(job)}
-                        className={`hover:bg-indigo-50/10 dark:hover:bg-slate-800/40 cursor-pointer transition-colors group ${
-                          isSelected ? "bg-indigo-50/5 dark:bg-indigo-950/20" : ""
-                        }`}
-                      >
-                        {/* Title & Department */}
-                        <td className="py-4 px-6">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <h4 className="font-bold text-slate-950 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors truncate max-w-xs sm:max-w-md">
-                                {job.title}
-                              </h4>
-                              {job.status === "active" && (
-                                <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                                  <button
-                                    type="button"
-                                    onClick={() => setPreviewApplicationJobId(job.id)}
-                                    className="text-[10px] font-mono font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/50 px-2 py-0.5 rounded-md flex items-center gap-1 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors cursor-pointer"
-                                    title="Open interactive application form preview"
-                                  >
-                                    <Globe className="h-3 w-3" />
-                                    <span>Open Form</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      navigator.clipboard.writeText(`${window.location.origin}/?applyJobId=${job.id}`);
-                                      triggerToast("📋 Copied direct applicant form link to clipboard!");
-                                    }}
-                                    className="p-0.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded text-slate-500 hover:text-indigo-600 dark:bg-slate-800 dark:hover:bg-slate-700 dark:border-slate-700 dark:text-slate-400 transition-all cursor-pointer"
-                                    title="Copy direct applicant link"
-                                  >
-                                    <Link className="h-3 w-3" />
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                            <p className="text-slate-400 dark:text-slate-500 text-xs font-medium mt-0.5">{job.department}</p>
-                          </div>
-                        </td>
-                        
-                        {/* Job ID */}
-                        <td className="py-4 px-6 text-slate-600 dark:text-slate-300 font-mono text-xs font-semibold whitespace-nowrap">
-                          {formatJobId(job.id)}
-                        </td>
-                        
-                        {/* Location */}
-                        <td className="py-4 px-6 text-slate-600 dark:text-slate-300 font-medium">
-                          <span className="flex items-center gap-1.5">
-                            <MapPin className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500 shrink-0" />
-                            <span className="truncate max-w-[140px]">{job.location}</span>
-                          </span>
-                        </td>
-                        
-                        {/* Employment Type */}
-                        <td className="py-4 px-6">
-                          <span className="text-[11px] font-mono font-semibold px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-md border border-slate-200/50 dark:border-slate-700/50">
-                            {job.type}
-                          </span>
-                        </td>
-                        
-                        {/* Status */}
-                        <td className="py-4 px-6">
-                          <span className={`text-[11px] font-bold font-mono px-2.5 py-0.8 border rounded-full ${getJobStatusBadge(job.status)}`}>
-                            {job.status === "active" ? "OPEN" : job.status === "closed" ? "CLOSED" : "DRAFT"}
-                          </span>
-                        </td>
-                        
-                        {/* Applied Count */}
-                        <td className="py-4 px-6 text-center" onClick={(e) => {
-                          if (onNavigate) {
-                            e.stopPropagation();
-                            onNavigate("candidates", { candidatesFilterJobId: job.id });
-                          }
-                        }}>
-                          <span className="text-xs font-bold font-mono px-2.5 py-1 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-md hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-all cursor-pointer" title="Click to view applied candidates applications">
-                            {job.candidateCount} applied candidates
-                          </span>
-                        </td>
-                        
-                        {/* Created Date */}
-                        <td className="py-4 px-6 text-slate-400 dark:text-slate-500 text-xs font-mono">
-                          {new Date(job.createdAt).toLocaleDateString(undefined, {
-                            month: "short",
-                            day: "numeric",
-                            year: "numeric"
-                          })}
-                        </td>
-                        
-                        {/* Action buttons */}
-                        <td className="py-4 px-6 text-right" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center justify-end gap-2">
-                            <button
-                              title="Edit Job Opportunity"
-                              onClick={() => handleEditJobClick(job)}
-                              className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all cursor-pointer"
-                            >
-                              <Edit className="h-4 w-4" />
-                            </button>
-                            
-                            <button
-                              title="View Specifications"
-                              onClick={() => {
-                                setSelectedJob(job);
-                                setShowDetailDrawer(true);
-                              }}
-                              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-indigo-600 transition-all cursor-pointer"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </button>
-
-                            {jobIdPendingDelete === job.id ? (
-                              <div className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDeleteJob(job.id, true);
-                                  }}
-                                  className="px-2 py-1 text-[10px] font-bold bg-rose-600 text-white rounded-md hover:bg-rose-700 transition-all cursor-pointer"
-                                >
-                                  Yes
-                                </button>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setJobIdPendingDelete(null);
-                                  }}
-                                  className="px-2 py-1 text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 transition-all cursor-pointer"
-                                >
-                                  No
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                title="Delete Job Opportunity"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteJob(job.id);
-                                }}
-                                className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-all cursor-pointer"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            )}
-                            
-                            {/* Simple Quick Status Change Selector */}
-                            <select
-                              value={job.status}
-                              onChange={(e) => handleUpdateStatus(job.id, e.target.value as JobStatus)}
-                              className="text-xs font-semibold bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-2 py-1 rounded-md focus:outline-none focus:border-indigo-500 cursor-pointer"
-                            >
-                              <option value="active">OPEN</option>
-                              <option value="draft">DRAFT</option>
-                              <option value="closed">CLOSED</option>
-                            </select>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+        <div className="flex items-center gap-4 text-xs font-medium text-slate-500 whitespace-nowrap">
+          <span>Active: <strong className="text-emerald-600">{jobList.filter(j => j.status === JobStatus.ACTIVE).length}</strong></span>
+          <span>Drafts: <strong className="text-amber-600">{jobList.filter(j => j.status === JobStatus.DRAFT).length}</strong></span>
+          <span>Total: <strong className="text-[#1F3B75]">{jobList.length}</strong></span>
         </div>
+      </FilterBar>
 
-      </div>
-
+      <DataTable
+        columns={[
+          {
+            header: "Job Title & Dept",
+            render: (job: Job) => (
+              <div>
+                <div className="font-semibold text-slate-900 flex items-center gap-2">
+                  {job.title}
+                  {job.status === "active" && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPreviewApplicationJobId(job.id);
+                      }}
+                      className="text-[10px] text-[#1F3B75] bg-[#1F3B75]/10 px-1.5 py-0.5 rounded hover:bg-[#1F3B75]/20"
+                    >
+                      Form
+                    </button>
+                  )}
+                </div>
+                <div className="text-xs text-slate-500 mt-0.5">{job.department}</div>
+              </div>
+            )
+          },
+          {
+            header: "Location",
+            render: (job: Job) => (
+               <div className="flex items-center gap-1.5 text-slate-600 text-sm">
+                <MapPin className="h-3.5 w-3.5 text-slate-400" />
+                {job.location}
+              </div>
+            )
+          },
+          {
+            header: "Type",
+            render: (job: Job) => <span className="text-xs text-slate-600 font-medium bg-slate-100 px-2 py-1 rounded">{job.type}</span>
+          },
+          {
+            header: "Status",
+            render: (job: Job) => <StatusBadge status={job.status} />
+          },
+          {
+            header: "Applied",
+            render: (job: Job) => (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onNavigate) onNavigate("applications", { candidatesFilterJobId: job.id });
+                }}
+                className="text-xs font-semibold text-[#1F3B75] bg-[#1F3B75]/10 hover:bg-[#1F3B75]/20 px-2 py-1 rounded"
+              >
+                {job.candidateCount} applied
+              </button>
+            )
+          },
+          {
+            header: "Created On",
+            render: (job: Job) => (
+               <span className="text-xs text-slate-500">
+                {new Date(job.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+              </span>
+            )
+          },
+          {
+            header: "Actions",
+            render: (job: Job) => (
+              <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                <button onClick={() => handleEditJobClick(job)} className="p-1.5 text-slate-400 hover:text-[#1F3B75] transition-colors"><Edit className="h-4 w-4" /></button>
+                <button onClick={() => { setSelectedJob(job); setShowDetailDrawer(true); }} className="p-1.5 text-slate-400 hover:text-[#1F3B75] transition-colors"><Eye className="h-4 w-4" /></button>
+                {jobIdPendingDelete === job.id ? (
+                   <div className="flex gap-1">
+                    <button onClick={() => handleDeleteJob(job.id, true)} className="text-xs bg-rose-600 text-white px-2 py-1 rounded">Yes</button>
+                    <button onClick={() => setJobIdPendingDelete(null)} className="text-xs bg-slate-200 text-slate-700 px-2 py-1 rounded">No</button>
+                  </div>
+                ) : (
+                  <button onClick={() => handleDeleteJob(job.id)} className="p-1.5 text-slate-400 hover:text-rose-600 transition-colors"><Trash2 className="h-4 w-4" /></button>
+                )}
+                <select
+                  value={job.status}
+                  onChange={(e) => handleUpdateStatus(job.id, e.target.value as JobStatus)}
+                  className="text-xs bg-slate-50 border border-slate-200 text-slate-700 px-2 py-1 rounded-md focus:outline-none focus:border-[#1F3B75]"
+                >
+                  <option value="active">OPEN</option>
+                  <option value="draft">DRAFT</option>
+                  <option value="closed">CLOSED</option>
+                </select>
+              </div>
+            )
+          }
+        ]}
+        data={filteredJobs}
+        onRowClick={handleRowClick}
+      />
       {/* Slide-over Right Drawer for Selected Job Specifications */}
       {showDetailDrawer && selectedJob && (
         <div className="fixed inset-0 z-50 overflow-hidden">
@@ -1178,7 +903,7 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
           />
           
           <div className="absolute inset-y-0 right-0 max-w-full flex pl-10">
-            <div className="w-screen max-w-2xl bg-white h-full shadow-2xl flex flex-col relative animate-slide-in">
+            <div className="w-screen max-w-2xl bg-white h-full shadow-sm flex flex-col relative animate-slide-in">
               
               {/* Header */}
               <div className="p-6 border-b border-slate-150 flex justify-between items-center bg-slate-900 text-white">
@@ -1199,7 +924,7 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
                   {onNavigate && (
                     <button
                       onClick={() => {
-                        onNavigate("candidates", { candidatesFilterJobId: selectedJob.id });
+                        onNavigate("applications", { candidatesFilterJobId: selectedJob.id });
                         setShowDetailDrawer(false);
                       }}
                       className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-200 hover:text-white font-bold text-xs rounded-lg transition-all cursor-pointer border border-indigo-500/20"
@@ -1261,7 +986,7 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
               <div className="flex-1 overflow-y-auto p-6 sm:p-8 space-y-6">
                 
                 {/* Job Metadata Grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5 p-4 rounded-xl bg-slate-50/90 border border-slate-200/80 text-xs text-slate-700">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5 p-4 rounded-lg bg-slate-50/90 border border-slate-200/80 text-xs text-slate-700">
                   <div className="space-y-1">
                     <span className="text-slate-400 font-bold block uppercase tracking-wider text-[9px]">Department</span>
                     <span className="font-semibold text-slate-800 flex items-center gap-1.5">
@@ -1289,7 +1014,7 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
                   <div className="space-y-1 sm:border-l border-slate-200/80 sm:pl-3">
                     <span className="text-slate-400 font-bold block uppercase tracking-wider text-[9px]">Employment Type</span>
                     <span className="font-semibold text-slate-800 flex items-center gap-1.5">
-                      <Briefcase className="h-3.5 w-3.5 text-brand-600 shrink-0" />
+                      <Briefcase className="h-3.5 w-3.5 text-[#1F3B75] shrink-0" />
                       <span>{selectedJob.type || "Full-time"}</span>
                     </span>
                   </div>
@@ -1378,7 +1103,7 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
                       <FileText className="h-4 w-4" />
                       <span>About the Job</span>
                     </h4>
-                    <div className="text-slate-600 text-xs sm:text-sm leading-relaxed whitespace-pre-line bg-slate-50/50 p-4 rounded-xl border border-slate-150 text-left">
+                    <div className="text-slate-600 text-xs sm:text-sm leading-relaxed whitespace-pre-line bg-slate-50/50 p-4 rounded-lg border border-slate-150 text-left">
                       {cleanJobDescription(selectedJob.description) || "No description provided for this job opening."}
                     </div>
                   </div>
@@ -1517,7 +1242,7 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                           {/* LinkedIn */}
-                          <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/40 hover:bg-slate-50 transition-all flex flex-col justify-between space-y-3">
+                          <div className="border border-slate-200 rounded-lg p-4 bg-slate-50/40 hover:bg-slate-50 transition-all flex flex-col justify-between space-y-3">
                             <div className="flex items-start justify-between">
                               <div className="flex items-center gap-2.5">
                                 <div className="h-8 w-8 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-700 font-black text-xs">
@@ -1585,7 +1310,7 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
                           </div>
 
                           {/* Indeed */}
-                          <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/40 hover:bg-slate-50 transition-all flex flex-col justify-between space-y-3">
+                          <div className="border border-slate-200 rounded-lg p-4 bg-slate-50/40 hover:bg-slate-50 transition-all flex flex-col justify-between space-y-3">
                             <div className="flex items-start justify-between">
                               <div className="flex items-center gap-2.5">
                                 <div className="h-8 w-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-700 font-black text-xs">
@@ -1652,7 +1377,7 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
                           </div>
 
                           {/* Naukri.com */}
-                          <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/40 hover:bg-slate-50 transition-all flex flex-col justify-between space-y-3">
+                          <div className="border border-slate-200 rounded-lg p-4 bg-slate-50/40 hover:bg-slate-50 transition-all flex flex-col justify-between space-y-3">
                             <div className="flex items-start justify-between">
                               <div className="flex items-center gap-2.5">
                                 <div className="h-8 w-8 rounded-lg bg-orange-50 flex items-center justify-center text-orange-700 font-bold text-xs">
@@ -1718,7 +1443,7 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
                           </div>
 
                           {/* Careers Website */}
-                          <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/40 hover:bg-slate-50 transition-all flex flex-col justify-between space-y-3">
+                          <div className="border border-slate-200 rounded-lg p-4 bg-slate-50/40 hover:bg-slate-50 transition-all flex flex-col justify-between space-y-3">
                             <div className="flex items-start justify-between">
                               <div className="flex items-center gap-2.5">
                                 <div className="h-8 w-8 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600">
@@ -1798,7 +1523,7 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
                         </div>
 
                         {showAddCollabInput && (
-                          <form onSubmit={handleAddCollaborator} className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                          <form onSubmit={handleAddCollaborator} className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-2.5">
                             <div className="grid grid-cols-2 gap-2">
                               <input 
                                 type="text" 
@@ -1808,7 +1533,7 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
                                 onChange={(e) => setCollabName(e.target.value)}
                                 className="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs outline-none font-semibold text-slate-800"
                               />
-                              <select
+                              <SearchableSelect
                                 value={collabRole}
                                 onChange={(e) => setCollabRole(e.target.value)}
                                 className="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs outline-none font-semibold text-slate-700"
@@ -1818,7 +1543,7 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
                                 <option value="Hiring Reviewer">Hiring Reviewer</option>
                                 <option value="Tech Lead">Tech Lead</option>
                                 <option value="Department Head">Department Head</option>
-                              </select>
+                              </SearchableSelect>
                             </div>
                             <div className="flex justify-end gap-2">
                               <button 
@@ -1845,7 +1570,7 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
                           {activeCollabs.map((collab, idx) => (
                             <div 
                               key={`collab-${collab.name || idx}`} 
-                              className="border border-slate-200 rounded-xl p-3 bg-white flex flex-col justify-between space-y-2.5 hover:shadow-xs transition-shadow"
+                              className="border border-slate-200 rounded-lg p-3 bg-white flex flex-col justify-between space-y-2.5 hover:shadow-xs transition-shadow"
                             >
                               <div className="flex items-center gap-2">
                                 <img 
@@ -1893,7 +1618,7 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
                         <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
                           {activeComments.length > 0 ? (
                             activeComments.map((comment) => (
-                              <div key={comment.id} className="p-3 rounded-xl bg-slate-50 border border-slate-150 text-xs text-left space-y-1">
+                              <div key={comment.id} className="p-3 rounded-lg bg-slate-50 border border-slate-150 text-xs text-left space-y-1">
                                 <div className="flex items-center justify-between">
                                   <div className="flex items-center gap-1.5">
                                     <span className="font-bold text-slate-900">{comment.author}</span>
@@ -1949,7 +1674,7 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
       {/* Manual Slide-over Overlay Drawer for Creating New Job */}
       {showForm && (
         <div className="fixed inset-0 z-50 overflow-hidden bg-slate-950/60 backdrop-blur-xs flex justify-end">
-          <div className="w-full max-w-xl bg-white h-full shadow-2xl flex flex-col animate-slide-in">
+          <div className="w-full max-w-xl bg-white h-full shadow-sm flex flex-col animate-slide-in">
             {/* Form Header */}
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-900 text-white">
               <div className="text-left">
@@ -2090,7 +1815,7 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
       {/* Advanced AI Smart Import Modal Panel */}
       {showImportModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-4 sm:p-6 bg-slate-950/70 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl max-w-3xl w-full border border-slate-200 shadow-2xl flex flex-col overflow-hidden max-h-[90vh]">
+          <div className="bg-white rounded-lg max-w-3xl w-full border border-slate-200 shadow-sm flex flex-col overflow-hidden max-h-[90vh]">
             
             {/* Modal Header */}
             <div className="p-5.5 bg-slate-900 text-white flex justify-between items-center border-b border-slate-800">
@@ -2139,7 +1864,7 @@ export default function JobsView({ onNavigate }: JobsViewProps = {}) {
                           : "border-transparent text-slate-400 hover:text-slate-600"
                       }`}
                     >
-                      Upload Spreadsheet / Doc
+                      Upload PDF / DOC
                     </button>
                   </div>
 
@@ -2159,7 +1884,7 @@ Role details: We require a Node.js veteran...
 - Mastered esbuild and bundle tools`}
                         value={importText}
                         onChange={(e) => setImportText(e.target.value)}
-                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm font-medium transition-all resize-none leading-relaxed"
+                        className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm font-medium transition-all resize-none leading-relaxed"
                       />
                     </div>
                   ) : (
@@ -2167,24 +1892,29 @@ Role details: We require a Node.js veteran...
                       {/* Drag & Drop simulated box */}
                       <div 
                         onClick={() => fileInputRef.current?.click()}
-                        className="border-2 border-dashed border-slate-200 hover:border-indigo-500 rounded-xl p-8 text-center bg-slate-50/50 hover:bg-indigo-50/10 cursor-pointer transition-all space-y-3"
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          acceptImportFile(e.dataTransfer.files?.[0]);
+                        }}
+                        className="border-2 border-dashed border-slate-200 hover:border-indigo-500 rounded-lg p-8 text-center bg-slate-50/50 hover:bg-indigo-50/10 cursor-pointer transition-all space-y-3"
                       >
                         <div className="mx-auto h-12 w-12 rounded-full bg-slate-100 flex items-center justify-center">
-                          <FileSpreadsheet className="h-6 w-6 text-indigo-600" />
+                          <FileText className="h-6 w-6 text-indigo-600" />
                         </div>
                         <div className="space-y-1">
                           <p className="text-xs font-bold text-slate-700">
-                            {importFile ? importFile.name : "Select or drag PDF, Excel, CSV, Word, or plain TXT document"}
+                            {importFile ? importFile.name : "Select or drag a PDF or DOC document"}
                           </p>
                           <p className="text-[10px] text-slate-400 font-medium">
-                            {importFile ? `${Math.round(importFile.size / 1024)} KB file uploaded` : "Supports .pdf, .xlsx, .csv, .tsv, .docx, .txt"}
+                            {importFile ? `${Math.round(importFile.size / 1024)} KB file uploaded` : "Supports .pdf and .docx"}
                           </p>
                         </div>
                         <input
                           type="file"
                           ref={fileInputRef}
                           onChange={handleFileChange}
-                          accept=".csv,.txt,.xlsx,.xls,.docx,.pdf"
+                          accept=".pdf,.docx"
                           className="hidden"
                         />
                       </div>
@@ -2241,7 +1971,7 @@ Role details: We require a Node.js veteran...
               ) : (
                 /* Stage 2: Parsed Preview Screen */
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between p-3.5 bg-indigo-50 border border-indigo-100 rounded-xl">
+                  <div className="flex items-center justify-between p-3.5 bg-indigo-50 border border-indigo-100 rounded-lg">
                     <div className="flex items-center gap-2.5">
                       <CheckCircle className="h-5 w-5 text-indigo-600" />
                       <div className="text-left">
@@ -2256,7 +1986,7 @@ Role details: We require a Node.js veteran...
                     </span>
                   </div>
 
-                  <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs max-h-80 overflow-y-auto">
+                  <div className="border border-slate-200 rounded-lg overflow-hidden shadow-xs max-h-80 overflow-y-auto">
                     <table className="w-full text-left text-xs border-collapse">
                       <thead className="bg-slate-50 border-b border-slate-150 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                         <tr>
@@ -2323,11 +2053,11 @@ Role details: We require a Node.js veteran...
                                   </span>
                                 </div>
                                 <div className="text-[10px] font-mono text-slate-400 flex items-center gap-2">
-                                  <span>{pJob.openings || 1} Openings</span>
+                                  <span>{pJob.openings ? `${pJob.openings} Openings` : "Openings: not stated"}</span>
                                   <span>•</span>
-                                  <span>Deadline: {pJob.deadline || "N/A"}</span>
+                                  <span>Deadline: {pJob.deadline || "not stated"}</span>
                                   <span>•</span>
-                                  <span>Joining: {pJob.targetJoiningDate || "ASAP"}</span>
+                                  <span>Joining: {pJob.targetJoiningDate || "not stated"}</span>
                                 </div>
                               </div>
                             </td>
@@ -2428,7 +2158,7 @@ Role details: We require a Node.js veteran...
       {/* Edit Extracted AI Job Modal */}
       {editingImportJobIdx !== null && editingImportJobData !== null && (
         <div className="fixed inset-0 z-[110] bg-slate-950/70 backdrop-blur-xs flex justify-center items-center p-4 overflow-y-auto">
-          <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl flex flex-col max-h-[90vh] border border-slate-200 dark:border-slate-800 animate-scale-in">
+          <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-lg shadow-sm flex flex-col max-h-[90vh] border border-slate-200 dark:border-slate-800 animate-scale-in">
             {/* Header */}
             <div className="p-5 border-b border-slate-150 dark:border-slate-800 flex justify-between items-center bg-slate-900 text-white rounded-t-2xl">
               <div>
@@ -2530,7 +2260,7 @@ Role details: We require a Node.js veteran...
                     type="text"
                     value={editingImportJobData.salaryRange || ""}
                     onChange={(e) => setEditingImportJobData({ ...editingImportJobData, salaryRange: e.target.value })}
-                    placeholder="e.g. Competitive"
+                    placeholder="Not stated"
                     className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium"
                   />
                 </div>
@@ -2539,8 +2269,9 @@ Role details: We require a Node.js veteran...
                   <input
                     type="number"
                     min="1"
-                    value={editingImportJobData.openings || 1}
-                    onChange={(e) => setEditingImportJobData({ ...editingImportJobData, openings: Number(e.target.value) || 1 })}
+                    value={editingImportJobData.openings ?? ""}
+                    placeholder="Not stated"
+                    onChange={(e) => setEditingImportJobData({ ...editingImportJobData, openings: Number(e.target.value) || null })}
                     className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-xs font-medium"
                   />
                 </div>
@@ -2668,7 +2399,7 @@ Role details: We require a Node.js veteran...
                   setEditingImportJobData(null);
                   triggerToast(`Updated job role details for "${cleanTitle}".`);
                 }}
-                className="px-5 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-indigo-600/20"
+                className="px-5 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shadow-sm shadow-indigo-600/20"
               >
                 <CheckCircle2 className="h-4 w-4" />
                 <span>Save Changes</span>
@@ -2680,7 +2411,7 @@ Role details: We require a Node.js veteran...
 
       {/* Toast Notification Container */}
       {toast && (
-        <div className="fixed bottom-5 right-5 z-[100] bg-slate-900 border border-slate-800 text-white text-xs font-bold px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2.5 animate-slide-in">
+        <div className="fixed bottom-5 right-5 z-[100] bg-slate-900 border border-slate-800 text-white text-xs font-bold px-4 py-3 rounded-lg shadow-sm flex items-center gap-2.5 animate-slide-in">
           <Sparkles className="h-4 w-4 text-indigo-400 animate-pulse" />
           <span>{toast}</span>
         </div>
@@ -2689,10 +2420,10 @@ Role details: We require a Node.js veteran...
       {/* Interactive In-App Application Form Modal */}
       {previewApplicationJobId !== null && (
         <div className="fixed inset-0 z-[120] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto">
-          <div className="relative w-full max-w-4xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col my-auto border border-slate-200 dark:border-slate-800">
+          <div className="relative w-full max-w-4xl bg-white dark:bg-slate-900 rounded-lg shadow-sm overflow-hidden max-h-[92vh] flex flex-col my-auto border border-slate-200 dark:border-slate-800">
             <div className="sticky top-0 z-30 bg-white dark:bg-slate-900 px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shadow-xs">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 rounded-xl">
+                <div className="p-2 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 rounded-lg">
                   <Globe className="h-5 w-5" />
                 </div>
                 <div>
@@ -2710,7 +2441,7 @@ Role details: We require a Node.js veteran...
               <button
                 type="button"
                 onClick={() => setPreviewApplicationJobId(null)}
-                className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all cursor-pointer"
+                className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
                 title="Close Form Preview"
               >
                 <X className="h-5 w-5" />
@@ -2726,6 +2457,6 @@ Role details: We require a Node.js veteran...
         </div>
       )}
 
-    </div>
+    </PageContainer>
   );
 }

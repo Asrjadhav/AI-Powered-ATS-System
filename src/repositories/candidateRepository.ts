@@ -7,25 +7,9 @@ import axios from "axios";
 import { LocalStorageService } from "../services/localStorageService";
 import { ApplicationRepository } from "./applicationRepository";
 import {
-  generateId,
   normalizePipelineStatus,
-  generateAIMatchScore,
-  cleanOrphanCandidates,
   assignSequentialCandidateIds
 } from "./repositoryUtils";
-import {
-  isNewCandidate,
-  isPendingEvaluation,
-  isAIShortlisted,
-  isInterviewStage,
-  isOfferedStage,
-  isHiredStage,
-  isRejectedStage,
-  isTodayCandidate,
-  filterCandidatesByStage,
-  getCandidateAIScore,
-  DEFAULT_MATCH_THRESHOLD
-} from "../utils/pipelineUtils";
 
 export const SUPPORTED_CANDIDATE_SOURCES = [
   "Career Website",
@@ -39,7 +23,7 @@ export const SUPPORTED_CANDIDATE_SOURCES = [
   "Indeed"
 ] as const;
 
-const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || (import.meta as any).env?.VITE_API_URL || "https://ats-fastapi-backend.onrender.com";
+const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || (import.meta as any).env?.VITE_API_URL || "http://127.0.0.1:8000";
 
 const apiConfig = {
   headers: {
@@ -48,167 +32,42 @@ const apiConfig = {
   },
 };
 
-function findCandidateIndex(candidates: any[], id: string): number {
-  if (!id) return -1;
-  const rawId = String(id).trim();
-  const cleanId = rawId.replace(/^app-/, "").replace(/^cand-/, "").toLowerCase();
-  return candidates.findIndex(c => {
-    if (!c) return false;
-    const cId = String(c.id || "").trim();
-    const cCandId = String(c.candidateId || "").trim();
-    const cCleanId = cId.replace(/^app-/, "").replace(/^cand-/, "").toLowerCase();
-    const cCandCleanId = cCandId.replace(/^app-/, "").replace(/^cand-/, "").toLowerCase();
-    return (
-      cId === rawId ||
-      cCandId === rawId ||
-      cCleanId === cleanId ||
-      cCandCleanId === cleanId ||
-      cId.toLowerCase() === rawId.toLowerCase() ||
-      cCandId.toLowerCase() === rawId.toLowerCase()
-    );
-  });
-}
-
-function base64ToFile(base64Data: string, filename: string): File {
-  try {
-    const arr = base64Data.split(",");
-    const mimeMatch = arr[0].match(/:(.*?);/);
-    const mime = mimeMatch ? mimeMatch[1] : "application/pdf";
-    const bstr = atob(arr.length > 1 ? arr[1] : arr[0]);
-    let n = bstr.length;
-    const u8arr = new Uint8Array(n);
-    while (n--) {
-      u8arr[n] = bstr.charCodeAt(n);
-    }
-    return new File([u8arr], filename, { type: mime });
-  } catch (e) {
-    return new File(["Dummy PDF Content"], filename, { type: "application/pdf" });
-  }
-}
-
 export const CandidateRepository = {
   async getAllCandidates(): Promise<any[]> {
-    try {
-      const res = await axios.get(`${FASTAPI_BASE_URL}/api/candidates`, apiConfig);
-      if (res.data && Array.isArray(res.data)) {
-        const cleaned = cleanOrphanCandidates(res.data);
-        const sequenced = assignSequentialCandidateIds(cleaned);
-        return sequenced;
-      }
-    } catch (e) {
-      console.warn("CandidateRepository.getAllCandidates API fetch failed, using local storage fallback:", e);
-    }
-    const local = LocalStorageService.get<any[]>("candidates", []);
-    return assignSequentialCandidateIds(cleanOrphanCandidates(local));
+    const res = await axios.get(`${FASTAPI_BASE_URL}/api/candidates`, apiConfig);
+    const list = Array.isArray(res.data) ? res.data : [];
+    return assignSequentialCandidateIds(list);
   },
 
   async getAll(): Promise<any[]> {
     return this.getAllCandidates();
   },
 
-  async getMetrics(matchThreshold = DEFAULT_MATCH_THRESHOLD): Promise<{
-    total: number;
-    pendingEvaluation: number;
-    aiShortlisted: number;
-    interview: number;
-    offered: number;
-    hired: number;
-    rejected: number;
-    today: number;
-  }> {
-    const list = await this.getAll();
-    return {
-      total: list.length,
-      pendingEvaluation: list.filter(a => isPendingEvaluation(a)).length,
-      aiShortlisted: list.filter(a => isAIShortlisted(a, matchThreshold)).length,
-      interview: list.filter(a => isInterviewStage(a)).length,
-      offered: list.filter(a => isOfferedStage(a)).length,
-      hired: list.filter(a => isHiredStage(a)).length,
-      rejected: list.filter(a => isRejectedStage(a)).length,
-      today: list.filter(a => isTodayCandidate(a)).length,
-    };
-  },
-
-  async getTotal(): Promise<number> {
-    const list = await this.getAll();
-    return list.length;
-  },
-
-  async getPendingEvaluationCount(): Promise<number> {
-    const list = await this.getAll();
-    return list.filter(a => isPendingEvaluation(a)).length;
-  },
-
-  async getNewApplicationsCount(): Promise<number> {
-    const list = await this.getAll();
-    return list.filter(a => isNewCandidate(a)).length;
-  },
-
-  async getNewTodayCount(): Promise<number> {
-    const list = await this.getAll();
-    return list.filter(a => isTodayCandidate(a)).length;
-  },
-
-  async getAIShortlistedCount(threshold = DEFAULT_MATCH_THRESHOLD): Promise<number> {
-    const list = await this.getAll();
-    return list.filter(a => isAIShortlisted(a, threshold)).length;
-  },
-
-  async getAverageAIScore(): Promise<number> {
-    const list = await this.getAll();
-    if (list.length === 0) return 0;
-    const totalScore = list.reduce((sum, a) => sum + getCandidateAIScore(a), 0);
-    return Math.round(totalScore / list.length);
-  },
-
-  async getFiltered(
-    filterStatus = "all",
-    filterToday = false,
-    jobId = "all",
-    searchQuery = "",
-    matchThreshold = DEFAULT_MATCH_THRESHOLD
-  ): Promise<any[]> {
-    const list = await this.getAll();
-    let result = filterCandidatesByStage(list, filterStatus, filterToday, matchThreshold);
-
-    if (jobId && jobId !== "all") {
-      result = result.filter(a => a.jobId === jobId || a.job?.id === jobId);
-    }
-
-    if (searchQuery && searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      result = result.filter(a => {
-        const c = a.candidate || a;
-        const name = `${c.firstName || ""} ${c.lastName || ""} ${c.name || ""}`.toLowerCase();
-        const email = (c.email || "").toLowerCase();
-        const role = (c.currentRole || a.appliedJob || "").toLowerCase();
-        const company = (c.currentCompany || "").toLowerCase();
-        return name.includes(q) || email.includes(q) || role.includes(q) || company.includes(q);
-      });
-    }
-
-    return result;
-  },
+  // getMetrics/getTotal/getPendingEvaluationCount/getNewApplicationsCount/
+  // getNewTodayCount/getAIShortlistedCount/getAverageAIScore/getFiltered
+  // were removed here: all eight duplicated pipeline stage/scoring logic
+  // that GET /api/stats and GET /api/insights already compute server-side
+  // (backend/services/pipeline.py is the shared source of truth for both),
+  // and none had any caller left in the app — the dashboard and insights
+  // screens already moved to those endpoints. Kept them would have meant a
+  // second, unreachable copy of that logic that could silently drift from
+  // the backend's.
 
   async getById(id: string): Promise<any | null> {
     try {
       const res = await axios.get(`${FASTAPI_BASE_URL}/api/candidates/${encodeURIComponent(id)}`, apiConfig);
-      if (res.data) return res.data;
-    } catch (e) {
-      // Fallback to list search
+      return res.data || null;
+    } catch (e: any) {
+      if (e?.response?.status === 404) return null;
+      throw e;
     }
-    const list = await this.getAll();
-    const idx = findCandidateIndex(list, id);
-    return idx !== -1 ? list[idx] : null;
   },
 
   async create(payload: any): Promise<any> {
-    const currentList = await this.getAll();
     const now = new Date().toISOString();
     const currentUser = LocalStorageService.getCurrentUserEmail();
 
-    const status = normalizePipelineStatus(payload.status || "Applied");
-    const aiMatchScore = generateAIMatchScore(payload);
+    const status = normalizePipelineStatus(payload.status || "New");
 
     let firstName = payload.firstName;
     let lastName = payload.lastName;
@@ -225,53 +84,72 @@ export const CandidateRepository = {
       phone: payload.phone || "+91 9876543210",
       currentRole: payload.currentRole || "Not specified",
       currentCompany: payload.currentCompany || "Not specified",
-      skills: payload.skills || [],
+      skills:
+        payload.skills ||
+        (payload.keySkills
+          ? String(payload.keySkills)
+              .split(",")
+              .map((s: string) => s.trim())
+              .filter(Boolean)
+          : []),
       experienceYears: payload.experienceYears || 0,
       resumeText: payload.resumeText || "",
-      linkedinUrl: payload.linkedinUrl || "",
-      portfolioUrl: payload.portfolioUrl || "",
+      linkedinUrl: payload.linkedinUrl || payload.linkedinProfile || "",
+      portfolioUrl: payload.portfolioUrl || payload.portfolioLink || "",
       source: payload.source || "Job Application Form",
-      location: payload.location || "Remote",
+      location: payload.location || payload.currentLocation || "Remote",
       expectedCTC: payload.expectedCTC || 0,
       currentCTC: payload.currentCTC || 0,
       hrNotes: payload.hrNotes || "",
       hrApprovalStatus: payload.hrApprovalStatus || "approved",
       experienceLevel: payload.experienceLevel || "Experienced",
       noticePeriod: payload.noticePeriod || "Immediate",
+      // Job Application Google Form fields (experienced + fresher variants).
+      // The backend candidate model/schema already has these columns — they
+      // were simply never forwarded here, so the form data never reached the API.
+      relocateToPune: payload.relocateToPune || "",
+      // The candidate's own preference; empty when not chosen. The job's work mode is never sent from here.
+      preferredWorkMode: payload.preferredWorkMode || "",
+      keySkills: payload.keySkills || "",
+      highestEducation: payload.highestEducation || "",
+      specialization: payload.specialization || "",
+      yearOfPassing: payload.yearOfPassing || "",
+      totalExperience: payload.totalExperience || "",
+      inHandSalary: payload.inHandSalary || "",
+      projectsWorkedOn: payload.projectsWorkedOn || payload.projectsDescription || "",
       status,
-      aiScore: aiMatchScore,
+      // No client-side scoring. A real number here means it came from an
+      // actual AI evaluation (e.g. createApplication's /api/screen-resume
+      // call, run after this). Anything else stays unset — null/no score is
+      // honest; a plausible-looking fabricated number is not.
+      aiScore: typeof payload.aiScore === "number" ? payload.aiScore : undefined,
       createdAt: payload.createdAt || now,
       updatedAt: now,
       createdBy: payload.createdBy || currentUser,
     };
 
-    let savedCandidate: any = null;
     const targetJobId = payload.jobId || "JOB-0001";
+    let savedCandidate: any;
     try {
       const res = await axios.post(`${FASTAPI_BASE_URL}/api/candidates?jobId=${encodeURIComponent(targetJobId)}`, newCandidatePayload, apiConfig);
       savedCandidate = res.data;
     } catch (e: any) {
       if (e?.response?.status === 409) {
-        const errorDetail = e.response.data?.detail || "This candidate has already submitted an application for this job position.";
-        throw new Error(errorDetail);
+        throw new Error(
+          e.response.data?.detail || "This candidate has already submitted an application for this job position."
+        );
       }
-      console.warn("CandidateRepository.create API call encountered error, using local fallback:", e?.response?.data || e);
-      const nextNum = currentList.length + 1;
-      const candidateId = payload.candidateId || `CAND-${String(nextNum).padStart(4, '0')}`;
-      savedCandidate = {
-        ...newCandidatePayload,
-        id: candidateId,
-        candidateId,
-      };
-      currentList.unshift(savedCandidate);
-      LocalStorageService.set("candidates", currentList);
+      throw new Error(e?.response?.data?.detail || e?.message || "Failed to create candidate.");
     }
 
-    // Automatically upload resume PDF document if cvBase64 is attached to payload
-    if (payload.cvBase64 && savedCandidate && (savedCandidate.id || savedCandidate.candidateId)) {
+    // Upload the CV alongside the new candidate. The file is sent as-is;
+    // the browser never encodes or inspects it.
+    if (payload.resumeFile instanceof File && savedCandidate && (savedCandidate.id || savedCandidate.candidateId)) {
       try {
-        const fileObj = base64ToFile(payload.cvBase64, payload.cvFileName || "resume.pdf");
-        const uploadRes = await this.uploadResume(savedCandidate.id || savedCandidate.candidateId, fileObj);
+        const uploadRes = await this.uploadResume(
+          savedCandidate.id || savedCandidate.candidateId,
+          payload.resumeFile
+        );
         if (uploadRes) {
           savedCandidate = { ...savedCandidate, ...uploadRes };
         }
@@ -309,9 +187,12 @@ export const CandidateRepository = {
       applicationRecord = await ApplicationRepository.createApplication({
         candidateId: candidate.candidateId || candidate.id,
         jobId: targetJobId,
-        status: payload.status || "Applied",
+        status: payload.status || "New",
         source: payload.source || "Job Application Form",
-        atsScore: candidate.aiScore || generateAIMatchScore(payload),
+        // Real scoring happens a few lines below via /api/screen-resume.
+        // No client-side fallback score — an application with no ats score
+        // yet is "not screened yet", not a fabricated number.
+        atsScore: typeof candidate.aiScore === "number" ? candidate.aiScore : undefined,
         appliedRole: targetJobTitle || payload.appliedRole || "Job Position",
         department: payload.department || "Engineering",
         candidateEmail: candidate.email,
@@ -331,12 +212,13 @@ export const CandidateRepository = {
             ...applicationRecord,
             aiEvaluation: evalResult,
             atsScore: evalResult.score,
-            status: evalResult.score >= 50 ? "Shortlisted" : "Screening"
+            // The stage the backend saved after screening (Shortlisted or Rejected); never a made-up one.
+            status: screenRes.data.status || applicationRecord?.status
           };
           if (candidate) {
             candidate.aiScore = evalResult.score;
             candidate.aiEvaluation = evalResult;
-            candidate.status = evalResult.score >= 50 ? "Shortlisted" : "Screening";
+            candidate.status = screenRes.data.status || candidate.status;
           }
         }
       } catch (screenErr) {
@@ -354,80 +236,38 @@ export const CandidateRepository = {
       candidate,
       candidateId: candidate.candidateId || candidate.id,
       jobId: targetJobId,
-      status: applicationRecord?.status || payload.status || "Applied",
+      status: applicationRecord?.status || payload.status || "New",
       aiEvaluation: applicationRecord?.aiEvaluation || candidate?.aiEvaluation,
       atsScore: applicationRecord?.atsScore || candidate?.aiScore
     };
   },
 
   async update(id: string, updates: any): Promise<any> {
-    const now = new Date().toISOString();
     const payload = {
       ...updates,
-      updatedAt: now
+      updatedAt: new Date().toISOString()
     };
 
-    try {
-      const res = await axios.put(`${FASTAPI_BASE_URL}/api/candidates/${encodeURIComponent(id)}`, payload, apiConfig);
-      if (res.data) {
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new CustomEvent("candidates-updated"));
-        }
-        return res.data;
-      }
-    } catch (e) {
-      // Fallback
-    }
-
-    const currentList = await this.getAll();
-    const idx = findCandidateIndex(currentList, id);
-    if (idx !== -1) {
-      currentList[idx] = { ...currentList[idx], ...payload };
-      LocalStorageService.set("candidates", currentList);
-    }
-
+    const res = await axios.put(`${FASTAPI_BASE_URL}/api/candidates/${encodeURIComponent(id)}`, payload, apiConfig);
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("candidates-updated"));
     }
-    return { id, ...updates };
+    return res.data;
   },
 
-  async updateStatus(id: string, newStatusRaw: string, currentUserSession?: any): Promise<any> {
-    const newStatus = normalizePipelineStatus(newStatusRaw);
-    const now = new Date().toISOString();
-    const updaterName = currentUserSession?.name || "HR Admin";
-
-    const currentCandidate = await this.getById(id);
-    const timeline = currentCandidate?.timeline || [];
-
-    const newEvent = {
-      id: generateId("evt"),
-      title: `State Transition to ${newStatus}`,
-      timestamp: now,
-      description: `Applicant pipeline state updated to ${newStatus} by ${updaterName}.`
-    };
-
-    const updatedTimeline = [...timeline, newEvent];
-
-    return this.update(id, {
-      status: newStatus,
-      timeline: updatedTimeline,
-      updatedAt: now
-    });
-  },
+  // updateStatus was removed here: its only caller was
+  // CandidateWorkflowService.updateCandidateStatus in the now-deleted
+  // src/services/workflowService.ts, which also auto-created interview and
+  // offer records with fabricated data ("$120,000" salary, "Hiring Manager"
+  // as interviewer, a fake "calendarSynced: true"). Status changes now go
+  // through ApplicationRepository.updateStatus and CandidateRepository.update
+  // directly, without inventing records on the side.
 
   async delete(id: string): Promise<boolean> {
     const rawId = String(id || "").trim();
     if (!rawId) return false;
-    try {
-      await axios.delete(`${FASTAPI_BASE_URL}/api/candidates/${encodeURIComponent(rawId)}`, apiConfig);
-    } catch (e) {
-      console.warn("API Candidate delete error:", e);
-    }
 
-    const currentList = await this.getAll();
-    const filtered = currentList.filter(c => c.id !== rawId && c.candidateId !== rawId && c.applicationId !== rawId);
-    LocalStorageService.set("candidates", filtered);
+    await axios.delete(`${FASTAPI_BASE_URL}/api/candidates/${encodeURIComponent(rawId)}`, apiConfig);
 
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("candidates-updated"));

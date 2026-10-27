@@ -27,17 +27,17 @@ export default function ChangePasswordView({ onSuccess }: Props) {
   };
 
   return (
-    <div className="w-full max-w-md bg-white/5 backdrop-blur-2xl border border-white/10 rounded-3xl p-8 shadow-2xl text-white">
+    <div className="w-full max-w-md bg-white/5 backdrop-blur-2xl border border-white/10 rounded-lg p-8 shadow-sm text-white">
       <h2 className="text-2xl font-bold mb-4">Change Password</h2>
       <p className="text-sm text-slate-400 mb-6">This is your first login. Please change your temporary password.</p>
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && (
-          <div className="p-3 bg-rose-500/10 border border-rose-500/25 rounded-xl text-xs font-medium text-rose-300">
+          <div className="p-3 bg-rose-500/10 border border-rose-500/25 rounded-lg text-xs font-medium text-rose-300">
             ⚠️ {error}
           </div>
         )}
         {success && (
-          <div className="p-3 bg-emerald-500/10 border border-emerald-500/25 rounded-xl text-xs font-medium text-emerald-300">
+          <div className="p-3 bg-emerald-500/10 border border-emerald-500/25 rounded-lg text-xs font-medium text-emerald-300">
             ✅ {success}
           </div>
         )}
@@ -51,7 +51,7 @@ export default function ChangePasswordView({ onSuccess }: Props) {
               placeholder="••••••••••••"
               value={currentPassword}
               onChange={(e) => setCurrentPassword(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-xs text-white"
+              className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-xs text-white"
             />
           </div>
         </div>
@@ -65,7 +65,7 @@ export default function ChangePasswordView({ onSuccess }: Props) {
               placeholder="••••••••••••"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-xs text-white"
+              className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-xs text-white"
             />
           </div>
         </div>
@@ -79,13 +79,13 @@ export default function ChangePasswordView({ onSuccess }: Props) {
               placeholder="••••••••••••"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-xs text-white"
+              className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-xs text-white"
             />
           </div>
         </div>
         <button
           type="submit"
-          className="w-full py-3 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl shadow-xs transition-all cursor-pointer"
+          className="w-full py-3 bg-[#1F3B75] hover:bg-brand-700 text-white font-bold rounded-lg shadow-xs transition-all cursor-pointer"
         >
           Change Password
         </button>

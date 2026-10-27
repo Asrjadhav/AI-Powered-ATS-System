@@ -38,7 +38,7 @@ def seed_real_talent_pool():
                     aiSummary="Vetted candidate profile in talent pool.",
                     certifications=[],
                     projects=[],
-                    recruitmentHistory={"appliedJob": cand.appliedRole if hasattr(cand, 'appliedRole') else "General Pool", "previousStage": cand.status or "Applied", "interviewFeedback": "Active profile", "notSelectedReason": "None", "recruiterNotes": "Real candidate profile."},
+                    recruitmentHistory={"appliedJob": cand.appliedRole if hasattr(cand, 'appliedRole') else "General Pool", "previousStage": cand.status or "New", "interviewFeedback": "Active profile", "notSelectedReason": "None", "recruiterNotes": "Real candidate profile."},
                     recruiterNotes="Candidate in talent pool.",
                     createdAt=now,
                     updatedAt=now

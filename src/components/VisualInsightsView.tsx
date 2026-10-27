@@ -10,18 +10,23 @@ import {
   InterviewRepository, 
   OfferRepository, 
   UserRepository,
-  PreferenceRepository, 
-  StatsRepository 
+  PreferenceRepository,
+  InsightsRepository
 } from "../repositories";
+import {
+  EMPTY_INSIGHTS,
+  SCORE_BUCKET_COLORS,
+  FUNNEL_STAGE_COLORS,
+  type RecruitmentInsights
+} from "../repositories/insightsRepository";
 import {
   normalizeCandidateStatus,
   getCandidateAIScore,
+  isNewCandidate,
   isInterviewStage,
   isOfferedStage,
-  isHiredStage,
   isRejectedStage,
-  isAIShortlisted,
-  isPendingEvaluation
+  isShortlisted
 } from "../utils/pipelineUtils";
 import { 
   Sparkles, 
@@ -82,6 +87,7 @@ import {
   AreaChart, 
   Area 
 } from "recharts";
+import { SearchableSelect } from "./common/SearchableSelect";
 
 export default function VisualInsightsView() {
   const [density, setDensity] = useState(() => PreferenceRepository.getLayoutDensity());
@@ -100,6 +106,7 @@ export default function VisualInsightsView() {
   const [interviews, setInterviews] = useState<any[]>([]);
   const [offers, setOffers] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
+  const [insights, setInsights] = useState<RecruitmentInsights>(EMPTY_INSIGHTS);
   const [isLoading, setIsLoading] = useState(true);
   const [lastRefreshed, setLastRefreshed] = useState<string>("");
 
@@ -112,13 +119,17 @@ export default function VisualInsightsView() {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [candData, jobData, intData, offData, userData] = await Promise.all([
+      // Analytics are aggregated by /api/insights. The other collections are
+      // still fetched for the per-record tables further down the page.
+      const [insightsData, candData, jobData, intData, offData, userData] = await Promise.all([
+        InsightsRepository.getInsights(departmentFilter === "All" ? undefined : departmentFilter),
         CandidateRepository.getAll(),
         JobRepository.getAll(),
         InterviewRepository.getAll(),
         OfferRepository.getAll(),
         UserRepository.getAll()
       ]);
+      setInsights(insightsData);
       setCandidates(candData || []);
       setJobs(jobData || []);
       setInterviews(intData || []);
@@ -145,20 +156,14 @@ export default function VisualInsightsView() {
       window.removeEventListener("interviews-updated", handleSync);
       window.removeEventListener("offers-updated", handleSync);
     };
-  }, []);
+    // Department scoping is applied by the API, so changing it refetches.
+  }, [departmentFilter]);
 
-  // Available Departments for Filter
-  const departments = useMemo(() => {
-    const depts = new Set<string>();
-    jobs.forEach(j => {
-      if (j.department) depts.add(j.department);
-    });
-    candidates.forEach(c => {
-      if (c.department) depts.add(c.department);
-      if (c.job?.department) depts.add(c.job.department);
-    });
-    return ["All", ...Array.from(depts)];
-  }, [jobs, candidates]);
+  // Departments are reported by the API alongside the analytics.
+  const departments = useMemo(
+    () => ["All", ...insights.departments],
+    [insights]
+  );
 
   // Filtered Candidates according to Department and Timeframe
   const filteredCandidates = useMemo(() => {
@@ -172,140 +177,24 @@ export default function VisualInsightsView() {
   }, [candidates, departmentFilter]);
 
   // Key Analytics Aggregations
-  const stats = useMemo(() => {
-    const total = filteredCandidates.length || 1;
-    
-    // Status breakdown
-    let appliedCount = 0;
-    let pendingEvalCount = 0;
-    let shortlistedCount = 0;
-    let interviewCount = 0;
-    let offeredCount = 0;
-    let hiredCount = 0;
-    let rejectedCount = 0;
+  // All analytics come from /api/insights, already aggregated in the database.
+  // Only presentation colours are applied here.
+  const stats = useMemo(() => ({
+    ...insights,
+    scoreBuckets: insights.scoreBuckets.map(bucket => ({
+      ...bucket,
+      color: SCORE_BUCKET_COLORS[bucket.key] || "#94a3b8"
+    }))
+  }), [insights]);
 
-    let totalAIScore = 0;
-    let score90Plus = 0;
-    let score75To89 = 0;
-    let score60To74 = 0;
-    let scoreBelow60 = 0;
-
-    const sourceMap: Record<string, { count: number; totalScore: number }> = {};
-
-    filteredCandidates.forEach(cand => {
-      const normStatus = normalizeCandidateStatus(cand.status || cand.candidate?.status);
-      const score = getCandidateAIScore(cand);
-      totalAIScore += score;
-
-      // Score buckets
-      if (score >= 90) score90Plus++;
-      else if (score >= 75) score75To89++;
-      else if (score >= 60) score60To74++;
-      else scoreBelow60++;
-
-      // Stage counting
-      const statusLower = normStatus.toLowerCase();
-      if (statusLower === "new" || statusLower === "applied") appliedCount++;
-      else if (statusLower === "pending evaluation") pendingEvalCount++;
-      else if (statusLower === "shortlisted") shortlistedCount++;
-      else if (statusLower.includes("interview") || statusLower === "interviewing") interviewCount++;
-      else if (statusLower === "offered" || statusLower === "offer sent") offeredCount++;
-      else if (statusLower === "hired" || statusLower === "accepted") hiredCount++;
-      else if (statusLower === "rejected") rejectedCount++;
-      else appliedCount++;
-
-      // Sources
-      const src = cand.source || cand.candidate?.source || "LinkedIn";
-      if (!sourceMap[src]) sourceMap[src] = { count: 0, totalScore: 0 };
-      sourceMap[src].count++;
-      sourceMap[src].totalScore += score;
-    });
-
-    const avgScore = Math.round(totalAIScore / total);
-
-    // Progression rates
-    const activePipeline = shortlistedCount + interviewCount + offeredCount + hiredCount;
-    const conversionRate = Math.round((activePipeline / total) * 100);
-    const offerConversionRate = offeredCount > 0 ? Math.round((hiredCount / offeredCount) * 100) : 85;
-
-    // Source channel analytics formatted for Recharts
-    const sourceData = Object.keys(sourceMap).map(srcName => ({
-      name: srcName,
-      candidates: sourceMap[srcName].count,
-      avgScore: Math.round(sourceMap[srcName].totalScore / sourceMap[srcName].count)
-    })).sort((a, b) => b.candidates - a.candidates);
-
-    return {
-      total,
-      avgScore,
-      appliedCount,
-      pendingEvalCount,
-      shortlistedCount,
-      interviewCount,
-      offeredCount,
-      hiredCount,
-      rejectedCount,
-      conversionRate,
-      offerConversionRate,
-      scoreBuckets: [
-        { name: "Exceptional (90-100)", count: score90Plus, percentage: Math.round((score90Plus / total) * 100), color: "#1F3B75" },
-        { name: "Strong (75-89)", count: score75To89, percentage: Math.round((score75To89 / total) * 100), color: "#355EA8" },
-        { name: "Moderate (60-74)", count: score60To74, percentage: Math.round((score60To74 / total) * 100), color: "#f59e0b" },
-        { name: "Needs Review (<60)", count: scoreBelow60, percentage: Math.round((scoreBelow60 / total) * 100), color: "#94a3b8" }
-      ],
-      sourceData
-    };
-  }, [filteredCandidates]);
-
-  // Pipeline Funnel Chart Data
-  const funnelChartData = useMemo(() => {
-    const total = stats.total || 1;
-    
-    // Cumulative conversion progression
-    const stageApplied = stats.total;
-    const stageShortlisted = stats.shortlistedCount + stats.interviewCount + stats.offeredCount + stats.hiredCount;
-    const stageInterview = stats.interviewCount + stats.offeredCount + stats.hiredCount;
-    const stageOffer = stats.offeredCount + stats.hiredCount;
-    const stageHired = stats.hiredCount;
-
-    return [
-      {
-        stage: "Applications",
-        count: stageApplied,
-        percentage: 100,
-        color: "#1F3B75",
-        conversion: "100%"
-      },
-      {
-        stage: "AI Shortlisted",
-        count: stageShortlisted,
-        percentage: Math.round((stageShortlisted / total) * 100),
-        color: "#2E549B",
-        conversion: `${Math.round((stageShortlisted / stageApplied) * 100)}%`
-      },
-      {
-        stage: "Interview Stage",
-        count: stageInterview,
-        percentage: Math.round((stageInterview / total) * 100),
-        color: "#557DBF",
-        conversion: `${Math.round((stageInterview / (stageShortlisted || 1)) * 100)}%`
-      },
-      {
-        stage: "Offers Extended",
-        count: stageOffer,
-        percentage: Math.round((stageOffer / total) * 100),
-        color: "#f59e0b",
-        conversion: `${Math.round((stageOffer / (stageInterview || 1)) * 100)}%`
-      },
-      {
-        stage: "Hired Candidates",
-        count: stageHired,
-        percentage: Math.round((stageHired / total) * 100),
-        color: "#10b981",
-        conversion: `${Math.round((stageHired / (stageOffer || 1)) * 100)}%`
-      }
-    ];
-  }, [stats]);
+  // Funnel counts are cumulative and conversions are computed by the backend.
+  const funnelChartData = useMemo(() => insights.funnel.map(stage => ({
+    stage: stage.stage,
+    count: stage.count,
+    percentage: stage.percentageOfTotal,
+    conversion: `${stage.conversionFromPrevious}%`,
+    color: FUNNEL_STAGE_COLORS[stage.key] || "#355EA8"
+  })), [insights]);
 
   // Recruiter Performance Matrix
   const recruiterData = useMemo(() => {
@@ -323,13 +212,13 @@ export default function VisualInsightsView() {
       }
       recruiterMap[recruiterName].assigned++;
 
-      if (isPendingEvaluation(cand) || cand.status === "Applied") {
+      if (isNewCandidate(cand)) {
         recruiterMap[recruiterName].pending++;
       }
       if (isInterviewStage(cand)) {
         recruiterMap[recruiterName].interviews++;
       }
-      if (isOfferedStage(cand) || isHiredStage(cand)) {
+      if (isOfferedStage(cand)) {
         recruiterMap[recruiterName].offers++;
       }
     });
@@ -358,7 +247,7 @@ export default function VisualInsightsView() {
     const alerts: { text: string; priority: "CRITICAL" | "MEDIUM" | "INFO"; actionLabel: string }[] = [];
 
     // High match candidates pending review
-    const pendingHighMatch = filteredCandidates.filter(c => getCandidateAIScore(c) >= 85 && (isPendingEvaluation(c) || c.status === "Applied"));
+    const pendingHighMatch = filteredCandidates.filter(c => getCandidateAIScore(c) >= 85 && isNewCandidate(c));
     if (pendingHighMatch.length > 0) {
       alerts.push({
         text: `${pendingHighMatch.length} candidates with AI match score > 85% are awaiting recruiter review.`,
@@ -448,7 +337,7 @@ export default function VisualInsightsView() {
     <div className={`${density === "compact" ? "p-4 space-y-5" : "px-4 sm:px-6 lg:px-8 py-8 space-y-8"} w-full text-slate-800 dark:text-slate-100 transition-all`}>
       
       {/* Top Header & Toolbar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-5">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-200">
         <div className="space-y-1.5 text-left">
           <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
             <span>Analytics</span>
@@ -456,12 +345,11 @@ export default function VisualInsightsView() {
             <span className="text-slate-700 dark:text-slate-200 font-extrabold">Executive Insights</span>
           </div>
 
-          <h2 className="font-display font-black text-2xl sm:text-3xl text-slate-900 dark:text-white tracking-tight flex items-center gap-3">
-            <BrainCircuit className="h-8 w-8 text-indigo-600 dark:text-indigo-400 shrink-0" />
+          <h2 className="text-xl font-semibold text-slate-900 tracking-tight flex items-center gap-2.5">
             <span>Recruitment Analytics & Predictive Insights</span>
           </h2>
 
-          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-3xl">
+          <p className="text-sm text-slate-500 mt-1 max-w-3xl">
             Real-time intelligence analyzing candidate match scores, pipeline funnel drop-off, recruiter workload distribution, and channel efficiency.
           </p>
         </div>
@@ -471,7 +359,7 @@ export default function VisualInsightsView() {
           {/* Department Filter */}
           <div className="flex items-center gap-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-2.5 py-1.5 text-xs shadow-xs">
             <Building2 className="h-3.5 w-3.5 text-slate-400" />
-            <select
+            <SearchableSelect
               value={departmentFilter}
               onChange={(e) => setDepartmentFilter(e.target.value)}
               className="bg-transparent font-semibold text-slate-700 dark:text-slate-200 outline-none cursor-pointer"
@@ -479,7 +367,7 @@ export default function VisualInsightsView() {
               {departments.map(d => (
                 <option key={d} value={d} className="dark:bg-slate-900">{d === "All" ? "All Departments" : d}</option>
               ))}
-            </select>
+            </SearchableSelect>
           </div>
 
           {/* Timeframe Filter */}
@@ -518,7 +406,7 @@ export default function VisualInsightsView() {
       </div>
 
       {/* Live Sync Status Banner */}
-      <div className="flex items-center justify-between bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/50 rounded-xl px-4 py-2.5 text-xs">
+      <div className="flex items-center justify-between bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/50 rounded-lg px-4 py-2.5 text-xs">
         <div className="flex items-center gap-2 text-indigo-900 dark:text-indigo-200 font-semibold">
           <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400 animate-pulse" />
           <span>Aura Engine: Analyzing {stats.total} total candidate applications across {jobs.length} open requisitions</span>
@@ -531,7 +419,7 @@ export default function VisualInsightsView() {
       {/* TOP 4 EXECUTIVE KPI CARDS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* KPI 1: AI Match Score */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs relative overflow-hidden flex flex-col justify-between">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-5 shadow-xs relative overflow-hidden flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Avg AI Match Quality</span>
             <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400">
@@ -556,7 +444,7 @@ export default function VisualInsightsView() {
         </div>
 
         {/* KPI 2: Funnel Conversion Rate */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs relative overflow-hidden flex flex-col justify-between">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-5 shadow-xs relative overflow-hidden flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Pipeline Progression</span>
             <div className="p-2 rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400">
@@ -581,7 +469,7 @@ export default function VisualInsightsView() {
         </div>
 
         {/* KPI 3: Avg Time to Hire */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs relative overflow-hidden flex flex-col justify-between">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-5 shadow-xs relative overflow-hidden flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Avg Time to Hire</span>
             <div className="p-2 rounded-lg bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400">
@@ -606,7 +494,7 @@ export default function VisualInsightsView() {
         </div>
 
         {/* KPI 4: Offer Acceptance Rate */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs relative overflow-hidden flex flex-col justify-between">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-5 shadow-xs relative overflow-hidden flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Offer Acceptance</span>
             <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
@@ -626,7 +514,7 @@ export default function VisualInsightsView() {
           </div>
 
           <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2 text-left">
-            {stats.hiredCount} hired candidates out of {stats.offeredCount + stats.hiredCount} extended offers
+            {stats.hiredCount} hired candidates out of {stats.offerCount + stats.hiredCount} extended offers
           </p>
         </div>
       </div>
@@ -634,7 +522,7 @@ export default function VisualInsightsView() {
       {/* SECTION 1: FUNNEL CONVERSION & DROP-OFF ANALYTICS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left 2 Cols: Recharts Funnel Conversion Bar Chart */}
-        <div className="lg:col-span-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-xs space-y-4">
+        <div className="lg:col-span-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 shadow-xs space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-4">
             <div>
               <h3 className="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
@@ -685,7 +573,7 @@ export default function VisualInsightsView() {
         </div>
 
         {/* Right 1 Col: AI Bottleneck & Conversion Diagnosis */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-xs flex flex-col justify-between space-y-4">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 shadow-xs flex flex-col justify-between space-y-4">
           <div className="space-y-3">
             <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
               <Zap className="h-5 w-5 text-amber-500 shrink-0" />
@@ -695,7 +583,7 @@ export default function VisualInsightsView() {
               </div>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-900 dark:text-amber-300 space-y-2">
+            <div className="p-3.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-900 dark:text-amber-300 space-y-2">
               <div className="font-bold flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
                 <AlertCircle className="h-4 w-4" />
                 <span>Primary Bottleneck Detected</span>
@@ -731,7 +619,7 @@ export default function VisualInsightsView() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
         {/* Left: Recharts Donut Chart for Score Distribution */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-xs space-y-4">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 shadow-xs space-y-4">
           <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
             <h3 className="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
               <PieIcon className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
@@ -787,10 +675,10 @@ export default function VisualInsightsView() {
         </div>
 
         {/* Right: Sourcing Channel Efficiency */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-xs space-y-4">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 shadow-xs space-y-4">
           <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
             <h3 className="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
-              <Award className="h-5 w-5 text-brand-600 dark:text-brand-400" />
+              <Award className="h-5 w-5 text-[#1F3B75] dark:text-brand-400" />
               <span>Sourcing Channel Quality Index</span>
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
@@ -830,7 +718,7 @@ export default function VisualInsightsView() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* Left 2 Cols: Recruiter Workload Table */}
-        <div className="lg:col-span-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-xs space-y-4">
+        <div className="lg:col-span-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 shadow-xs space-y-4">
           <div className="border-b border-slate-100 dark:border-slate-800 pb-3 flex items-center justify-between">
             <div>
               <h3 className="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
@@ -884,7 +772,7 @@ export default function VisualInsightsView() {
         </div>
 
         {/* Right 1 Col: AI Alerts & Recommended Actions */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-xs flex flex-col justify-between space-y-4">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 shadow-xs flex flex-col justify-between space-y-4">
           <div className="space-y-3">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-2">
@@ -909,7 +797,7 @@ export default function VisualInsightsView() {
                 }
 
                 return (
-                  <div key={`alert-${alert.id || idx}`} className={`p-3 rounded-xl border flex items-start gap-2.5 text-xs ${bgBorder} transition-all`}>
+                  <div key={`alert-${alert.id || idx}`} className={`p-3 rounded-lg border flex items-start gap-2.5 text-xs ${bgBorder} transition-all`}>
                     <AlertCircle className={`h-4 w-4 shrink-0 mt-0.5 ${alert.priority === "CRITICAL" ? "text-rose-500" : "text-amber-500"}`} />
                     <div className="space-y-1 text-left min-w-0 flex-1">
                       <p className="text-[11px] font-medium leading-relaxed text-slate-800 dark:text-slate-200">
@@ -933,7 +821,7 @@ export default function VisualInsightsView() {
       </div>
 
       {/* SECTION 4: STRATEGIC ACTION CHECKLIST */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-xs space-y-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 shadow-xs space-y-4">
         <div className="border-b border-slate-100 dark:border-slate-800 pb-3 flex items-center justify-between">
           <div>
             <h3 className="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
@@ -958,7 +846,7 @@ export default function VisualInsightsView() {
               <div 
                 key={item.id} 
                 onClick={() => toggleAction(item.id)}
-                className={`p-3.5 border rounded-xl flex items-center justify-between gap-3 text-xs cursor-pointer select-none transition-all ${
+                className={`p-3.5 border rounded-lg flex items-center justify-between gap-3 text-xs cursor-pointer select-none transition-all ${
                   isCompleted 
                     ? "bg-slate-50 border-slate-200 text-slate-400 dark:bg-slate-950/20 dark:border-slate-800 line-through" 
                     : "bg-white border-slate-200 dark:bg-slate-900 dark:border-slate-800 hover:border-indigo-400 text-slate-800 dark:text-slate-200 shadow-xs"
@@ -982,7 +870,7 @@ export default function VisualInsightsView() {
       </div>
 
       {/* EXECUTIVE SUMMARY BOTTOM BANNER */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white border border-indigo-950 rounded-2xl p-6 sm:p-8 shadow-sm relative overflow-hidden">
+      <div className="bg-white text-white border border-indigo-950 rounded-lg p-6 sm:p-8 shadow-sm relative overflow-hidden">
         <div className="absolute right-0 bottom-0 translate-y-12 translate-x-12 opacity-10">
           <BrainCircuit className="h-64 w-64 text-indigo-400" />
         </div>

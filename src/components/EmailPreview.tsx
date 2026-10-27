@@ -2,7 +2,7 @@ import React from "react";
 
 export default function EmailPreview() {
   return (
-    <div className="p-8 bg-slate-900 text-white rounded-xl">
+    <div className="p-8 bg-slate-900 text-white rounded-lg">
       <h2 className="text-xl font-bold mb-4">Email Preview</h2>
       <div className="space-y-6">
         <div className="border p-4 rounded">

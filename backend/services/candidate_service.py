@@ -1,6 +1,9 @@
 import re
 import uuid
 import datetime
+
+from services.application_stage import to_db_stage
+from services import work_mode
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
@@ -9,6 +12,11 @@ from fastapi import HTTPException, status
 
 from models.candidate import CandidateModel
 from schemas.candidate import CandidateCreate, CandidateUpdate, CandidateResponse
+
+import logging
+from logging_config import mask_email
+
+logger = logging.getLogger(__name__)
 
 def normalize_email(email: str) -> str:
     """
@@ -273,13 +281,18 @@ def create_candidate(db: Session, candidate_in: CandidateCreate, target_job_id: 
         )
 
     # 1. Check for existing candidate profile with this normalized email
+    logger.info("Candidate create requested: email=%s job=%s", mask_email(norm_email),
+                target_job_id or getattr(candidate_in, "jobId", None))
     existing_candidate = get_candidate_by_email(db, norm_email)
     if existing_candidate:
+        logger.info("Candidate create: this email already belongs to candidate %s, re-using that profile",
+                    existing_candidate.id)
         job_id_to_check = target_job_id or getattr(candidate_in, "jobId", None)
         if job_id_to_check:
             from models.application import ApplicationModel
             from services.job_service import get_job_by_id_or_job_id
             job = get_job_by_id_or_job_id(db, job_id_to_check)
+            work_mode.ensure_allowed_for_job(candidate_in.preferredWorkMode, job)
             j_ids = [job_id_to_check]
             if job:
                 j_ids.extend([job.id, job.jobId])
@@ -290,9 +303,13 @@ def create_candidate(db: Session, candidate_in: CandidateCreate, target_job_id: 
                 ApplicationModel.jobId.in_(j_ids)
             ).first()
 
-            is_same_job = existing_app or (existing_candidate.jobId and existing_candidate.jobId in j_ids)
+            # Only a recorded application counts as "already applied". A job saved on the profile alone
+            # (an application that failed to save earlier) must not block applying again.
+            is_same_job = existing_app
 
             if is_same_job:
+                logger.warning("Candidate create refused: candidate %s already applied to job %s",
+                               existing_candidate.id, job_id_to_check)
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="This candidate has already submitted an application for this job position."
@@ -313,6 +330,10 @@ def create_candidate(db: Session, candidate_in: CandidateCreate, target_job_id: 
         update_data.pop("createdAt", None)
         update_data.pop("jobId", None)
         update_data["updatedAt"] = now
+        if update_data.get("status"):
+            # The form sends "Applied"; the application_stage enum only accepts the canonical stages
+            # (same mapping as a brand-new candidate below). Without it the commit failed with a 500.
+            update_data["status"] = to_db_stage(update_data["status"])
 
         for key, val in update_data.items():
             if val is not None:
@@ -320,6 +341,8 @@ def create_candidate(db: Session, candidate_in: CandidateCreate, target_job_id: 
 
         db.commit()
         db.refresh(existing_candidate)
+        logger.info("Candidate %s: existing profile updated from the new application, fields=%s",
+                    existing_candidate.id, sorted(update_data))
 
         # Create new application for different role in PostgreSQL
         if job_id_to_check:
@@ -331,11 +354,20 @@ def create_candidate(db: Session, candidate_in: CandidateCreate, target_job_id: 
                     create_application(db, ApplicationCreate(
                         candidateId=existing_candidate.id,
                         jobId=job.id,
-                        status=candidate_in.status or "Applied",
-                        appliedRole=job.title or candidate_in.currentRole or "Applicant"
+                        status=to_db_stage(candidate_in.status),
+                        appliedRole=job.title or candidate_in.currentRole or "Applicant",
+                        # The source chosen on the form (the application keeps it too, not the "Career Portal" default)
+                        **({"source": candidate_in.source} if candidate_in.source else {})
                     ))
-            except Exception:
-                pass
+            except HTTPException:
+                raise
+            except Exception as app_err:
+                logger.error("Candidate %s: creating the application for job %s failed: %s",
+                             existing_candidate.id, job_id_to_check, app_err, exc_info=True)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Your details were saved, but the application for this job could not be recorded. Please submit again."
+                )
 
         return existing_candidate
 
@@ -350,12 +382,17 @@ def create_candidate(db: Session, candidate_in: CandidateCreate, target_job_id: 
             data["id"] = internal_id
             data["candidateId"] = assigned_cand_id
             data["email"] = norm_email
-            data["status"] = candidate_in.status or "Applied"
+            # "Applied" is the legacy/UI spelling; map it (and any empty value)
+            # onto the canonical enum value, since the PostgreSQL
+            # application_stage enum only accepts New/Shortlisted/Interviewing/
+            # Rejected/Offer.
+            data["status"] = to_db_stage(candidate_in.status)
 
             job_id_val = target_job_id or candidate_in.jobId
             if job_id_val:
                 from services.job_service import get_job_by_id_or_job_id
                 job = get_job_by_id_or_job_id(db, job_id_val)
+                work_mode.ensure_allowed_for_job(candidate_in.preferredWorkMode, job)
                 if job:
                     data["jobId"] = job.id
 
@@ -371,6 +408,8 @@ def create_candidate(db: Session, candidate_in: CandidateCreate, target_job_id: 
             db.add(db_cand)
             db.commit()
             db.refresh(db_cand)
+            logger.info("Candidate created: id=%s candidateId=%s email=%s", db_cand.id, db_cand.candidateId,
+                        mask_email(db_cand.email))
 
             if job_id_val:
                 try:
@@ -381,15 +420,27 @@ def create_candidate(db: Session, candidate_in: CandidateCreate, target_job_id: 
                         create_application(db, ApplicationCreate(
                             candidateId=db_cand.id,
                             jobId=job.id,
-                            status=candidate_in.status or "Applied",
-                            appliedRole=job.title or candidate_in.currentRole or "Applicant"
+                            status=to_db_stage(candidate_in.status),
+                            appliedRole=job.title or candidate_in.currentRole or "Applicant",
+                            # The source chosen on the form (the application keeps it too, not the "Career Portal" default)
+                            **({"source": candidate_in.source} if candidate_in.source else {})
                         ))
-                except Exception:
-                    pass
+                except HTTPException:
+                    raise
+                except Exception as app_err:
+                    # Not swallowed: a saved candidate with no application never shows under the job.
+                    logger.error("Candidate %s: creating the application for job %s failed: %s",
+                                 db_cand.id, job_id_val, app_err, exc_info=True)
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Your details were saved, but the application for this job could not be recorded. Please submit again."
+                    )
 
             return db_cand
         except IntegrityError as err:
             db.rollback()
+            logger.warning("Candidate create: database integrity error on attempt %d/%d: %s",
+                           attempt + 1, max_retries, err)
             if attempt < max_retries - 1 and not candidate_in.candidateId:
                 continue
             raise err
@@ -402,6 +453,7 @@ def update_candidate(db: Session, identifier: str, updates: CandidateUpdate) -> 
     """
     db_cand = get_candidate_by_id_or_candidate_id(db, identifier)
     if not db_cand:
+        logger.warning("Candidate update: %r not found", identifier)
         return None
 
     update_data = updates.dict(exclude_unset=True)
@@ -436,6 +488,7 @@ def update_candidate(db: Session, identifier: str, updates: CandidateUpdate) -> 
                 func.lower(JobModel.title) == str(target_job_id).lower()
             )
         ).first()
+        work_mode.ensure_allowed_for_job(update_data.get("preferredWorkMode"), job)
         if job:
             db_cand.jobId = job.id
             db_app = db.query(ApplicationModel).filter(ApplicationModel.candidateId == db_cand.id).first()
@@ -446,6 +499,9 @@ def update_candidate(db: Session, identifier: str, updates: CandidateUpdate) -> 
     enrich_candidate_applied_job(db, db_cand)
     db.commit()
     db.refresh(db_cand)
+    logger.info("Candidate %s updated: fields=%s%s", db_cand.id,
+                sorted(k for k in update_data if k != "updatedAt"),
+                f" (job -> {target_job_id})" if target_job_id else "")
     return db_cand
 
 def delete_candidate(db: Session, identifier: str) -> bool:
@@ -492,9 +548,10 @@ def delete_candidate(db: Session, identifier: str) -> bool:
         try:
             file_storage_service.delete_candidate_folder(folder_id)
         except Exception as f_err:
-            print(f"[ERROR] Failed to delete candidate resume directory for '{folder_id}': {f_err}")
+            logger.error("Candidate delete: could not remove resume folder %r: %s", folder_id, f_err)
 
     if not db_cand:
+        logger.warning("Candidate delete: %r matched no candidate, nothing deleted (reported as success)", raw_id)
         return True
 
     # 3. Purge linked records and candidate database row
@@ -508,6 +565,8 @@ def delete_candidate(db: Session, identifier: str) -> bool:
         or_(ApplicationModel.candidateId.in_(c_ids), ApplicationModel.candidateEmail == db_cand.email)
     ).all()
     app_ids = list(set([a.id for a in apps] + [a.applicationId for a in apps if a.applicationId]))
+    logger.info("Candidate %s: deleting the profile, %d application(s) and all their interviews, offers and talent pool entry",
+                db_cand.id, len(apps))
 
     db.query(OfferModel).filter(
         or_(
@@ -538,6 +597,7 @@ def delete_candidate(db: Session, identifier: str) -> bool:
 
     db.delete(db_cand)
     db.commit()
+    logger.info("Candidate %s deleted", db_cand.id)
     return True
 
 import os
@@ -546,46 +606,31 @@ import services.file_storage_service as file_storage_service
 
 MAX_RESUME_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
 
+# Resumes and job descriptions accept the same three formats: PDF, DOCX, TXT.
+# Legacy .doc is excluded because its text cannot be extracted reliably.
 ALLOWED_MIME_TYPES = {
     "application/pdf",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "text/plain",
 }
 
-ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx"}
+ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt"}
 
 def extract_text_from_file_bytes(file_bytes: bytes, filename: str) -> Optional[str]:
     """
-    Extracts plain text content from PDF and DOCX file bytes.
-    For legacy .doc format, returns descriptive message if safe text parser is unavailable.
+    Extracts plain text from PDF, DOCX or TXT resume bytes.
+
+    Delegates to services.document_service so resumes and job descriptions are
+    read by the same code and accept the same formats. Returns None when
+    nothing readable could be extracted, leaving callers to decide.
     """
-    ext = os.path.splitext(filename.lower())[1]
-    extracted_text = ""
+    import services.document_service as document_service
 
-    if ext == ".pdf":
-        try:
-            import pypdf
-            reader = pypdf.PdfReader(io.BytesIO(file_bytes))
-            text_pages = []
-            for page in reader.pages:
-                t = page.extract_text()
-                if t:
-                    text_pages.append(t)
-            extracted_text = "\n\n".join(text_pages).strip()
-        except Exception as e:
-            print(f"PDF extraction error for {filename}: {e}")
-
-    elif ext == ".docx":
-        try:
-            import docx
-            doc = docx.Document(io.BytesIO(file_bytes))
-            paragraphs = [p.text for p in doc.paragraphs if p.text]
-            extracted_text = "\n".join(paragraphs).strip()
-        except Exception as e:
-            print(f"DOCX extraction error for {filename}: {e}")
-
-    elif ext == ".doc":
-        extracted_text = f"Text extraction is unavailable for legacy .doc format ({filename}). Please download the file or re-upload in PDF or DOCX format."
+    try:
+        extracted_text = document_service.extract_text(file_bytes, filename)
+    except document_service.DocumentExtractionError as extraction_error:
+        logger.warning("Resume text extraction failed for %s: %s", filename, extraction_error)
+        return None
 
     return extracted_text if extracted_text else None
 
@@ -597,13 +642,17 @@ def validate_resume_file(file_bytes: bytes, original_filename: str, content_type
         )
 
     ext = os.path.splitext(original_filename.lower())[1]
-    ct = (content_type or "").lower().strip()
 
-    is_valid_type = ct in ALLOWED_MIME_TYPES or ext in ALLOWED_EXTENSIONS
-    if not is_valid_type:
+    # The extension is authoritative. Browsers report content types
+    # inconsistently, and accepting a file because its declared type looks
+    # right would let through anything with a misleading header.
+    if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported resume file type."
+            detail=(
+                f"Unsupported file type '{ext or 'unknown'}'. "
+                "Upload a PDF, DOCX or TXT file."
+            )
         )
 
 def upload_candidate_resume(
@@ -621,6 +670,7 @@ def upload_candidate_resume(
             detail="Candidate not found."
         )
 
+    logger.info("Resume upload: candidate=%s file=%s (%d bytes)", cand.id, original_filename, len(file_bytes))
     validate_resume_file(file_bytes, original_filename, content_type)
 
     # 1. Idempotency Check: if candidate already has a file with identical SHA-256 hash, return immediately
@@ -631,6 +681,7 @@ def upload_candidate_resume(
             try:
                 with open(existing_path, "rb") as ef:
                     if hashlib.sha256(ef.read()).hexdigest() == new_hash:
+                        logger.info("Resume upload: candidate %s already has this exact file, nothing to do", cand.id)
                         return cand
             except Exception:
                 pass
@@ -647,6 +698,8 @@ def upload_candidate_resume(
     )
 
     extracted_text = extract_text_from_file_bytes(file_bytes, original_filename)
+    logger.info("Resume upload: saved as %s, extracted %s", new_storage_key,
+                f"{len(extracted_text)} characters of text" if extracted_text else "NO text (scanned or unreadable file?)")
 
     # 3. Update candidate database record
     import base64
@@ -667,6 +720,7 @@ def upload_candidate_resume(
     # 4. Enforce DB Commit FIRST before physical deletion of old file
     db.commit()
     db.refresh(cand)
+    logger.info("Resume upload: candidate %s record updated", cand.id)
 
     # 5. After DB commit succeeds, safely delete old file if not referenced elsewhere
     if old_key and old_key != new_storage_key:
@@ -704,6 +758,8 @@ def get_candidate_resume_file(db: Session, identifier: str):
     # Persistent Ephemeral Fallback: Auto-reconstruct physical file if disk wiped on Render restart
     if not file_path and cand and (cand.resumeText or (isinstance(cand.customFields, dict) and cand.customFields.get("cvBase64"))):
         try:
+            logger.warning("Resume view: file for candidate %s is missing on disk (wiped on restart?), rebuilding it from the database copy",
+                           cand_ref)
             cand_name = f"{cand.firstName or ''} {cand.lastName or ''}".strip() or "Candidate"
             doc_filename = cand.resumeFileName or f"{cand_name.replace(' ', '_')}_Resume.pdf"
             cv_b64 = cand.customFields.get("cvBase64") if isinstance(cand.customFields, dict) else None
@@ -729,8 +785,9 @@ def get_candidate_resume_file(db: Session, identifier: str):
                 cand.resumeUploadedAt = datetime.datetime.now(datetime.timezone.utc).isoformat()
                 db.commit()
                 db.refresh(cand)
+                logger.info("Resume view: rebuilt file for candidate %s as %s", cand_ref, new_key)
         except Exception as synth_err:
-            print(f"Auto-reconstruct resume file note for {cand_ref}: {synth_err}")
+            logger.error("Resume view: rebuilding the file for candidate %s failed: %s", cand_ref, synth_err, exc_info=True)
 
     if not file_path:
         raise HTTPException(
@@ -908,11 +965,16 @@ def parse_resume_document(file_bytes: Optional[bytes] = None, filename: Optional
             else:
                 clean_line_alpha = re.sub(r"[^A-Za-z\s]", " ", clean_line).strip()
                 tokens = [t for t in clean_line_alpha.split() if len(t) > 1 and t.lower() not in noise_words]
-                if tokens:
+                if tokens and not first_name:
                     first_name = tokens[0].capitalize()
                     if len(tokens) > 1:
                         last_name = " ".join([t.capitalize() for t in tokens[1:]])
-                    break
+
+            # The earliest header line that yields a name wins. Without this,
+            # a later line such as "B.E. Computer Science, Pune University"
+            # overwrote a name already found on the first line.
+            if first_name:
+                break
 
     # Priority 2: Clean Filename Fallback (stripping numeric prefixes e.g. '04_' and job title noise words)
     if not first_name and filename:

@@ -1,6 +1,6 @@
 import uuid
 import datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 from fastapi import HTTPException, status
@@ -40,7 +40,7 @@ def format_tp_response(tp: TalentPoolModel, cand: Optional[CandidateModel]) -> d
         "projects": tp.projects or [],
         "recruitmentHistory": tp.recruitmentHistory or {
             "appliedJob": cand.appliedRole if hasattr(cand, 'appliedRole') else "General Pool",
-            "previousStage": cand.status if cand else "Applied",
+            "previousStage": cand.status if cand else "New",
             "interviewFeedback": "Profile active.",
             "notSelectedReason": "None",
             "recruiterNotes": tp.recruiterNotes or "Candidate in talent pool."
@@ -57,6 +57,31 @@ def list_talent_pool(db: Session) -> List[dict]:
         cand = candidate_service.get_candidate_by_id_or_candidate_id(db, tp.candidateId)
         results.append(format_tp_response(tp, cand))
     return results
+
+def get_talent_pool_stats(db: Session) -> dict:
+    """
+    KPI figures for the Talent Pool screen, aggregated directly in SQL.
+
+    aiMatchScore is nullable on the model, defaulting to 80.0 for display
+    (format_tp_response) but genuinely absent for some rows; AVG() and the
+    >= 90 count both simply skip NULLs, which is the honest behaviour —
+    an unscored candidate should not silently count as an 80.
+    """
+    total = db.query(func.count(TalentPoolModel.id)).scalar() or 0
+    ai_recommended = db.query(func.count(TalentPoolModel.id)).filter(
+        TalentPoolModel.aiMatchScore >= 90
+    ).scalar() or 0
+    immediate_joiners = db.query(func.count(TalentPoolModel.id)).filter(
+        TalentPoolModel.availability == "Immediate"
+    ).scalar() or 0
+    average_score = db.query(func.coalesce(func.avg(TalentPoolModel.aiMatchScore), 0)).scalar() or 0
+
+    return {
+        "total": total,
+        "aiRecommendedCount": ai_recommended,
+        "immediateJoinersCount": immediate_joiners,
+        "averageMatchScore": int(round(average_score)),
+    }
 
 def get_talent_pool_by_id(db: Session, identifier: str) -> Optional[TalentPoolModel]:
     if not identifier:

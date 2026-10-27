@@ -3,130 +3,125 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { CandidateRepository } from "./candidateRepository";
-import { ApplicationRepository } from "./applicationRepository";
-import { JobRepository } from "./jobRepository";
-import { InterviewRepository } from "./interviewRepository";
-import { OfferRepository } from "./offerRepository";
-import { TalentPoolRepository } from "./talentPoolRepository";
-import {
-  isNewCandidate,
-  isPendingEvaluation,
-  isAIShortlisted,
-  isInterviewStage,
-  isOfferedStage,
-  isHiredStage,
-  isRejectedStage,
-  isTodayCandidate,
-  getCandidateAIScore,
-  DEFAULT_MATCH_THRESHOLD
-} from "../utils/pipelineUtils";
+import axios from "axios";
+
+const FASTAPI_BASE_URL =
+  (import.meta as any).env?.VITE_FASTAPI_BASE_URL ||
+  (import.meta as any).env?.VITE_API_URL ||
+  "http://127.0.0.1:8000";
+
+const apiConfig = {
+  headers: {
+    "X-Skip-Interceptor": "true",
+    "Content-Type": "application/json",
+  },
+};
+
+export interface WeeklyApplicationPoint {
+  name: string;
+  count: number;
+}
+
+/**
+ * Every figure shown on the recruitment dashboard.
+ *
+ * This mirrors the DashboardStats model in backend/schemas/stats.py. Each value
+ * is final and is rendered as-is: do not re-total, re-filter or otherwise
+ * recompute anything here. The pipeline stage counts are disjoint, so they can
+ * be summed or charted directly.
+ *
+ * To change how a figure is derived, change
+ * backend/services/stats_service.get_dashboard_stats.
+ */
+export interface DashboardStats {
+  totalJobs: number;
+  activeVacancies: number;
+  activeCandidates: number;
+  totalCandidates: number;
+  talentPoolCount: number;
+
+  newApplicationsCount: number;
+  aiShortlistedCount: number;
+  interviewStageCount: number;
+  offerCount: number;
+  hiredCount: number;
+  rejectedCount: number;
+  appsTodayCount: number;
+
+  averageMatchScore: number;
+
+  todayInterviews: number;
+  upcomingInterviews: number;
+  completedInterviews: number;
+  cancelledInterviews: number;
+  pendingFeedback: number;
+  totalInterviews: number;
+
+  totalOffers: number;
+  pendingOffers: number;
+  averageDuration: number;
+
+  weeklyApplications: WeeklyApplicationPoint[];
+}
+
+/**
+ * Shown when the dashboard cannot reach the API, so the page renders empty
+ * rather than throwing. It is never used to stand in for a real figure.
+ */
+const EMPTY_STATS: DashboardStats = {
+  totalJobs: 0,
+  activeVacancies: 0,
+  activeCandidates: 0,
+  totalCandidates: 0,
+  talentPoolCount: 0,
+  newApplicationsCount: 0,
+  aiShortlistedCount: 0,
+  interviewStageCount: 0,
+  offerCount: 0,
+  hiredCount: 0,
+  rejectedCount: 0,
+  appsTodayCount: 0,
+  averageMatchScore: 0,
+  todayInterviews: 0,
+  upcomingInterviews: 0,
+  completedInterviews: 0,
+  cancelledInterviews: 0,
+  pendingFeedback: 0,
+  totalInterviews: 0,
+  totalOffers: 0,
+  pendingOffers: 0,
+  averageDuration: 0,
+  weeklyApplications: [
+    { name: "Mon", count: 0 },
+    { name: "Tue", count: 0 },
+    { name: "Wed", count: 0 },
+    { name: "Thu", count: 0 },
+    { name: "Fri", count: 0 },
+    { name: "Sat", count: 0 },
+    { name: "Sun", count: 0 },
+  ],
+};
 
 export const StatsRepository = {
-  async getDashboardStats(matchThreshold = DEFAULT_MATCH_THRESHOLD): Promise<any> {
-    const [candidates, applications, jobs, interviewsRaw, offersRaw, talentPool] = await Promise.all([
-      CandidateRepository.getAll(),
-      ApplicationRepository.getAll(),
-      JobRepository.getAll(),
-      InterviewRepository.getAll(),
-      OfferRepository.getAll(),
-      TalentPoolRepository.getAll()
-    ]);
-
-    const interviews = candidates.length === 0 ? [] : interviewsRaw;
-    const offers = candidates.length === 0 ? [] : offersRaw;
-
-    const activeVacancies = jobs.filter((j: any) => String(j.status || "").toLowerCase() === "active").length;
-    const totalCandidates = candidates.length;
-    const totalInterviews = interviews.length;
-    const totalOffers = offers.length;
-
-    const todayStr = new Date().toISOString().split("T")[0];
-    const todayInterviews = interviews.filter((i: any) => i.date === todayStr && i.status !== "Cancelled" && i.status !== "CANCELLED").length;
-    const upcomingInterviews = interviews.filter((i: any) => (i.status === "Upcoming" || i.status === "SCHEDULED" || i.status === "Scheduled") && i.date > todayStr).length;
-    const completedInterviews = interviews.filter((i: any) => i.status === "Completed" || i.status === "COMPLETED").length;
-    const cancelledInterviews = interviews.filter((i: any) => i.status === "Cancelled" || i.status === "CANCELLED").length;
-    const pendingFeedback = interviews.filter((i: any) => (i.status === "Upcoming" || i.status === "SCHEDULED" || i.status === "Scheduled") && i.date < todayStr).length;
-    
-    const pendingOffers = offers.filter((o: any) => String(o.status || "").toLowerCase() === "pending").length;
-
-    const completedWithDuration = interviews.filter((i: any) => i.status === "Completed" || i.status === "COMPLETED");
-    const averageDuration = completedWithDuration.length > 0 
-      ? Math.round(completedWithDuration.reduce((acc: number, curr: any) => acc + (curr.duration || 45), 0) / completedWithDuration.length)
-      : 0;
-
-    const averageMatchScore = candidates.length > 0 
-      ? Math.round(candidates.reduce((acc: number, curr: any) => acc + getCandidateAIScore(curr), 0) / candidates.length)
-      : 0;
-
-    const dayCounts: Record<string, number> = { "Mon": 0, "Tue": 0, "Wed": 0, "Thu": 0, "Fri": 0, "Sat": 0, "Sun": 0 };
-    candidates.forEach(cand => {
-      const dateStr = cand.appliedAt || cand.appliedDate || cand.createdAt;
-      if (dateStr) {
-        const d = new Date(dateStr);
-        if (!isNaN(d.getTime())) {
-          const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-          const dayName = dayNames[d.getDay()];
-          if (dayCounts[dayName] !== undefined) {
-            dayCounts[dayName]++;
-          }
-        }
+  /**
+   * Fetches the dashboard figures.
+   *
+   * The aggregation runs in the database. Pass matchThreshold only to override
+   * the server's configured ATS_MATCH_THRESHOLD for this request.
+   */
+  async getDashboardStats(matchThreshold?: number): Promise<DashboardStats> {
+    try {
+      const res = await axios.get(`${FASTAPI_BASE_URL}/api/stats`, {
+        ...apiConfig,
+        params:
+          typeof matchThreshold === "number" ? { matchThreshold } : undefined,
+      });
+      if (res.data) {
+        return res.data as DashboardStats;
       }
-    });
-
-    const dataset = applications.length > 0 ? applications.map(app => {
-      const matchedCand = candidates.find(c => c.id === app.candidateId || c.candidateId === app.candidateId || (c.email && app.candidateEmail && c.email.toLowerCase() === app.candidateEmail.toLowerCase())) || {};
-      return {
-        ...matchedCand,
-        ...app,
-        status: app.status || matchedCand.status || "New",
-        aiScore: app.atsScore !== undefined && app.atsScore !== null ? app.atsScore : matchedCand.aiScore,
-        aiEvaluation: app.aiEvaluation || matchedCand.aiEvaluation,
-      };
-    }) : candidates;
-
-    const pendingReviews = dataset.filter(c => isPendingEvaluation(c)).length;
-    const aiShortlistedCount = dataset.filter(c => isAIShortlisted(c, matchThreshold)).length;
-    const interviewStageCount = dataset.filter(c => isInterviewStage(c)).length;
-    const offeredCount = dataset.filter(c => isOfferedStage(c)).length;
-    const hiredCount = dataset.filter(c => isHiredStage(c)).length;
-    const rejectedCount = dataset.filter(c => isRejectedStage(c)).length;
-    const appsTodayCount = dataset.filter(c => isTodayCandidate(c)).length;
-    const newApplicationsCount = dataset.filter(c => isNewCandidate(c)).length;
-
-    return {
-      totalJobs: activeVacancies,
-      activeVacancies,
-      activeCandidates: totalCandidates,
-      totalCandidates,
-      talentPoolCount: talentPool.length,
-      pendingReviews,
-      aiShortlistedCount,
-      interviewStageCount,
-      offeredCount,
-      hiredCount,
-      rejectedCount,
-      appsTodayCount,
-      newApplicationsCount,
-      averageMatchScore,
-      todayInterviews,
-      upcomingInterviews,
-      completedInterviews,
-      cancelledInterviews,
-      pendingFeedback,
-      totalInterviews,
-      totalOffers,
-      pendingOffers,
-      averageDuration,
-      weeklyApplications: [
-        { name: "Mon", count: dayCounts["Mon"] },
-        { name: "Tue", count: dayCounts["Tue"] },
-        { name: "Wed", count: dayCounts["Wed"] },
-        { name: "Thu", count: dayCounts["Thu"] },
-        { name: "Fri", count: dayCounts["Fri"] },
-        { name: "Sat", count: dayCounts["Sat"] },
-        { name: "Sun", count: dayCounts["Sun"] },
-      ]
-    };
-  }
+    } catch (e) {
+      console.error("StatsRepository.getDashboardStats failed:", e);
+    }
+    return EMPTY_STATS;
+  },
 };

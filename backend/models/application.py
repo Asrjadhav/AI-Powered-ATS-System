@@ -1,6 +1,8 @@
-from sqlalchemy import Column, String, Integer, Float, Text, JSON, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, String, Integer, Float, Text, JSON, ForeignKey, UniqueConstraint, Enum as SAEnum
 from sqlalchemy.orm import relationship
 from database import Base
+from services.application_stage import ApplicationStage
+from services.application_state import ApplicationState
 
 class ApplicationModel(Base):
     __tablename__ = "applications"
@@ -9,7 +11,9 @@ class ApplicationModel(Base):
     applicationId = Column(String, unique=True, index=True, nullable=False) # e.g. APP-0001
     candidateId = Column(String, ForeignKey("candidates.id"), nullable=False, index=True)
     jobId = Column(String, ForeignKey("jobs.id"), nullable=True, index=True)
-    status = Column(String, nullable=True, default="Applied", index=True)
+    status = Column(SAEnum(ApplicationStage, name="application_stage", create_type=False, values_callable=lambda x: [e.value for e in x]), nullable=True, default=ApplicationStage.NEW, index=True)
+    # "Open" while the job is open; "On Hold" while the job is closed/draft (see services/job_lifecycle_service.py)
+    applicationState = Column(SAEnum(ApplicationState, name="application_state", values_callable=lambda x: [e.value for e in x]), nullable=False, default=ApplicationState.OPEN, server_default=ApplicationState.OPEN.value, index=True)
     source = Column(String, nullable=True, default="Career Portal")
     atsScore = Column(Integer, nullable=True) # ATS score stored directly on Application record
     appliedRole = Column(String, nullable=True)

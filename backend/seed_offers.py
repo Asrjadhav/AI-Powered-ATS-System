@@ -5,6 +5,7 @@ import os
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
+from sqlalchemy import String
 from database import SessionLocal
 from models.candidate import CandidateModel
 from models.application import ApplicationModel
@@ -15,7 +16,7 @@ def seed_offers():
     db = SessionLocal()
     try:
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        offered_cands = db.query(CandidateModel).filter(CandidateModel.status.ilike("%offered%")).all()
+        offered_cands = db.query(CandidateModel).filter(CandidateModel.status.cast(String).ilike("%offered%")).all()
         print(f"Found {len(offered_cands)} candidate(s) in Offered stage in PostgreSQL.")
 
         for cand in offered_cands:

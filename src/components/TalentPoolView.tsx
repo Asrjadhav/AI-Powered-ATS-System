@@ -9,6 +9,7 @@ import axios from "axios";
 import { LocalStorageService } from "../services/localStorageService";
 import { TalentPoolRepository } from "../repositories";
 import { formatJobId } from "../repositories/repositoryUtils";
+import { parseResume } from "../utils/resumeParser";
 import { 
   Users, 
   Sparkles, 
@@ -23,7 +24,6 @@ import {
   MoreVertical, 
   ExternalLink, 
   UserPlus, 
-  ChevronRight, 
   CheckCircle, 
   X, 
   MessageSquare, 
@@ -41,6 +41,8 @@ import {
   UploadCloud,
   Plus
 } from "lucide-react";
+import { AIInsightPanel, DataTable, FilterBar, PageContainer, PageHeader, Button } from "./common/UIPrimitives";
+import { SearchableSelect } from "./common/SearchableSelect";
 
 // Types matching the existing ATS domain
 interface TalentPoolCandidate {
@@ -384,6 +386,12 @@ export default function TalentPoolView() {
 
   
   const [candidates, setCandidates] = useState<any[]>([]);
+  const [poolStats, setPoolStats] = useState({
+    total: 0,
+    aiRecommendedCount: 0,
+    immediateJoinersCount: 0,
+    averageMatchScore: 0,
+  });
 
   const fetchCandidates = async () => {
     try {
@@ -394,15 +402,31 @@ export default function TalentPoolView() {
     }
   };
 
+  const fetchPoolStats = async () => {
+    try {
+      const stats = await TalentPoolRepository.getStats();
+      setPoolStats(stats);
+    } catch (err) {
+      console.error("Failed to fetch talent pool stats", err);
+    }
+  };
+
   useEffect(() => {
     fetchCandidates();
+    fetchPoolStats();
     window.addEventListener("trigger-notification-sync", fetchCandidates);
     window.addEventListener("applications-updated", fetchCandidates);
     window.addEventListener("talent-pool-updated", fetchCandidates);
+    window.addEventListener("trigger-notification-sync", fetchPoolStats);
+    window.addEventListener("applications-updated", fetchPoolStats);
+    window.addEventListener("talent-pool-updated", fetchPoolStats);
     return () => {
       window.removeEventListener("trigger-notification-sync", fetchCandidates);
       window.removeEventListener("applications-updated", fetchCandidates);
       window.removeEventListener("talent-pool-updated", fetchCandidates);
+      window.removeEventListener("trigger-notification-sync", fetchPoolStats);
+      window.removeEventListener("applications-updated", fetchPoolStats);
+      window.removeEventListener("talent-pool-updated", fetchPoolStats);
     };
   }, []);
 
@@ -504,7 +528,11 @@ export default function TalentPoolView() {
       skills: newCandidateForm.skillsString ? newCandidateForm.skillsString.split(",").map(s => s.trim()).filter(Boolean) : ["React"],
       experienceYears: Number(newCandidateForm.experienceYears) || 0,
       location: newCandidateForm.location || "Remote",
-      aiMatchScore: Number(newCandidateForm.aiMatchScore) || Math.floor(Math.random() * 20) + 75,
+      // No client-side fallback score. If the recruiter didn't enter one,
+      // omit it — the backend defaults aiMatchScore to 80.0
+      // (schemas/talent_pool.py), one real default instead of a second,
+      // randomly-generated one computed here.
+      aiMatchScore: newCandidateForm.aiMatchScore ? Number(newCandidateForm.aiMatchScore) : undefined,
       availability: newCandidateForm.availability,
       noticePeriod: newCandidateForm.noticePeriod,
       department: newCandidateForm.department,
@@ -548,130 +576,61 @@ export default function TalentPoolView() {
     }
   };
 
-  const processImportedFile = (file: File) => {
+  /**
+   * Uploads a CV and prefills the real Add Candidate form with what the
+   * backend actually extracted from it (backend/services/candidate_service.
+   * parse_resume_document — PDF/DOCX text extraction, not guesswork).
+   *
+   * This used to be a purely client-side illusion: a fake progress bar with
+   * scripted "Aura AI extracting..." status text, landing on one of three
+   * hardcoded canned profiles (or the literal name "Nikhil Deshmukh" if the
+   * filename looked unhelpful), plus a fabricated email, phone number and
+   * aiMatchScore. It also never called TalentPoolRepository.create at all —
+   * the "imported" candidate lived only in local React state and vanished on
+   * the next refresh, while the success toast claimed otherwise.
+   *
+   * The review step is intentional: real extraction can't know which
+   * department a role belongs to, so the recruiter confirms that (and
+   * anything else) in the existing Add Candidate modal before it's saved.
+   */
+  const processImportedFile = async (file: File) => {
     setImportFile(file);
     setIsImporting(true);
-    setImportProgress(0);
-    setImportStatus("Uploading resume standard...");
+    setImportProgress(20);
+    setImportStatus("Uploading document to server for parsing...");
 
-    const interval = setInterval(() => {
-      setImportProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          completeSimulatedImport(file);
-          return 100;
-        }
-        
-        const next = prev + 10;
-        if (next < 40) {
-          setImportStatus("Uploading document structure...");
-        } else if (next < 75) {
-          setImportStatus("Aura AI extracting professional experience and education...");
-        } else if (next < 95) {
-          setImportStatus("Benchmarking skills matrix with active recruitment open loops...");
-        } else {
-          setImportStatus("Finalizing candidate match metrics...");
-        }
-        return next;
-      });
-    }, 150);
-  };
+    try {
+      const parsed = await parseResume(file);
+      setImportProgress(100);
+      setImportStatus("Parsed. Review details before saving.");
 
-  const completeSimulatedImport = (file: File) => {
-    const rawName = file.name.split(".")[0].replace(/_/g, " ").replace(/-/g, " ");
-    const parsedName = rawName.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
-    
-    const profiles = [
-      {
-        role: "Senior React Specialist",
-        company: "Global Web Solutions",
-        skills: ["React", "TypeScript", "Redux", "Webpack", "Tailwind CSS", "Jest", "GraphQL"],
-        exp: 5,
-        loc: "Remote (India)",
-        dept: "Engineering" as const,
-        score: 91,
-        degree: "B.E.",
-        spec: "Information Technology",
-        univ: "Anna University",
-        summary: "Specialized frontend developer with a robust focus on optimization, design frameworks, and low latency server-side state hydration."
-      },
-      {
-        role: "DevOps & Cloud Engineer",
-        company: "Stellar Cloud Systems",
-        skills: ["AWS", "Docker", "Kubernetes", "Terraform", "CI/CD", "Linux", "Python", "Prometheus"],
-        exp: 4.5,
-        loc: "Mumbai",
-        dept: "Operations" as const,
-        score: 87,
-        degree: "B.Tech",
-        spec: "Computer Science",
-        univ: "IIT Bombay",
-        summary: "Highly skilled Cloud Engineer specialized in automating multi-cloud container pipelines and reducing infrastructure overhead by 30%."
-      },
-      {
-        role: "Product Manager (UX/Growth)",
-        company: "NextGen Unicorn",
-        skills: ["Agile", "Jira", "Mixpanel", "SQL", "Product Roadmap", "A/B Testing", "Figma"],
-        exp: 6,
-        loc: "Bangalore",
-        dept: "Product" as const,
-        score: 93,
-        degree: "MBA",
-        spec: "Product Management",
-        univ: "IIM Ahmedabad",
-        summary: "Data-driven Product Manager with a record of driving 2.5x growth in user retention through rigorous behavioral experiments and custom UX flows."
-      }
-    ];
+      setNewCandidateForm(prev => ({
+        ...prev,
+        name: parsed.fullName || `${parsed.firstName} ${parsed.lastName}`.trim(),
+        email: parsed.email,
+        phone: parsed.phone,
+        currentRole: parsed.role,
+        currentCompany: parsed.company,
+        skillsString: parsed.skills,
+        experienceYears: parsed.isFresher ? "" : String(parsed.experienceYears),
+        location: parsed.location,
+        // aiMatchScore intentionally left blank: resume parsing extracts
+        // facts, it doesn't produce a match score without a job to match
+        // against. The backend defaults this to 80.0 if left unset.
+      }));
 
-    const randomProfile = profiles[Math.floor(Math.random() * profiles.length)];
-    const cleanName = parsedName.toLowerCase().includes("resume") || parsedName.toLowerCase().includes("cv") || parsedName.length < 3
-      ? "Nikhil Deshmukh" 
-      : parsedName;
-
-    const importedCandidate: TalentPoolCandidate = {
-      id: `tp-${Date.now()}`,
-      name: cleanName,
-      email: `${cleanName.toLowerCase().replace(/\s/g, ".")}@gmail.com`,
-      phone: `+91 ${Math.floor(Math.random() * 10000) + 90000} ${Math.floor(Math.random() * 10000) + 10000}`,
-      currentRole: randomProfile.role,
-      currentCompany: randomProfile.company,
-      skills: randomProfile.skills,
-      experienceYears: randomProfile.exp,
-      location: randomProfile.loc,
-      aiMatchScore: randomProfile.score,
-      availability: "Immediate",
-      noticePeriod: "Immediate",
-      lastContacted: new Date().toISOString().split("T")[0],
-      status: "Available",
-      department: randomProfile.dept,
-      education: {
-        degree: randomProfile.degree,
-        specialization: randomProfile.spec,
-        passingYear: "2021",
-        university: randomProfile.univ
-      },
-      tags: ["AI Imported", "Immediate Joiner", "Auto Screened"],
-      aiSummary: randomProfile.summary,
-      certifications: ["Professional Cloud Developer Certificate", "Scrum Alliance PO"],
-      projects: [
-        { name: "Automated Deployment Engine", description: "Redesigned deployment lifecycle reducing regression errors by 60%." }
-      ],
-      recruitmentHistory: {
-        appliedJob: randomProfile.role,
-        previousStage: "Auto Parsed",
-        interviewFeedback: "Candidate profile auto-analyzed from resume file structure with highly positive ratings.",
-        notSelectedReason: "N/A - Standby",
-        recruiterNotes: `Uploaded CV file: ${file.name}. Profile parsed with Aura AI parser. Nice resume structure.`
-      }
-    };
-
-    setTimeout(() => {
-      setCandidates(prev => [importedCandidate, ...prev]);
+      setIsImportModalOpen(false);
+      setIsAddModalOpen(true);
+      triggerToast(`📄 Parsed "${file.name}". Review the details and save.`, "info");
+    } catch (err: any) {
+      console.error("Resume parsing failed:", err);
+      const detail = err?.response?.data?.detail || err?.message || "Could not parse this file.";
+      triggerToast(`❌ ${detail}`, "warning");
+    } finally {
       setIsImporting(false);
       setImportFile(null);
-      setIsImportModalOpen(false);
-      triggerToast(`📥 Successfully imported and parsed "${importedCandidate.name}" (${importedCandidate.currentRole}) into the Talent Pool!`, "success");
-    }, 400);
+      setImportProgress(0);
+    }
   };
 
   // Unique list generators for filter options (Dynamic)
@@ -925,13 +884,13 @@ export default function TalentPoolView() {
   };
 
   // KPI calculations based on CURRENT state (but seeded to reflect requested metrics gracefully)
-  const totalInPool = candidates.length;
-  const aiRecommended = candidates.filter(c => c.aiMatchScore >= 90).length;
-  const immediateJoiners = candidates.filter(c => c.availability === "Immediate").length;
-  const averageMatchScore = Math.round(candidates.reduce((acc, curr) => acc + curr.aiMatchScore, 0) / candidates.length) || 0;
+  const totalInPool = poolStats.total;
+  const aiRecommended = poolStats.aiRecommendedCount;
+  const immediateJoiners = poolStats.immediateJoinersCount;
+  const averageMatchScore = poolStats.averageMatchScore;
 
   return (
-    <div id="talent-pool-page" className="w-full px-4 sm:px-6 lg:px-8 pt-7 sm:pt-8 pb-8 space-y-5 sm:space-y-6 text-slate-800 dark:text-slate-100 transition-colors">
+    <div id="talent-pool-page" className="ats-enterprise-page w-full px-4 sm:px-6 lg:px-8 pt-5 sm:pt-6 pb-8 space-y-5 text-slate-800 dark:text-slate-100 transition-colors">
       
       {/* Alert Toast Notification */}
       <AnimatePresence>
@@ -940,7 +899,7 @@ export default function TalentPoolView() {
             initial={{ opacity: 0, y: -20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -20, scale: 0.95 }}
-            className={`fixed top-4 right-4 z-[9999] flex items-center gap-3 px-4 py-3.5 rounded-xl shadow-xl border text-xs font-semibold ${
+            className={`fixed top-4 right-4 z-[9999] flex items-center gap-3 px-4 py-3.5 rounded-lg shadow-sm border text-xs font-semibold ${
               alertType === "success" 
                 ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800/40 text-emerald-800 dark:text-emerald-300"
                 : alertType === "warning"
@@ -958,13 +917,12 @@ export default function TalentPoolView() {
       </AnimatePresence>
 
       {/* Header Info Panel */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-4 border-b border-slate-200">
         <div>
-          <h2 className="font-display font-black text-2xl sm:text-3xl text-slate-950 dark:text-white tracking-tight flex items-center gap-2.5">
-            <Database className="h-7 w-7 text-brand-600" />
+          <h2 className="text-xl font-semibold text-slate-900 tracking-tight flex items-center gap-2.5">
             <span>Talent Pool</span>
           </h2>
-          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+          <p className="text-sm text-slate-500 mt-1">
             Manage and review saved candidate profiles.
           </p>
         </div>
@@ -980,7 +938,7 @@ export default function TalentPoolView() {
           </button>
           <button 
             onClick={() => setIsAddModalOpen(true)}
-            className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg flex items-center gap-2 cursor-pointer shadow-md shadow-indigo-600/10 transition-all"
+            className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg flex items-center gap-2 cursor-pointer shadow-sm shadow-indigo-600/10 transition-all"
           >
             <UserPlus className="h-4 w-4" />
             <span>Add Candidate</span>
@@ -995,7 +953,7 @@ export default function TalentPoolView() {
         {/* 1. Total Talent Pool Candidates */}
         <div 
           onClick={handleResetFilters}
-          className={`p-4 rounded-xl border shadow-sm flex flex-col justify-between cursor-pointer transition-all hover:scale-102 hover:shadow-md ${
+          className={`p-4 rounded-lg border shadow-sm flex flex-col justify-between cursor-pointer transition-all hover:scale-102 hover:shadow-sm ${
             (searchQuery === "" && selectedSkill === "all" && selectedRole === "all" && selectedExperience === "all" && selectedLocation === "all" && selectedDepartment === "all" && selectedEducation === "all" && selectedAvailability === "all" && selectedNoticePeriod === "all" && selectedMinScore === "all" && selectedCompany === "all" && selectedTag === "all" && selectedStatus === "all")
               ? "border-indigo-500 ring-2 ring-indigo-500/15 dark:ring-indigo-500/35 bg-indigo-50/10 dark:bg-indigo-950/10" 
               : "bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800/60"
@@ -1021,7 +979,7 @@ export default function TalentPoolView() {
             setShowAdvancedFilters(true);
             triggerToast("🤖 AI Filter applied: Candidates with Match Score ≥ 90%", "info");
           }}
-          className={`p-4 rounded-xl border shadow-sm flex flex-col justify-between cursor-pointer transition-all hover:scale-102 hover:shadow-md ${
+          className={`p-4 rounded-lg border shadow-sm flex flex-col justify-between cursor-pointer transition-all hover:scale-102 hover:shadow-sm ${
             selectedMinScore === "90"
               ? "border-indigo-500 ring-2 ring-indigo-500/15 dark:ring-indigo-500/35 bg-indigo-50/10 dark:bg-indigo-950/10" 
               : "bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800/60"
@@ -1029,7 +987,7 @@ export default function TalentPoolView() {
         >
           <div className="flex justify-between items-start">
             <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">AI Recommended</span>
-            <div className="p-1.5 rounded-lg bg-brand-50 dark:bg-brand-950/40 text-brand-600">
+            <div className="p-1.5 rounded-lg bg-brand-50 dark:bg-brand-950/40 text-[#1F3B75]">
               <Sparkles className="h-4 w-4" />
             </div>
           </div>
@@ -1047,7 +1005,7 @@ export default function TalentPoolView() {
             setShowAdvancedFilters(true);
             triggerToast("⚡ Availability Filter applied: Immediate Joiners", "info");
           }}
-          className={`p-4 rounded-xl border shadow-sm flex flex-col justify-between cursor-pointer transition-all hover:scale-102 hover:shadow-md ${
+          className={`p-4 rounded-lg border shadow-sm flex flex-col justify-between cursor-pointer transition-all hover:scale-102 hover:shadow-sm ${
             selectedAvailability === "Immediate"
               ? "border-indigo-500 ring-2 ring-indigo-500/15 dark:ring-indigo-500/35 bg-indigo-50/10 dark:bg-indigo-950/10" 
               : "bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800/60"
@@ -1072,7 +1030,7 @@ export default function TalentPoolView() {
             setSelectedStatus("Available");
             triggerToast("📌 Status Filter applied: Available Standby Profiles", "info");
           }}
-          className={`p-4 rounded-xl border shadow-sm flex flex-col justify-between cursor-pointer transition-all hover:scale-102 hover:shadow-md ${
+          className={`p-4 rounded-lg border shadow-sm flex flex-col justify-between cursor-pointer transition-all hover:scale-102 hover:shadow-sm ${
             selectedStatus === "Available"
               ? "border-indigo-500 ring-2 ring-indigo-500/15 dark:ring-indigo-500/35 bg-indigo-50/10 dark:bg-indigo-950/10" 
               : "bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800/60"
@@ -1099,7 +1057,7 @@ export default function TalentPoolView() {
             setSelectedStatus("Contacted");
             triggerToast("📌 Status Filter applied: Contacted Candidates", "info");
           }}
-          className={`p-4 rounded-xl border shadow-sm flex flex-col justify-between cursor-pointer transition-all hover:scale-102 hover:shadow-md ${
+          className={`p-4 rounded-lg border shadow-sm flex flex-col justify-between cursor-pointer transition-all hover:scale-102 hover:shadow-sm ${
             selectedStatus === "Contacted"
               ? "border-indigo-500 ring-2 ring-indigo-500/15 dark:ring-indigo-500/35 bg-indigo-50/10 dark:bg-indigo-950/10" 
               : "bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800/60"
@@ -1127,7 +1085,7 @@ export default function TalentPoolView() {
             setShowAdvancedFilters(true);
             triggerToast("🤖 AI Filter applied: Match Score ≥ 80%", "info");
           }}
-          className={`p-4 rounded-xl border shadow-sm flex flex-col justify-between cursor-pointer transition-all hover:scale-102 hover:shadow-md ${
+          className={`p-4 rounded-lg border shadow-sm flex flex-col justify-between cursor-pointer transition-all hover:scale-102 hover:shadow-sm ${
             selectedMinScore === "80"
               ? "border-indigo-500 ring-2 ring-indigo-500/15 dark:ring-indigo-500/35 bg-indigo-50/10 dark:bg-indigo-950/10" 
               : "bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800/60"
@@ -1147,50 +1105,9 @@ export default function TalentPoolView() {
       </div>
 
       {/* ==========================================
-          AI RECOMMENDATIONS & INSIGHTS CAROUSEL
-          ========================================== */}
-      <div className="bg-indigo-950 text-indigo-100 p-5 rounded-2xl border border-indigo-900 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6">
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-indigo-400 animate-pulse shrink-0" />
-            <h4 className="font-bold text-sm tracking-tight text-white">Talent AI Co-Pilot Recommendation Engine</h4>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1.5 text-xs text-indigo-300 font-medium">
-            <div className="flex items-center gap-2">
-              <span className="text-indigo-400">🤖</span>
-              <span>18 candidates match the active <strong className="text-white">Java Backend Developer</strong> opening.</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-indigo-400">🤖</span>
-              <span>7 candidates have an elite match score above <strong className="text-white">90%</strong>.</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-indigo-400">🤖</span>
-              <span>5 candidates are available for immediate joining.</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-indigo-400">🤖</span>
-              <span>3 candidates have not been contacted in over 90 days.</span>
-            </div>
-          </div>
-        </div>
-        <button 
-          onClick={() => {
-            setSelectedSkill("Java");
-            setSelectedMinScore("90");
-            triggerToast("💡 Filters focused to top matched Java Backend Developers.", "info");
-          }}
-          className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition-all shadow-lg shadow-indigo-950 flex items-center gap-2 shrink-0 self-stretch xl:self-auto justify-center cursor-pointer"
-        >
-          <span>Invite Recommended Candidates</span>
-          <ChevronRight className="h-4 w-4" />
-        </button>
-      </div>
-
-      {/* ==========================================
           SEARCH & FILTERS
           ========================================== */}
-      <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800/60 shadow-xs space-y-4">
+      <div className="bg-white dark:bg-slate-900 p-5 rounded-lg border border-slate-200/80 dark:border-slate-800/60 shadow-xs space-y-4">
         <div className="flex flex-col lg:flex-row gap-3">
           {/* Main Search Input */}
           <div className="flex-1 relative">
@@ -1200,7 +1117,7 @@ export default function TalentPoolView() {
               placeholder="Search by candidate name, current role, company or primary skills..." 
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-indigo-500/25 focus:border-indigo-500 focus:bg-white text-slate-700 dark:text-slate-200"
+              className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-indigo-500/25 focus:border-indigo-500 focus:bg-white text-slate-700 dark:text-slate-200"
             />
             {searchQuery && (
               <button onClick={() => setSearchQuery("")} className="absolute right-3.5 top-3 text-slate-400 hover:text-slate-600 cursor-pointer">
@@ -1211,20 +1128,20 @@ export default function TalentPoolView() {
 
           <div className="flex items-center gap-2 shrink-0">
             {/* Quick Tag Filter */}
-            <select
+            <SearchableSelect
               value={selectedTag}
               onChange={(e) => setSelectedTag(e.target.value)}
-              className="px-3 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20"
+              className="px-3 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-300 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20"
             >
               <option value="all">🏷️ Filter by Tag</option>
               {allTagsList.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
+            </SearchableSelect>
 
             {/* Quick Status Filter */}
-            <select
+            <SearchableSelect
               value={selectedStatus}
               onChange={(e) => setSelectedStatus(e.target.value)}
-              className="px-3 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20"
+              className="px-3 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-300 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20"
             >
               <option value="all">📌 Status: All</option>
               <option value="Available">Available</option>
@@ -1232,12 +1149,12 @@ export default function TalentPoolView() {
               <option value="Interested">Interested</option>
               <option value="Not Interested">Not Interested</option>
               <option value="Archived">Archived</option>
-            </select>
+            </SearchableSelect>
 
             {/* Advanced Filters Toggle Button */}
             <button 
               onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-              className={`px-4 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-2 cursor-pointer transition-all ${
+              className={`px-4 py-2.5 rounded-lg border text-xs font-bold flex items-center gap-2 cursor-pointer transition-all ${
                 showAdvancedFilters || selectedSkill !== "all" || selectedRole !== "all" || selectedExperience !== "all" || selectedLocation !== "all" || selectedDepartment !== "all" || selectedEducation !== "all" || selectedAvailability !== "all" || selectedNoticePeriod !== "all" || selectedMinScore !== "all" || selectedCompany !== "all"
                   ? "bg-indigo-50 dark:bg-indigo-950 border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300"
                   : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 text-slate-700 dark:text-slate-300"
@@ -1252,7 +1169,7 @@ export default function TalentPoolView() {
             {(searchQuery || selectedSkill !== "all" || selectedRole !== "all" || selectedExperience !== "all" || selectedLocation !== "all" || selectedDepartment !== "all" || selectedEducation !== "all" || selectedAvailability !== "all" || selectedNoticePeriod !== "all" || selectedMinScore !== "all" || selectedCompany !== "all" || selectedTag !== "all" || selectedStatus !== "all") && (
               <button 
                 onClick={handleResetFilters}
-                className="p-2.5 border border-rose-200 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                className="p-2.5 border border-rose-200 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20 rounded-lg text-xs font-bold transition-all cursor-pointer"
                 title="Reset all filters"
               >
                 <X className="h-4 w-4" />
@@ -1275,33 +1192,33 @@ export default function TalentPoolView() {
                 {/* 1. Skill */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Primary Skills</label>
-                  <select 
+                  <SearchableSelect 
                     value={selectedSkill} 
                     onChange={(e) => setSelectedSkill(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold focus:outline-hidden text-slate-700 dark:text-slate-300"
                   >
                     <option value="all">All Skills</option>
                     {allSkillsList.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
+                  </SearchableSelect>
                 </div>
 
                 {/* 2. Job Role */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Job Role</label>
-                  <select 
+                  <SearchableSelect 
                     value={selectedRole} 
                     onChange={(e) => setSelectedRole(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold focus:outline-hidden text-slate-700 dark:text-slate-300"
                   >
                     <option value="all">All Roles</option>
                     {allRolesList.map(r => <option key={r} value={r}>{r}</option>)}
-                  </select>
+                  </SearchableSelect>
                 </div>
 
                 {/* 3. Experience */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Experience</label>
-                  <select 
+                  <SearchableSelect 
                     value={selectedExperience} 
                     onChange={(e) => setSelectedExperience(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold focus:outline-hidden text-slate-700 dark:text-slate-300"
@@ -1311,26 +1228,26 @@ export default function TalentPoolView() {
                     <option value="1-3">1 - 3 Years</option>
                     <option value="3-5">3 - 5 Years</option>
                     <option value="5+">5+ Years</option>
-                  </select>
+                  </SearchableSelect>
                 </div>
 
                 {/* 4. Location */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Location</label>
-                  <select 
+                  <SearchableSelect 
                     value={selectedLocation} 
                     onChange={(e) => setSelectedLocation(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold focus:outline-hidden text-slate-700 dark:text-slate-300"
                   >
                     <option value="all">All Locations</option>
                     {allLocationsList.map(l => <option key={l} value={l}>{l}</option>)}
-                  </select>
+                  </SearchableSelect>
                 </div>
 
                 {/* 5. Department */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Department</label>
-                  <select 
+                  <SearchableSelect 
                     value={selectedDepartment} 
                     onChange={(e) => setSelectedDepartment(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold focus:outline-hidden text-slate-700 dark:text-slate-300"
@@ -1340,13 +1257,13 @@ export default function TalentPoolView() {
                     <option value="Product">Product</option>
                     <option value="QA">QA</option>
                     <option value="Operations">Operations</option>
-                  </select>
+                  </SearchableSelect>
                 </div>
 
                 {/* 6. Education */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Education</label>
-                  <select 
+                  <SearchableSelect 
                     value={selectedEducation} 
                     onChange={(e) => setSelectedEducation(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold focus:outline-hidden text-slate-700 dark:text-slate-300"
@@ -1357,13 +1274,13 @@ export default function TalentPoolView() {
                     <option value="BSc">BSc</option>
                     <option value="MS">MS</option>
                     <option value="MBA">MBA</option>
-                  </select>
+                  </SearchableSelect>
                 </div>
 
                 {/* 7. Availability */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Availability</label>
-                  <select 
+                  <SearchableSelect 
                     value={selectedAvailability} 
                     onChange={(e) => setSelectedAvailability(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold focus:outline-hidden text-slate-700 dark:text-slate-300"
@@ -1374,13 +1291,13 @@ export default function TalentPoolView() {
                     <option value="30 days">30 Days</option>
                     <option value="60 days">60 Days</option>
                     <option value="90 days">90 Days</option>
-                  </select>
+                  </SearchableSelect>
                 </div>
 
                 {/* 8. Notice Period */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Notice Period</label>
-                  <select 
+                  <SearchableSelect 
                     value={selectedNoticePeriod} 
                     onChange={(e) => setSelectedNoticePeriod(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold focus:outline-hidden text-slate-700 dark:text-slate-300"
@@ -1391,7 +1308,7 @@ export default function TalentPoolView() {
                     <option value="1 Month">1 Month</option>
                     <option value="2 Months">2 Months</option>
                     <option value="3 Months">3 Months</option>
-                  </select>
+                  </SearchableSelect>
                 </div>
 
                 {/* 9. AI Score */}
@@ -1412,14 +1329,14 @@ export default function TalentPoolView() {
                 {/* 10. Current Company */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Current Company</label>
-                  <select 
+                  <SearchableSelect 
                     value={selectedCompany} 
                     onChange={(e) => setSelectedCompany(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold focus:outline-hidden text-slate-700 dark:text-slate-300"
                   >
                     <option value="all">All Companies</option>
                     {allCompaniesList.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
+                  </SearchableSelect>
                 </div>
 
               </div>
@@ -1437,7 +1354,7 @@ export default function TalentPoolView() {
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 15 }}
-            className="p-3.5 bg-slate-900 text-white rounded-xl shadow-lg flex flex-col md:flex-row justify-between items-center gap-3 border border-slate-800"
+            className="p-3.5 bg-slate-900 text-white rounded-lg shadow-sm flex flex-col md:flex-row justify-between items-center gap-3 border border-slate-800"
           >
             <div className="flex items-center gap-2.5">
               <span className="h-2 w-2 rounded-full bg-indigo-500 animate-ping" />
@@ -1530,7 +1447,7 @@ export default function TalentPoolView() {
       {/* ==========================================
           MAIN TALENT TABLE & INTERACTIVE GRID
           ========================================== */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800/60 shadow-xs overflow-hidden">
+      <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200/80 dark:border-slate-800/60 shadow-xs overflow-hidden">
         {filteredCandidates.length === 0 ? (
           /* Empty State */
           <div className="p-16 text-center max-w-md mx-auto space-y-4">
@@ -1822,7 +1739,7 @@ export default function TalentPoolView() {
               animate={{ x: 0 }}
               exit={{ x: "100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="fixed top-0 right-0 h-screen w-full sm:w-130 md:w-160 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 z-50 shadow-2xl flex flex-col overflow-hidden text-left"
+              className="fixed top-0 right-0 h-screen w-full sm:w-130 md:w-160 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 z-50 shadow-sm flex flex-col overflow-hidden text-left"
             >
               
               {/* Drawer Header */}
@@ -1844,7 +1761,7 @@ export default function TalentPoolView() {
                 
                 {/* 1. Personal Information */}
                 <div className="flex flex-col sm:flex-row gap-5 items-start">
-                  <div className="h-16 w-16 rounded-2xl bg-indigo-600 text-white font-black text-xl flex items-center justify-center shadow-lg shadow-indigo-600/25 shrink-0">
+                  <div className="h-16 w-16 rounded-lg bg-indigo-600 text-white font-black text-xl flex items-center justify-center shadow-sm shadow-indigo-600/25 shrink-0">
                     {selectedCandidate.name?.split(" ").map(n => n[0]).join("") || ""}
                   </div>
                   <div className="space-y-1.5 flex-1 min-w-0">
@@ -1859,7 +1776,7 @@ export default function TalentPoolView() {
                       <span className="flex items-center gap-1">📍 {selectedCandidate.location}</span>
                     </div>
                   </div>
-                  <div className="inline-block px-2.5 py-1.5 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900 rounded-xl font-black font-mono text-sm text-indigo-600 dark:text-indigo-400 self-start">
+                  <div className="inline-block px-2.5 py-1.5 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900 rounded-lg font-black font-mono text-sm text-indigo-600 dark:text-indigo-400 self-start">
                     AI: {selectedCandidate.aiMatchScore}%
                   </div>
                 </div>
@@ -1882,10 +1799,10 @@ export default function TalentPoolView() {
                 {/* 2. Professional Summary */}
                 <div className="space-y-2">
                   <h4 className="text-[10.5px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
-                    <Sparkles className="h-3.5 w-3.5 text-brand-600" />
+                    <Sparkles className="h-3.5 w-3.5 text-[#1F3B75]" />
                     <span>Aura AI Professional Summary</span>
                   </h4>
-                  <div className="p-4 bg-brand-50/40 dark:bg-brand-950/10 border border-brand-100/50 dark:border-brand-900/35 rounded-xl text-xs text-slate-700 dark:text-slate-300 leading-relaxed italic">
+                  <div className="p-4 bg-brand-50/40 dark:bg-brand-950/10 border border-brand-100/50 dark:border-brand-900/35 rounded-lg text-xs text-slate-700 dark:text-slate-300 leading-relaxed italic">
                     "{selectedCandidate.aiSummary || selectedCandidate.resumeText || "No summary available."}"
                   </div>
                 </div>
@@ -1914,7 +1831,7 @@ export default function TalentPoolView() {
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {/* General Bio Info */}
-                    <div className="p-4 bg-slate-50 dark:bg-slate-950/20 rounded-xl border border-slate-100 dark:border-slate-800 space-y-2.5">
+                    <div className="p-4 bg-slate-50 dark:bg-slate-950/20 rounded-lg border border-slate-100 dark:border-slate-800 space-y-2.5">
                       <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200">
                         <Award className="h-4 w-4 text-slate-400" />
                         <span>Experience Metrics</span>
@@ -1927,7 +1844,7 @@ export default function TalentPoolView() {
                     </div>
 
                     {/* Education */}
-                    <div className="p-4 bg-slate-50 dark:bg-slate-950/20 rounded-xl border border-slate-100 dark:border-slate-800 space-y-2.5">
+                    <div className="p-4 bg-slate-50 dark:bg-slate-950/20 rounded-lg border border-slate-100 dark:border-slate-800 space-y-2.5">
                       <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200">
                         <BookOpen className="h-4 w-4 text-slate-400" />
                         <span>Education Profile</span>
@@ -1983,7 +1900,7 @@ export default function TalentPoolView() {
                   </h4>
 
                   <div className="space-y-3 text-xs leading-relaxed">
-                    <div className="grid grid-cols-3 gap-3 bg-slate-50 dark:bg-slate-950/40 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                    <div className="grid grid-cols-3 gap-3 bg-slate-50 dark:bg-slate-950/40 p-3 rounded-lg border border-slate-200 dark:border-slate-800">
                       <div>
                         <p className="text-[9.5px] font-bold text-slate-400 uppercase">PREVIOUS ROLE</p>
                         <p className="font-bold text-slate-800 dark:text-slate-200 mt-0.5">
@@ -2004,7 +1921,7 @@ export default function TalentPoolView() {
                       </div>
                     </div>
 
-                    <div className="p-3.5 bg-slate-50 dark:bg-slate-950/30 rounded-xl border border-slate-100 dark:border-slate-850/80 space-y-1.5">
+                    <div className="p-3.5 bg-slate-50 dark:bg-slate-950/30 rounded-lg border border-slate-100 dark:border-slate-850/80 space-y-1.5">
                       <p className="text-[9.5px] font-black text-indigo-500 uppercase tracking-wider font-mono">Last Interview Feedback</p>
                       <p className="text-slate-650 dark:text-slate-350 italic">"{selectedCandidate.recruitmentHistory?.interviewFeedback || "Profile archived for talent pool."}"</p>
                       <p className="text-[10px] text-slate-400 mt-1 block">
@@ -2015,7 +1932,7 @@ export default function TalentPoolView() {
                     {/* Active Recruiter Notes Block */}
                     <div className="space-y-2">
                       <p className="text-[10px] font-bold text-slate-400">RECRUITER EVALUATION NOTES</p>
-                      <div className="p-3 bg-indigo-50/15 dark:bg-indigo-950/10 border border-indigo-100/30 rounded-xl text-slate-700 dark:text-slate-300">
+                      <div className="p-3 bg-indigo-50/15 dark:bg-indigo-950/10 border border-indigo-100/30 rounded-lg text-slate-700 dark:text-slate-300">
                         {selectedCandidate.recruitmentHistory?.recruiterNotes ? (
                           <p>{selectedCandidate.recruitmentHistory.recruiterNotes}</p>
                         ) : (
@@ -2027,7 +1944,7 @@ export default function TalentPoolView() {
                 </div>
 
                 {/* Add New Recruiter Note */}
-                <div className="space-y-2 bg-slate-50 dark:bg-slate-950/20 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
+                <div className="space-y-2 bg-slate-50 dark:bg-slate-950/20 p-4 rounded-lg border border-slate-100 dark:border-slate-800">
                   <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider block">Add Recruiter Standby Note</label>
                   <div className="flex gap-2.5 mt-1.5">
                     <input 
@@ -2092,7 +2009,7 @@ export default function TalentPoolView() {
                       handleInviteToApply(selectedCandidate);
                       setSelectedCandidate(null);
                     }}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg cursor-pointer transition-all shadow-md shadow-indigo-600/15"
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg cursor-pointer transition-all shadow-sm shadow-indigo-600/15"
                   >
                     Invite to Apply
                   </button>
@@ -2124,7 +2041,7 @@ export default function TalentPoolView() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="fixed inset-x-4 top-1/2 -translate-y-1/2 md:max-w-xl mx-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 z-[1000] rounded-2xl shadow-2xl flex flex-col overflow-hidden text-left"
+              className="fixed inset-x-4 top-1/2 -translate-y-1/2 md:max-w-xl mx-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 z-[1000] rounded-lg shadow-sm flex flex-col overflow-hidden text-left"
             >
               <div className="p-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 flex justify-between items-center">
                 <div className="flex items-center gap-2">
@@ -2203,7 +2120,7 @@ export default function TalentPoolView() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="fixed inset-x-4 top-1/2 -translate-y-1/2 md:max-w-2xl mx-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 z-[1000] rounded-2xl shadow-2xl flex flex-col overflow-hidden text-left"
+              className="fixed inset-x-4 top-1/2 -translate-y-1/2 md:max-w-2xl mx-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 z-[1000] rounded-lg shadow-sm flex flex-col overflow-hidden text-left"
             >
               <div className="p-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 flex justify-between items-center shrink-0">
                 <div className="flex items-center gap-2">
@@ -2294,7 +2211,7 @@ export default function TalentPoolView() {
                       </div>
                       <div className="space-y-1">
                         <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">Department</label>
-                        <select 
+                        <SearchableSelect 
                           value={newCandidateForm.department}
                           onChange={(e) => setNewCandidateForm(prev => ({ ...prev, department: e.target.value as any }))}
                           className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold focus:outline-hidden text-slate-700 dark:text-slate-200"
@@ -2305,7 +2222,7 @@ export default function TalentPoolView() {
                           <option value="Operations">Operations</option>
                           <option value="Design">Design</option>
                           <option value="Sales">Sales</option>
-                        </select>
+                        </SearchableSelect>
                       </div>
                       <div className="space-y-1">
                         <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">Experience (Years)</label>
@@ -2320,7 +2237,7 @@ export default function TalentPoolView() {
                       </div>
                       <div className="space-y-1">
                         <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">Availability</label>
-                        <select 
+                        <SearchableSelect 
                           value={newCandidateForm.availability}
                           onChange={(e) => setNewCandidateForm(prev => ({ ...prev, availability: e.target.value as any }))}
                           className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold focus:outline-hidden text-slate-700 dark:text-slate-200"
@@ -2330,11 +2247,11 @@ export default function TalentPoolView() {
                           <option value="30 days">30 days</option>
                           <option value="60 days">60 days</option>
                           <option value="90 days">90 days</option>
-                        </select>
+                        </SearchableSelect>
                       </div>
                       <div className="space-y-1">
                         <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">Notice Period</label>
-                        <select 
+                        <SearchableSelect 
                           value={newCandidateForm.noticePeriod}
                           onChange={(e) => setNewCandidateForm(prev => ({ ...prev, noticePeriod: e.target.value as any }))}
                           className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold focus:outline-hidden text-slate-700 dark:text-slate-200"
@@ -2344,7 +2261,7 @@ export default function TalentPoolView() {
                           <option value="1 Month">1 Month</option>
                           <option value="2 Months">2 Months</option>
                           <option value="3 Months">3 Months</option>
-                        </select>
+                        </SearchableSelect>
                       </div>
                       <div className="space-y-1 md:col-span-2">
                         <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">Skills (Comma-separated)</label>
@@ -2477,7 +2394,7 @@ export default function TalentPoolView() {
                   </button>
                   <button 
                     type="submit"
-                    className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg flex items-center gap-1.5 cursor-pointer shadow-md shadow-indigo-600/10"
+                    className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg flex items-center gap-1.5 cursor-pointer shadow-sm shadow-indigo-600/10"
                   >
                     <Plus className="h-4 w-4" />
                     <span>Add to Talent Pool</span>
@@ -2511,7 +2428,7 @@ export default function TalentPoolView() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="fixed inset-x-4 top-1/2 -translate-y-1/2 md:max-w-md mx-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 z-[1000] rounded-2xl shadow-2xl flex flex-col overflow-hidden text-left"
+              className="fixed inset-x-4 top-1/2 -translate-y-1/2 md:max-w-md mx-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 z-[1000] rounded-lg shadow-sm flex flex-col overflow-hidden text-left"
             >
               <div className="p-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 flex justify-between items-center">
                 <div className="flex items-center gap-2">
@@ -2544,7 +2461,7 @@ export default function TalentPoolView() {
                     {/* Simulated progress track */}
                     <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-950 rounded-full overflow-hidden border border-slate-200/50 dark:border-slate-800/50">
                       <motion.div 
-                        className="h-full bg-brand-600"
+                        className="h-full bg-[#1F3B75]"
                         animate={{ width: `${importProgress}%` }}
                         transition={{ duration: 0.1 }}
                       />
@@ -2558,7 +2475,7 @@ export default function TalentPoolView() {
                       onDragOver={handleImportDrag}
                       onDragLeave={handleImportDrag}
                       onDrop={handleImportDrop}
-                      className={`p-8 border-2 border-dashed rounded-xl flex flex-col items-center justify-center gap-3 transition-all ${
+                      className={`p-8 border-2 border-dashed rounded-lg flex flex-col items-center justify-center gap-3 transition-all ${
                         importDragActive 
                           ? "border-indigo-500 bg-indigo-50/20 dark:bg-indigo-950/20 scale-98" 
                           : "border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/10 hover:border-indigo-400"
@@ -2591,7 +2508,7 @@ export default function TalentPoolView() {
                     </div>
 
                     {/* Pro tips or features inside importer */}
-                    <div className="p-3.5 bg-indigo-950 text-indigo-200 rounded-xl border border-indigo-900 text-left space-y-1.5">
+                    <div className="p-3.5 bg-indigo-950 text-indigo-200 rounded-lg border border-indigo-900 text-left space-y-1.5">
                       <p className="text-[10.5px] font-black text-white flex items-center gap-1.5">
                         <Sparkles className="h-3.5 w-3.5 text-indigo-400 animate-pulse" />
                         <span>Aura Intelligent Parser Features</span>

@@ -5,8 +5,10 @@ class ApplicationBase(BaseModel):
     id: Optional[str] = None
     applicationId: Optional[str] = None # e.g. APP-0001
     candidateId: str
-    jobId: str
-    status: Optional[str] = "Applied"
+    # NULL when the job was deleted: delete_job() keeps the application and clears
+    # its jobId. ApplicationCreate below still requires a job for new applications.
+    jobId: Optional[str] = None
+    status: Optional[str] = "New"
     source: Optional[str] = "Career Portal"
     atsScore: Optional[int] = None
     appliedRole: Optional[str] = None
@@ -32,5 +34,8 @@ class ApplicationUpdate(BaseModel):
     aiEvaluation: Optional[Any] = None
 
 class ApplicationResponse(ApplicationBase):
+    # Read-only: set by the backend ("Open" on apply, "On Hold" while the job is closed/draft).
+    applicationState: Optional[str] = None
+
     class Config:
         from_attributes = True

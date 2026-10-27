@@ -97,12 +97,13 @@ export interface Job {
   candidateCount: number;
 }
 
+// The application stages, exactly as the backend stores them (application_stage in the database).
 export enum ApplicationStatus {
-  APPLIED = "Applied",
-  SCREENING = "Screening",
+  NEW = "New",
   SHORTLISTED = "Shortlisted",
   INTERVIEWING = "Interviewing",
-  OFFERED = "Offered",
+  OFFER = "Offer",
+  HIRED = "Hired",
   REJECTED = "Rejected"
 }
 
@@ -170,6 +171,8 @@ export interface Candidate {
   inHandSalary?: string;
   projectsWorkedOn?: string;
   relocateToPune?: string;
+  /** The candidate's preferred Work Mode (not the job's): Work from Office, Hybrid or Work from Home. */
+  preferredWorkMode?: string;
 }
 
 export interface DashboardStats {
@@ -178,10 +181,9 @@ export interface DashboardStats {
   activeCandidates: number;
   totalCandidates: number;
   talentPoolCount: number;
-  pendingReviews: number;
   aiShortlistedCount: number;
   interviewStageCount: number;
-  offeredCount: number;
+  offerCount: number;
   hiredCount: number;
   rejectedCount: number;
   appsTodayCount: number;
@@ -224,6 +226,14 @@ export interface InterviewFeedback {
   recommendation: RecommendationType;
 }
 
+/** A person from the backend people directory (GET /api/directory/people). */
+export interface DirectoryPerson {
+  id: string;
+  name: string;
+  email: string;
+  role?: string;
+}
+
 export interface Interview {
   id: string;
   applicationId: string;
@@ -232,7 +242,12 @@ export interface Interview {
   jobId: string;
   jobTitle: string;
   round: string;
+  /** Comma-joined names of `interviewers`, for places that show one text value. */
   interviewer: string;
+  /** The CC recipients of the invitation email. At least one person is required when scheduling. */
+  interviewers?: DirectoryPerson[];
+  /** Optional; hidden from the other recipients. */
+  bcc?: DirectoryPerson[];
   date: string;
   time: string;
   type: InterviewType;

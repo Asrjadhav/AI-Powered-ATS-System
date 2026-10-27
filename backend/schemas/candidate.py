@@ -1,4 +1,6 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
+
+from services import work_mode
 from typing import Optional, List, Dict, Any
 
 class CandidateBase(BaseModel):
@@ -40,13 +42,21 @@ class CandidateBase(BaseModel):
     inHandSalary: Optional[str] = None
     projectsWorkedOn: Optional[str] = None
     relocateToPune: Optional[str] = None
+    # The candidate's own preference (not the job's work mode): Work from Office, Hybrid or Work from Home.
+    preferredWorkMode: Optional[str] = None
     
     createdAt: Optional[str] = None
     updatedAt: Optional[str] = None
     createdBy: Optional[str] = None
-    status: Optional[str] = "Applied"
+    status: Optional[str] = "New"
     aiScore: Optional[int] = None
     timeline: Optional[Any] = None
+
+    @field_validator("preferredWorkMode", mode="before")
+    @classmethod
+    def _check_preferred_work_mode(cls, value):
+        return work_mode.normalize(value)
+
 
 class CandidateCreate(CandidateBase):
     email: str # Email is required for creating a Candidate profile
@@ -74,9 +84,15 @@ class CandidateUpdate(BaseModel):
     hrApprovalStatus: Optional[str] = None
     customFields: Optional[Any] = None
     totalExperienceMonths: Optional[int] = None
+    preferredWorkMode: Optional[str] = None
     status: Optional[str] = None
     jobId: Optional[str] = None
     selectedJobId: Optional[str] = None
+
+    @field_validator("preferredWorkMode", mode="before")
+    @classmethod
+    def _check_preferred_work_mode(cls, value):
+        return work_mode.normalize(value)
 
 class CandidateResponse(CandidateBase):
     class Config:

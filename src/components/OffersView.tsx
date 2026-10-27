@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import axios from "axios";
 import { OfferRepository } from "../repositories/offerRepository";
+import { NotificationRepository } from "../repositories/notificationRepository";
 import { formatJobId } from "../repositories/repositoryUtils";
 import { 
   Award, 
@@ -38,10 +39,8 @@ import {
   ListChecks, 
   ShieldCheck, 
   CheckSquare, 
-  Square, 
+  Square,
   ArrowRight,
-  TrendingUp,
-  TrendingDown,
   MessageSquare,
   FileSpreadsheet,
   CheckCircle,
@@ -51,6 +50,7 @@ import {
   UserCheck2,
   BadgeCheck
 } from "lucide-react";
+import { SearchableSelect } from "./common/SearchableSelect";
 
 export type OfferWorkflowStage = 
   | "Interview Completed"
@@ -65,6 +65,28 @@ export type OfferWorkflowStage =
   | "Candidate Response"
   | "Joining Process"
   | "Employee Joined";
+
+// The stages shown on the Offers page (tabs, list badge and stepper). Offers keep the finer-grained
+// `workflowStage` values they were saved with; each one is grouped into the stage that contains it
+// here, so merging stages needs no data change.
+export const OFFER_STAGES = [
+  {
+    id: "Pre-Offer Discussion",
+    name: "Pre-Offer Discussion",
+    label: "1. Pre-Offer Discussion",
+    includes: ["Verbal Discussion", "Salary Negotiation", "Verbal & Salary Negotiation", "Verbal Salary Discussion", "Candidate Decision"]
+  },
+  { id: "Documentation", name: "Documentation", label: "2. Documentation", includes: ["Offer Generation"] },
+  { id: "Offer Email Sent", name: "Email Sent", label: "3. Email Sent", includes: [] as string[] },
+  { id: "Candidate Response", name: "Candidate Response", label: "4. Candidate Response", includes: [] as string[] },
+  { id: "Joining Process", name: "Onboarding", label: "5. Onboarding", includes: [] as string[] },
+  { id: "Employee Joined", name: "Joined", label: "6. Joined", includes: [] as string[] }
+];
+
+/** The merged stage a saved workflowStage belongs to, or undefined when it belongs to none (e.g. "Interview Completed"). */
+export function getOfferStage(workflowStage?: string | null) {
+  return OFFER_STAGES.find(s => s.id === workflowStage || s.includes.includes(workflowStage as string));
+}
 
 export interface VerbalDiscussionData {
   discussionDate: string;
@@ -535,38 +557,38 @@ export default function OffersView({ initialStatusFilter, clearInitialStatusFilt
       const enhanced = (Array.isArray(data) ? data : []).map((off: Offer) => ({
         ...off,
         workflowStage: off.workflowStage || (off.status === "Accepted" ? "Joining Process" : off.status === "Joined" ? "Employee Joined" : "Offer Generation"),
-        documents: off.documents || DEFAULT_13_DOCUMENTS,
-        joiningChecklist: off.joiningChecklist || DEFAULT_10_JOINING_TASKS,
+        documents: off.documents || [],
+        joiningChecklist: off.joiningChecklist || [],
         verbalDiscussion: off.verbalDiscussion || {
           discussionDate: off.offerDate || "2026-07-15",
           recruiter: off.recruiter || "Sophia Patel",
           candidateName: off.candidateName,
           jobTitle: off.jobTitle,
-          currentCtc: "$110,000",
-          expectedCtc: "$130,000",
-          proposedSalary: off.offeredSalary || "$120,000",
+          currentCtc: "",
+          expectedCtc: "",
+          proposedSalary: off.offeredSalary || "",
           proposedDesignation: off.jobTitle,
-          joiningLocation: off.workLocation || "Remote",
-          noticePeriod: off.noticePeriod || "30 Days",
-          discussionNotes: "Initial verbal discussion completed.",
-          discussionStatus: "Completed"
+          joiningLocation: off.workLocation || "",
+          noticePeriod: off.noticePeriod || "",
+          discussionNotes: "",
+          discussionStatus: "Pending"
         },
         salaryNegotiation: off.salaryNegotiation || {
-          currentSalary: "$110,000",
-          expectedSalary: "$130,000",
-          companyOffer: "$120,000",
-          finalAgreedSalary: off.offeredSalary || "$120,000",
+          currentSalary: "",
+          expectedSalary: "",
+          companyOffer: off.offeredSalary || "",
+          finalAgreedSalary: off.offeredSalary || "",
           finalDesignation: off.jobTitle,
-          bonus: off.bonus || "10%",
-          joiningBonus: "$5,000",
-          variablePay: "5%",
-          negotiationNotes: "Salary agreement finalized.",
-          negotiationStatus: "Accepted"
+          bonus: off.bonus || "",
+          joiningBonus: "",
+          variablePay: "",
+          negotiationNotes: "",
+          negotiationStatus: "Pending"
         },
         candidateDecision: off.candidateDecision || {
-          decision: off.status === "Accepted" ? "Accept verbally" : "Need time",
-          timestamp: off.offerDate || "2026-07-15",
-          notes: "Candidate verbally acknowledged offer terms."
+          decision: off.status === "Accepted" ? "Accept verbally" : "Pending",
+          timestamp: off.offerDate || "",
+          notes: ""
         }
       }));
       setOffers(enhanced);
@@ -714,18 +736,9 @@ export default function OffersView({ initialStatusFilter, clearInitialStatusFilt
       const matchesExp = filterExpLevel ? offer.experienceLevel === filterExpLevel : true;
       const matchesLocation = filterLocation ? offer.location === filterLocation : true;
 
-      const matchesStage = activeStageFilter === "all" 
-        ? true 
-        : offer.workflowStage === activeStageFilter ||
-          (activeStageFilter === "Verbal Salary Discussion" && (
-            offer.workflowStage === "Verbal Discussion" || 
-            offer.workflowStage === "Salary Negotiation" || 
-            offer.workflowStage === "Verbal & Salary Negotiation" ||
-            offer.workflowStage === "Verbal Salary Discussion"
-          )) ||
-          (activeStageFilter === "Candidate Decision" && (
-            offer.workflowStage === "Candidate Decision"
-          ));
+      const matchesStage = activeStageFilter === "all"
+        ? true
+        : getOfferStage(offer.workflowStage)?.id === activeStageFilter;
 
       return matchesSearch && matchesJob && matchesDept && matchesRecruiter && 
              matchesJoining && matchesOfferDate && matchesExp && matchesLocation && matchesStage;
@@ -909,7 +922,7 @@ encureIT Systems Pvt Ltd`;
   const logNotificationAndEmail = async (type: string, title: string, message: string, candidateEmail: string) => {
     try {
       // Post Notification
-      await axios.post("/api/notifications", {
+      await NotificationRepository.create({
         type,
         title,
         description: message,
@@ -1062,73 +1075,38 @@ encureIT Systems Pvt Ltd`;
   };
 
   return (
-    <div className="w-full px-4 sm:px-6 lg:px-8 pt-7 sm:pt-8 pb-8 space-y-5 sm:space-y-6 text-slate-800 dark:text-slate-100 transition-all text-left">
+    <div className="ats-enterprise-page w-full px-4 sm:px-6 lg:px-8 pt-5 sm:pt-6 pb-8 space-y-5 text-slate-800 dark:text-slate-100 transition-all text-left">
       
       {/* Toast Notification banner */}
       {toastMessage && (
-        <div className="fixed top-20 right-6 z-50 bg-slate-900 border border-slate-800 text-white rounded-xl shadow-2xl px-5 py-3.5 flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-200">
-          <Bell className="h-4.5 w-4.5 text-brand-600 animate-bounce" />
+        <div className="fixed top-20 right-6 z-50 bg-slate-900 border border-slate-800 text-white rounded-lg shadow-sm px-5 py-3.5 flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-200">
+          <Bell className="h-4.5 w-4.5 text-[#1F3B75] animate-bounce" />
           <p className="text-xs font-bold leading-none">{toastMessage}</p>
         </div>
       )}
 
       {/* Header Container */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-slate-200">
         <div>
-          <h2 className="font-display font-black text-2xl sm:text-3xl text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
-            <Award className="h-7 w-7 text-brand-600" />
+          <h2 className="text-xl font-semibold text-slate-900 tracking-tight flex items-center gap-2.5">
             <span>Offers</span>
           </h2>
-          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5 font-medium text-left">
+          <p className="text-sm text-slate-500 mt-1 text-left">
             Manage candidate offers and offer status.
           </p>
         </div>
           
-          <div className="flex items-center gap-2 shrink-0">
-            <button 
-              onClick={() => {
-                setAiForm({
-                  candidateName: "",
-                  candidateEmail: "",
-                  candidatePhone: "",
-                  jobTitle: "",
-                  department: "Engineering",
-                  recruiter: "Sophia Patel",
-                  aiMatchScore: 85,
-                  offeredSalary: "$120,000 / year",
-                  offeredSalaryNum: 120000,
-                  bonus: "10% Performance Bonus",
-                  benefits: "Medical/Dental Gold, Unlimited PTO, Equity",
-                  reportingManager: "Marcus Vance (Engineering Lead)",
-                  employmentType: "Full-time",
-                  workLocation: "San Francisco, CA (Hybrid)",
-                  noticePeriod: "30 Days",
-                  joiningDate: "2026-09-01",
-                  offerDate: new Date().toISOString().split("T")[0],
-                  expiryDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-                  experienceLevel: "Senior",
-                  location: "San Francisco",
-                  companyName: "encureIT Systems Pvt Ltd"
-                });
-                setIsAIModalOpen(true);
-              }}
-              className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg shadow-sm hover:shadow-indigo-500/10 transition-all flex items-center gap-2 cursor-pointer"
-            >
-              <Sparkles className="h-4 w-4 animate-pulse" />
-              <span>Generate Offer using AI</span>
-            </button>
-          </div>
         </div>
 
       {/* TOP SUMMARY CARDS (6 Metrics) */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         {[
-          { title: "Total Contracts", value: metrics.total, status: "", change: "+12.4%", up: true, icon: Award, color: "text-indigo-600 bg-indigo-50 dark:bg-indigo-950/30 font-bold" },
-          { title: "Pending Offers", value: metrics.pending, status: "Pending", change: "+8.2%", up: true, icon: Clock, color: "text-amber-600 bg-amber-50 dark:bg-amber-950/30" },
-          { title: "Accepted Offers", value: metrics.accepted, status: "Accepted", change: "+15.3%", up: true, icon: CheckCircle2, color: "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30" },
-          { title: "Joined Employees", value: metrics.joined, status: "Joined", change: "+20.1%", up: true, icon: BadgeCheck, color: "text-blue-600 bg-blue-50 dark:bg-blue-950/30" },
-          { title: "Rejected Offers", value: metrics.rejected, status: "Rejected", change: "-4.1%", up: false, icon: XCircle, color: "text-rose-600 bg-rose-50 dark:bg-rose-950/30" },
-          { title: "Acceptance Rate", value: `${metrics.acceptanceRate}%`, status: "Rate", change: "+3.6%", up: true, icon: UserCheck, color: "text-brand-600 bg-brand-50 dark:bg-brand-950/30" }
+          { title: "Total Contracts", value: metrics.total, status: "", icon: Award, color: "text-indigo-600 bg-indigo-50 dark:bg-indigo-950/30 font-bold" },
+          { title: "Pending Offers", value: metrics.pending, status: "Pending", icon: Clock, color: "text-amber-600 bg-amber-50 dark:bg-amber-950/30" },
+          { title: "Accepted Offers", value: metrics.accepted, status: "Accepted", icon: CheckCircle2, color: "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30" },
+          { title: "Joined Employees", value: metrics.joined, status: "Joined", icon: BadgeCheck, color: "text-blue-600 bg-blue-50 dark:bg-blue-950/30" },
+          { title: "Rejected Offers", value: metrics.rejected, status: "Rejected", icon: XCircle, color: "text-rose-600 bg-rose-50 dark:bg-rose-950/30" },
+          { title: "Acceptance Rate", value: `${metrics.acceptanceRate}%`, status: "Rate", icon: UserCheck, color: "text-[#1F3B75] bg-brand-50 dark:bg-brand-950/30" }
         ].map((card, idx) => {
           const Icon = card.icon;
           const isSelected = card.status === "Rate" ? false : filterStatus === card.status;
@@ -1143,9 +1121,9 @@ encureIT Systems Pvt Ltd`;
                   triggerToast(`Filtering by ${card.title}...`);
                 }
               }}
-              className={`p-4 rounded-xl border text-left transition-all cursor-pointer shadow-xs flex flex-col justify-between h-32 ${
+              className={`p-4 rounded-lg border text-left transition-all cursor-pointer shadow-xs flex flex-col justify-between h-32 ${
                 isSelected 
-                  ? "bg-indigo-600 border-indigo-600 text-white shadow-md scale-[1.01]" 
+                  ? "bg-indigo-600 border-indigo-600 text-white shadow-sm scale-[1.01]" 
                   : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 text-slate-800 dark:text-slate-100 hover:scale-[1.02]"
               }`}
             >
@@ -1158,17 +1136,6 @@ encureIT Systems Pvt Ltd`;
 
               <div className="mt-2.5 w-full">
                 <span className={`text-2xl font-extrabold font-mono ${isSelected ? "text-white" : "text-slate-900 dark:text-white"}`}>{card.value}</span>
-                <div className="flex items-center gap-1.5 mt-1 text-[10px]">
-                  {card.up ? (
-                    <TrendingUp className={`h-3 w-3 ${isSelected ? "text-indigo-200" : "text-emerald-500"}`} />
-                  ) : (
-                    <TrendingDown className={`h-3 w-3 ${isSelected ? "text-indigo-200" : "text-rose-500"}`} />
-                  )}
-                  <span className={`font-bold font-mono ${isSelected ? "text-indigo-200" : card.up ? "text-emerald-600" : "text-rose-600"}`}>
-                    {card.change}
-                  </span>
-                  <span className={isSelected ? "text-indigo-200/80" : "text-slate-400 dark:text-slate-500"}>vs L.M.</span>
-                </div>
               </div>
             </button>
           );
@@ -1176,7 +1143,7 @@ encureIT Systems Pvt Ltd`;
       </div>
 
       {/* WORKFLOW STAGE PIPELINE FILTER TABS */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 shadow-xs space-y-2">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-3 shadow-xs space-y-2">
         <div className="flex items-center justify-between px-2">
           <span className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400 font-mono">
             Enterprise Hiring Workflow Stage
@@ -1193,21 +1160,11 @@ encureIT Systems Pvt Ltd`;
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
           {[
             { id: "all", label: "All Stages" },
-            { id: "Verbal Salary Discussion", label: "1. Verbal Salary Discussion" },
-            { id: "Candidate Decision", label: "2. Candidate Decision" },
-            { id: "Documentation", label: "3. Documentation" },
-            { id: "Offer Generation", label: "4. Offer Generation" },
-            { id: "Offer Email Sent", label: "5. Email Sent" },
-            { id: "Candidate Response", label: "6. Candidate Response" },
-            { id: "Joining Process", label: "7. Onboarding" },
-            { id: "Employee Joined", label: "8. Joined" }
+            ...OFFER_STAGES.map(s => ({ id: s.id, label: s.label }))
           ].map(st => {
-            const count = st.id === "all" 
-              ? offers.length 
-              : offers.filter(o => 
-                  o.workflowStage === st.id || 
-                  (st.id === "Verbal Salary Discussion" && (o.workflowStage === "Verbal Discussion" || o.workflowStage === "Salary Negotiation" || o.workflowStage === "Verbal & Salary Negotiation" || o.workflowStage === "Verbal Salary Discussion"))
-                ).length;
+            const count = st.id === "all"
+              ? offers.length
+              : offers.filter(o => getOfferStage(o.workflowStage)?.id === st.id).length;
             const active = activeStageFilter === st.id;
             return (
               <button
@@ -1235,7 +1192,7 @@ encureIT Systems Pvt Ltd`;
       </div>
 
       {/* FILTERS CONTAINER */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs space-y-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-5 shadow-xs space-y-4">
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
           <div className="flex items-center gap-2">
             <Filter className="h-4 w-4 text-indigo-500" />
@@ -1272,7 +1229,7 @@ encureIT Systems Pvt Ltd`;
           {/* Job Position */}
           <div className="space-y-1">
             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Job Position</label>
-            <select 
+            <SearchableSelect 
               value={filterJob}
               onChange={e => setFilterJob(e.target.value)}
               className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500"
@@ -1281,13 +1238,13 @@ encureIT Systems Pvt Ltd`;
               {dropdownOptions.jobs.map((job, i) => (
                 <option key={i} value={job}>{job}</option>
               ))}
-            </select>
+            </SearchableSelect>
           </div>
 
           {/* Department */}
           <div className="space-y-1">
             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Department</label>
-            <select 
+            <SearchableSelect 
               value={filterDept}
               onChange={e => setFilterDept(e.target.value)}
               className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500"
@@ -1296,13 +1253,13 @@ encureIT Systems Pvt Ltd`;
               {dropdownOptions.depts.map((dept, i) => (
                 <option key={i} value={dept}>{dept}</option>
               ))}
-            </select>
+            </SearchableSelect>
           </div>
 
           {/* Recruiter */}
           <div className="space-y-1">
             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Recruiter</label>
-            <select 
+            <SearchableSelect 
               value={filterRecruiter}
               onChange={e => setFilterRecruiter(e.target.value)}
               className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500"
@@ -1311,13 +1268,13 @@ encureIT Systems Pvt Ltd`;
               {dropdownOptions.recruiters.map((rec, i) => (
                 <option key={i} value={rec}>{rec}</option>
               ))}
-            </select>
+            </SearchableSelect>
           </div>
 
           {/* Status */}
           <div className="space-y-1">
             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Offer Status</label>
-            <select 
+            <SearchableSelect 
               value={filterStatus}
               onChange={e => setFilterStatus(e.target.value)}
               className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500"
@@ -1329,7 +1286,7 @@ encureIT Systems Pvt Ltd`;
               <option value="Rejected">Rejected</option>
               <option value="Expired">Expired</option>
               <option value="Withdrawn">Withdrawn</option>
-            </select>
+            </SearchableSelect>
           </div>
 
         </div>
@@ -1341,7 +1298,7 @@ encureIT Systems Pvt Ltd`;
         {/* LEFT COLUMN: Data Table (3/4 width on desktop) */}
         <div className="lg:col-span-3 space-y-4">
           
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xs overflow-hidden">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-xs overflow-hidden">
             <div className="w-full overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse min-w-[850px]">
                 <thead>
@@ -1377,7 +1334,7 @@ encureIT Systems Pvt Ltd`;
                               setFilterStatus("");
                               setActiveStageFilter("all");
                             }}
-                            className="mt-1 px-3.5 py-1.5 text-xs font-bold text-brand-600 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-lg transition-colors cursor-pointer"
+                            className="mt-1 px-3.5 py-1.5 text-xs font-bold text-[#1F3B75] bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-lg transition-colors cursor-pointer"
                           >
                             Reset Filters
                           </button>
@@ -1454,7 +1411,7 @@ encureIT Systems Pvt Ltd`;
                             className="py-3.5 px-4"
                           >
                             <span className="px-2 py-1 rounded bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-bold text-[10.5px] border border-indigo-200 dark:border-indigo-800/40">
-                              {offer.workflowStage || "Offer Generation"}
+                              {getOfferStage(offer.workflowStage || "Offer Generation")?.name || offer.workflowStage}
                             </span>
                           </td>
 
@@ -1575,7 +1532,7 @@ encureIT Systems Pvt Ltd`;
           </div>
 
           {/* AI RECOMMENDATIONS PANEL */}
-          <div className="bg-gradient-to-r from-indigo-500/5 to-indigo-600/10 border border-indigo-500/15 dark:border-indigo-900/45 rounded-xl p-5 space-y-3 text-left">
+          <div className="bg-white border border-indigo-500/15 dark:border-indigo-900/45 rounded-lg p-5 space-y-3 text-left">
             <div className="flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-indigo-600 dark:text-indigo-400 animate-pulse" />
               <h4 className="font-semibold text-xs text-indigo-950 dark:text-indigo-400 uppercase tracking-wider font-mono">
@@ -1614,72 +1571,8 @@ encureIT Systems Pvt Ltd`;
         {/* RIGHT COLUMN: Right-Side Panel (1/4 width on desktop) */}
         <div className="space-y-6 text-left">
           
-          {/* QUICK ACTIONS PANEL */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs space-y-4">
-            <h3 className="font-bold text-[11px] text-slate-400 dark:text-slate-500 uppercase tracking-wider font-mono border-b border-slate-100 dark:border-slate-800 pb-2">
-              Quick Actions
-            </h3>
-            
-            <div className="space-y-2">
-              <button 
-                onClick={() => {
-                  setAiForm({
-                    candidateName: "",
-                    candidateEmail: "",
-                    candidatePhone: "",
-                    jobTitle: "",
-                    department: "Engineering",
-                    recruiter: "Sophia Patel",
-                    aiMatchScore: 85,
-                    offeredSalary: "$120,000 / year",
-                    offeredSalaryNum: 120000,
-                    bonus: "10% Performance Bonus",
-                    benefits: "Medical/Dental Gold, Unlimited PTO, Equity",
-                    reportingManager: "Marcus Vance (Engineering Lead)",
-                    employmentType: "Full-time",
-                    workLocation: "San Francisco, CA (Hybrid)",
-                    noticePeriod: "30 Days",
-                    joiningDate: "2026-09-01",
-                    offerDate: new Date().toISOString().split("T")[0],
-                    expiryDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-                    experienceLevel: "Senior",
-                    location: "San Francisco",
-                    companyName: "encureIT Systems Pvt Ltd"
-                  });
-                  setIsAIModalOpen(true);
-                }}
-                className="w-full py-2 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/20 dark:hover:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <Plus className="h-4 w-4" />
-                <span>Generate New Offer</span>
-              </button>
-
-              <button 
-                onClick={() => {
-                  playAlertSound();
-                  triggerToast("Dispatched document upload reminders to candidates.");
-                }}
-                className="w-full py-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-850 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <Send className="h-3.5 w-3.5" />
-                <span>Send Document Reminders</span>
-              </button>
-
-              <button 
-                onClick={() => {
-                  triggerToast("Exporting enterprise offer pipeline report to CSV...");
-                  setTimeout(() => triggerToast("CSV exported successfully!"), 800);
-                }}
-                className="w-full py-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-850 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <Download className="h-3.5 w-3.5" />
-                <span>Export Pipeline CSV</span>
-              </button>
-            </div>
-          </div>
-
           {/* UPCOMING JOINING DATES */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs space-y-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-5 shadow-xs space-y-4">
             <h3 className="font-bold text-[11px] text-slate-400 dark:text-slate-500 uppercase tracking-wider font-mono border-b border-slate-100 dark:border-slate-800 pb-2">
               Upcoming Joining Candidates
             </h3>
@@ -1703,7 +1596,7 @@ encureIT Systems Pvt Ltd`;
           </div>
 
           {/* PENDING CANDIDATE RESPONSES */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs space-y-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-5 shadow-xs space-y-4">
             <h3 className="font-bold text-[11px] text-slate-400 dark:text-slate-500 uppercase tracking-wider font-mono border-b border-slate-100 dark:border-slate-800 pb-2">
               Pending Candidate Response
             </h3>
@@ -1748,7 +1641,7 @@ encureIT Systems Pvt Ltd`;
             className="absolute inset-0 bg-slate-950/50 backdrop-blur-xs transition-opacity" 
           />
 
-          <div className="relative w-full max-w-2xl bg-white dark:bg-slate-900 h-full shadow-2xl flex flex-col justify-between z-10 animate-in slide-in-from-right duration-200 overflow-y-auto">
+          <div className="relative w-full max-w-2xl bg-white dark:bg-slate-900 h-full shadow-sm flex flex-col justify-between z-10 animate-in slide-in-from-right duration-200 overflow-y-auto">
             
             {/* Drawer Header */}
             <div className="p-5 border-b border-slate-150 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex justify-between items-center sticky top-0 z-10">
@@ -1775,43 +1668,33 @@ encureIT Systems Pvt Ltd`;
             {/* Drawer Body */}
             <div className="p-6 space-y-6 flex-1 overflow-y-auto">
               
-              {/* WORKFLOW STEPPER BAR (10 STAGES) */}
+              {/* WORKFLOW STEPPER BAR (6 STAGES) */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono">
                     Hiring & Onboarding Workflow Stepper
                   </h4>
                   <span className="text-[10px] font-bold text-indigo-600">
-                    Stage: {selectedOffer.workflowStage || "Offer Generation"}
+                    Stage: {getOfferStage(selectedOffer.workflowStage || "Offer Generation")?.name || selectedOffer.workflowStage}
                   </span>
                 </div>
 
-                <div className="grid grid-cols-4 sm:grid-cols-8 gap-1.5 text-center text-[9px] font-bold font-mono">
-                  {[
-                    "1. Verbal Salary Discussion", "2. Candidate Decision", "3. Documentation", "4. Offer Generation",
-                    "5. Email Sent", "6. Candidate Response", "7. Onboarding", "8. Joined"
-                  ].map((step, idx) => {
-                    const stageNames = [
-                      "Verbal Salary Discussion", "Candidate Decision", "Documentation",
-                      "Offer Generation", "Offer Email Sent", "Candidate Response", "Joining Process", "Employee Joined"
-                    ];
-                    let currentStage = selectedOffer.workflowStage || "Offer Generation";
-                    if (currentStage === "Verbal Discussion" || currentStage === "Salary Negotiation" || currentStage === "Verbal & Salary Negotiation") {
-                      currentStage = "Verbal Salary Discussion";
-                    }
-                    let currentIdx = stageNames.indexOf(currentStage);
-                    if (currentIdx === -1) currentIdx = 3;
+                <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 text-center text-[9px] font-bold font-mono">
+                  {OFFER_STAGES.map((stage, idx) => {
+                    // A stage that belongs to none of the six is shown as Documentation (as "Offer Generation" was before).
+                    let currentIdx = OFFER_STAGES.findIndex(s => s.id === getOfferStage(selectedOffer.workflowStage || "Offer Generation")?.id);
+                    if (currentIdx === -1) currentIdx = 1;
                     const isDone = idx <= currentIdx;
                     return (
-                      <div 
-                        key={idx}
+                      <div
+                        key={stage.id}
                         className={`p-1.5 rounded border transition-colors ${
-                          isDone 
-                            ? "bg-indigo-600 text-white border-indigo-600" 
+                          isDone
+                            ? "bg-indigo-600 text-white border-indigo-600"
                             : "bg-slate-100 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700"
                         }`}
                       >
-                        {step}
+                        {stage.label}
                       </div>
                     );
                   })}
@@ -1819,7 +1702,7 @@ encureIT Systems Pvt Ltd`;
               </div>
 
               {/* ACTION QUICK BUTTONS */}
-              <div className="p-3 rounded-xl border border-indigo-100 dark:border-indigo-900/30 bg-indigo-50/40 dark:bg-indigo-950/10 flex items-center justify-between">
+              <div className="p-3 rounded-lg border border-indigo-100 dark:border-indigo-900/30 bg-indigo-50/40 dark:bg-indigo-950/10 flex items-center justify-between">
                 <div>
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono">Contract Status</span>
                   <p className="text-xs font-bold text-slate-800 dark:text-slate-100 uppercase tracking-wide mt-0.5">{selectedOffer.status}</p>
@@ -1844,7 +1727,7 @@ encureIT Systems Pvt Ltd`;
 
               {/* STAGE BREAKDOWN */}
               {(selectedOffer.verbalDiscussion || selectedOffer.salaryNegotiation) && (
-                <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-150 dark:border-slate-800 rounded-xl space-y-2">
+                <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-150 dark:border-slate-800 rounded-lg space-y-2">
                   <div className="flex justify-between items-center">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono">Verbal Salary Discussion</span>
                     <span className="text-[10px] font-bold text-emerald-600 font-mono">
@@ -1952,7 +1835,7 @@ encureIT Systems Pvt Ltd`;
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 text-left">
           <div onClick={() => { setIsVerbalModalOpen(false); setIsSalaryModalOpen(false); }} className="absolute inset-0 bg-slate-950/60 backdrop-blur-xs" />
           
-          <div className="relative w-full max-w-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl flex flex-col max-h-[88vh] overflow-hidden z-10">
+          <div className="relative w-full max-w-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-sm flex flex-col max-h-[88vh] overflow-hidden z-10">
             <div className="p-4 border-b border-slate-150 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex justify-between items-center">
               <div className="flex items-center gap-2">
                 <div className="p-1.5 bg-indigo-100 dark:bg-indigo-950 rounded-lg text-indigo-600 dark:text-indigo-400">
@@ -1969,7 +1852,7 @@ encureIT Systems Pvt Ltd`;
             </div>
 
             <div className="p-5 space-y-4 flex-1 overflow-y-auto text-xs">
-              <div className="bg-indigo-50/50 dark:bg-indigo-950/20 p-3 rounded-xl border border-indigo-100 dark:border-indigo-900/30 text-[11px] text-indigo-900 dark:text-indigo-200 font-medium">
+              <div className="bg-indigo-50/50 dark:bg-indigo-950/20 p-3 rounded-lg border border-indigo-100 dark:border-indigo-900/30 text-[11px] text-indigo-900 dark:text-indigo-200 font-medium">
                 Record verbal screening notes and negotiate compensation details during the candidate discussion call.
               </div>
 
@@ -2096,11 +1979,11 @@ encureIT Systems Pvt Ltd`;
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 text-left">
           <div onClick={() => setIsDocModalOpen(false)} className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm" />
           
-          <div className="relative w-full max-w-5xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl flex flex-col h-[90vh] max-h-[90vh] overflow-hidden z-10">
+          <div className="relative w-full max-w-5xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-sm flex flex-col h-[90vh] max-h-[90vh] overflow-hidden z-10">
             {/* Modal Header */}
             <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex justify-between items-center shrink-0">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-indigo-100 dark:bg-indigo-950/80 rounded-xl text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                <div className="p-2 bg-indigo-100 dark:bg-indigo-950/80 rounded-lg text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
                   <FileText className="h-5 w-5" />
                 </div>
                 <div>
@@ -2437,7 +2320,7 @@ encureIT Systems Pvt Ltd`;
 
                     {/* PDF Canvas Paper View */}
                     <div className="flex-1 p-6 overflow-y-auto flex justify-center">
-                      <div className="w-full max-w-2xl bg-white text-slate-900 shadow-2xl rounded-xs border border-slate-300 p-8 flex flex-col justify-between min-h-[600px] relative">
+                      <div className="w-full max-w-2xl bg-white text-slate-900 shadow-sm rounded-xs border border-slate-300 p-8 flex flex-col justify-between min-h-[600px] relative">
                         {/* Background Watermark */}
                         <div className="absolute inset-0 flex items-center justify-center opacity-[0.03] pointer-events-none select-none">
                           <span className="text-6xl font-black rotate-[-35deg] text-slate-900 tracking-widest text-center">
@@ -2496,10 +2379,10 @@ encureIT Systems Pvt Ltd`;
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 text-left">
           <div onClick={() => setIsOnboardingModalOpen(false)} className="absolute inset-0 bg-slate-950/60 backdrop-blur-xs" />
           
-          <div className="relative w-full max-w-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden z-10">
+          <div className="relative w-full max-w-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-sm flex flex-col max-h-[85vh] overflow-hidden z-10">
             <div className="p-4 border-b border-slate-150 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex justify-between items-center">
               <div className="flex items-center gap-2">
-                <ListChecks className="h-5 w-5 text-brand-600" />
+                <ListChecks className="h-5 w-5 text-[#1F3B75]" />
                 <h3 className="font-bold text-sm text-slate-900 dark:text-white">Stage 9: Joining Process & Onboarding (10 Tasks)</h3>
               </div>
               <button onClick={() => setIsOnboardingModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-600">
@@ -2553,7 +2436,7 @@ encureIT Systems Pvt Ltd`;
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 text-left">
           <div onClick={() => setIsValidationModalOpen(false)} className="absolute inset-0 bg-slate-950/60 backdrop-blur-xs" />
           
-          <div className="relative w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 space-y-4 z-10">
+          <div className="relative w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-sm p-6 space-y-4 z-10">
             <div className="flex items-center gap-3 text-amber-600">
               <AlertCircle className="h-6 w-6 shrink-0" />
               <h3 className="font-bold text-base text-slate-900 dark:text-white">Offer Generation Requirement</h3>
@@ -2586,7 +2469,7 @@ encureIT Systems Pvt Ltd`;
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 text-left">
           <div onClick={() => setIsPreviewModalOpen(false)} className="absolute inset-0 bg-slate-950/60 backdrop-blur-xs" />
           
-          <div className="relative w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden z-10">
+          <div className="relative w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-sm flex flex-col max-h-[85vh] overflow-hidden z-10">
             <div className="p-5 border-b border-slate-150 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex justify-between items-center shrink-0">
               <div className="flex items-center gap-2">
                 <FileCheck className="h-5 w-5 text-indigo-600" />
@@ -2602,7 +2485,7 @@ encureIT Systems Pvt Ltd`;
                 <strong>Note:</strong> Per enterprise requirements, the PDF Offer Contract contains NO salary. Salary details are included in the email body below.
               </div>
 
-              <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-5 font-mono text-xs leading-relaxed whitespace-pre-wrap">
+              <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-5 font-mono text-xs leading-relaxed whitespace-pre-wrap">
                 {generatedLetter}
               </div>
             </div>
@@ -2634,7 +2517,7 @@ encureIT Systems Pvt Ltd`;
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 text-left">
           <div onClick={() => setIsAIModalOpen(false)} className="absolute inset-0 bg-slate-950/60 backdrop-blur-xs" />
           
-          <div className="relative w-full max-w-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden z-10">
+          <div className="relative w-full max-w-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-sm flex flex-col max-h-[90vh] overflow-hidden z-10">
             <div className="p-5 border-b border-slate-150 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex justify-between items-center shrink-0">
               <div className="flex items-center gap-2">
                 <Sparkles className="h-5 w-5 text-indigo-600 animate-spin-slow" />

@@ -13,11 +13,11 @@ export default function UserManagementView() {
     <div className="p-8">
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold text-white">User Management</h2>
-        <button onClick={() => setIsDialogOpen(true)} className="px-4 py-2 bg-indigo-600 rounded-xl text-white font-bold text-xs flex items-center gap-2">
+        <button onClick={() => setIsDialogOpen(true)} className="px-4 py-2 bg-indigo-600 rounded-lg text-white font-bold text-xs flex items-center gap-2">
           <Plus className="h-4 w-4" /> Add User
         </button>
       </div>
-      <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
+      <div className="bg-white/5 border border-white/10 rounded-lg overflow-hidden">
         <table className="w-full text-xs text-white">
           <thead className="bg-white/5 text-slate-400 uppercase">
             <tr>

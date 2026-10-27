@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import axios from "axios";
+import { Turnstile } from "@marsidev/react-turnstile";
 import { LocalStorageService } from "../services/localStorageService";
 import { motion, AnimatePresence } from "motion/react";
 import { 
@@ -23,6 +24,7 @@ interface LoginViewProps {
 }
 
 const FASTAPI_BASE_URL = (import.meta as any).env?.VITE_FASTAPI_BASE_URL || (import.meta as any).env?.VITE_API_URL || "https://ats-fastapi-backend.onrender.com";
+const TURNSTILE_SITE_KEY = (import.meta as any).env?.VITE_TURNSTILE_SITE_KEY || "";
 const apiConfig = {
   headers: {
     "X-Skip-Interceptor": "true",
@@ -65,6 +67,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   
   // Sandbox preview hooks
   const [sandboxResetLink, setSandboxResetLink] = useState<string | null>(null);
@@ -80,7 +83,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
 
     try {
       if (view === "login") {
-        const res = await axios.post(`${FASTAPI_BASE_URL}/api/auth/login`, { email, password }, apiConfig);
+        const res = await axios.post(`${FASTAPI_BASE_URL}/api/auth/login`, { email, password, captchaToken }, apiConfig);
         if (res.data.success) {
           if (rememberMe) {
             LocalStorageService.set("remember_credentials", "true");
@@ -128,7 +131,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
   };
 
   return (
-    <div 
+    <div
       className="min-h-screen w-full bg-[#07111F] flex flex-col justify-between items-center p-4 sm:p-6 lg:p-8 relative overflow-y-auto font-sans selection:bg-[#2563EB] selection:text-white"
       style={{
         backgroundColor: '#07111F',
@@ -140,8 +143,8 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
     >
       {/* Top Header: Enterprise Platform Logo */}
       <header className="w-full max-w-md mx-auto text-center mt-3 sm:mt-6 relative z-10 shrink-0">
-        <div className="inline-flex items-center gap-3 bg-slate-900/80 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-slate-700/80 shadow-xl">
-          <div className="h-9 w-9 bg-white rounded-xl flex items-center justify-center p-1 shadow-sm overflow-hidden shrink-0">
+        <div className="inline-flex items-center gap-3 bg-slate-900/80 backdrop-blur-md px-4 py-2.5 rounded-lg border border-slate-700/80 shadow-sm">
+          <div className="h-9 w-9 bg-white rounded-lg flex items-center justify-center p-1 shadow-sm overflow-hidden shrink-0">
             <img src="/encureit_icon.png" alt="EncureIT Symbol" className="h-full w-full object-contain" />
           </div>
           <div className="text-left">
@@ -166,7 +169,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -12 }}
             transition={{ duration: 0.25, ease: "easeOut" }}
-            className="bg-white border border-[#E2E8F0] p-6 sm:p-8 rounded-2xl sm:rounded-3xl shadow-2xl shadow-black/50 relative"
+            className="bg-white border border-[#E2E8F0] p-6 sm:p-8 rounded-lg sm:rounded-lg shadow-sm shadow-black/50 relative"
           >
             {/* Header Content */}
             <div className="mb-6 text-center">
@@ -174,7 +177,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
                 <ShieldCheck className="h-3.5 w-3.5 text-[#2563EB]" />
                 <span>Secure Gateway</span>
               </div>
-              
+
               <h1 className="text-2xl sm:text-3xl font-bold text-[#0F172A] tracking-tight">
                 {view === "login" && "Welcome back"}
                 {view === "forgot" && "Reset your password"}
@@ -197,7 +200,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
                   exit={{ opacity: 0, height: 0 }}
                   className="mb-5 overflow-hidden"
                 >
-                  <div className="bg-rose-50 border border-rose-200 rounded-xl p-3.5 flex items-start gap-2.5 text-xs text-rose-800">
+                  <div className="bg-rose-50 border border-rose-200 rounded-lg p-3.5 flex items-start gap-2.5 text-xs text-rose-800">
                     <AlertCircle className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
                     <div>
                       <span className="font-semibold block mb-0.5">Authentication error</span>
@@ -214,7 +217,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
                   exit={{ opacity: 0, height: 0 }}
                   className="mb-5 overflow-hidden"
                 >
-                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 flex items-start gap-2.5 text-xs text-emerald-800">
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3.5 flex items-start gap-2.5 text-xs text-emerald-800">
                     <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 mt-0.5" />
                     <div>
                       <span className="font-semibold block mb-0.5">Success</span>
@@ -247,7 +250,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
                       autoComplete="email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2.5 bg-white border border-[#CBD5E1] hover:border-slate-400 focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 rounded-xl text-sm font-normal text-[#0F172A] placeholder:text-slate-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-full pl-10 pr-4 py-2.5 bg-white border border-[#CBD5E1] hover:border-slate-400 focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 rounded-lg text-sm font-normal text-[#0F172A] placeholder:text-slate-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     />
                   </div>
                 </div>
@@ -291,7 +294,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
                       autoComplete={view === "login" ? "current-password" : "new-password"}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="w-full pl-10 pr-11 py-2.5 bg-white border border-[#CBD5E1] hover:border-slate-400 focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 rounded-xl text-sm font-normal text-[#0F172A] placeholder:text-slate-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-full pl-10 pr-11 py-2.5 bg-white border border-[#CBD5E1] hover:border-slate-400 focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 rounded-lg text-sm font-normal text-[#0F172A] placeholder:text-slate-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     />
                     
                     <button
@@ -325,11 +328,24 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
                 </div>
               )}
 
+              {/* Cloudflare Turnstile CAPTCHA */}
+              {view === "login" && TURNSTILE_SITE_KEY && (
+                <div className="flex justify-center py-1">
+                  <Turnstile
+                    siteKey={TURNSTILE_SITE_KEY}
+                    onSuccess={(token) => setCaptchaToken(token)}
+                    onExpire={() => setCaptchaToken(null)}
+                    onError={() => setCaptchaToken(null)}
+                    options={{ theme: "light", size: "normal" }}
+                  />
+                </div>
+              )}
+
               {/* Sign In Button (Professional Enterprise Blue) */}
               <button
                 type="submit"
-                disabled={loading}
-                className="w-full py-3 px-4 bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-sm rounded-xl transition-all shadow-md shadow-blue-600/20 cursor-pointer flex items-center justify-center gap-2 mt-2 focus:outline-none focus:ring-2 focus:ring-[#2563EB]/40"
+                disabled={loading || (view === "login" && TURNSTILE_SITE_KEY && !captchaToken)}
+                className="w-full py-3 px-4 bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-sm rounded-lg transition-all shadow-sm shadow-blue-600/20 cursor-pointer flex items-center justify-center gap-2 mt-2 focus:outline-none focus:ring-2 focus:ring-[#2563EB]/40"
               >
                 {loading ? (
                   <span className="flex items-center justify-center gap-2">
@@ -354,7 +370,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
                   initial={{ opacity: 0, scale: 0.98 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.98 }}
-                  className="mt-4 bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs relative"
+                  className="mt-4 bg-slate-50 border border-slate-200 rounded-lg p-4 text-xs relative"
                 >
                   <div className="absolute top-[-8px] right-3 bg-[#2563EB] text-[9px] font-mono uppercase font-semibold px-2 py-0.5 rounded-full text-white tracking-wider">
                     Sandbox Mode
@@ -425,7 +441,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
           <span>&copy; {new Date().getFullYear()} EncureIT Systems</span>
         </div>
       </footer>
-      
+
     </div>
   );
 }
